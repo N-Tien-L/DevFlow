@@ -1,0 +1,20 @@
+# Test-only overrides: in-memory H2 so the smoke test runs without a live PostgreSQL
+# (local builds, CI). Production/dev still use PostgreSQL per application.yml.
+spring:
+  datasource:
+    url: jdbc:h2:mem:devflow-test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  ai:
+    model:
+      chat: none
+    openai:
+      api-key: test-dummy-key-not-real
+    mcp:
+      server:
+        name: devflow
+        version: 0.0.1-SNAPSHOT

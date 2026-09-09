@@ -1,0 +1,43 @@
+# DevFlow backend — scaffold defaults. Every external value is env-overridable;
+# see .env.example at the repo root for the docker-compose wiring.
+spring:
+  application:
+    name: devflow
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/devflow}
+    username: ${SPRING_DATASOURCE_USERNAME:devflow}
+    password: ${SPRING_DATASOURCE_PASSWORD:devflow}
+  jpa:
+    hibernate:
+      # Scaffold convenience: Hibernate creates/updates schema from entities.
+      # TODO before production: adopt a real migration tool (e.g. Flyway).
+      ddl-auto: update
+    open-in-view: false
+  ai:
+    model:
+      # "none" keeps the app bootable without a provider key. Set to "openai" and
+      # provide OPENAI_API_KEY to enable the LLM client in the AI service module.
+      chat: ${AI_MODEL_CHAT:none}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+    mcp:
+      server:
+        name: devflow
+        version: 0.0.1-SNAPSHOT
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# Observability per ARCHITECTURE.md Section 9: Prometheus scrapes /actuator/prometheus.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: info
