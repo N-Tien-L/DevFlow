@@ -9,10 +9,12 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:devflow}
   jpa:
     hibernate:
-      # Scaffold convenience: Hibernate creates/updates schema from entities.
-      # TODO before production: adopt a real migration tool (e.g. Flyway).
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
   ai:
     model:
       # "none" keeps the app bootable without a provider key. Set to "openai" and
