@@ -18,13 +18,14 @@
 
 Before designing new features, modifying architecture, or adding integrations, you **must consult**:
 
-1. [docs/ARCHITECTURE.md](file:///docs/ARCHITECTURE.md) — The authoritative system architecture:
+1. [docs/ARCHITECTURE.md](file:///docs/ARCHITECTURE.md) (EN) / [docs/ARCHITECTURE_VI.md](file:///docs/ARCHITECTURE_VI.md) (VI) — The authoritative system architecture:
    - Section 2: Modular Monolith architecture & dependency layout
    - Section 4: Domain Event Catalog (`DevFlowEvent` contract & matrix)
    - Section 5: Database schema & module table ownership
    - Section 10: Module boundary enforcement rules
-2. [docs/PRODUCT_SPEC.md](file:///docs/PRODUCT_SPEC.md) — Functional specifications, user personas, use cases, and acceptance criteria.
-3. [Trello Management Skill](file:///.agents/skills/trello-management/SKILL.md) — Project tasks, board lists, and card workflows.
+2. [docs/PRODUCT_SPEC.md](file:///docs/PRODUCT_SPEC.md) (EN) / [docs/PRODUCT_SPEC_VI.md](file:///docs/PRODUCT_SPEC_VI.md) (VI) — Functional specifications, user personas, use cases, and acceptance criteria.
+3. [docs/IMPLEMENTATION_PLAN.md](file:///docs/IMPLEMENTATION_PLAN.md) (EN) / [docs/IMPLEMENTATION_PLAN_VI.md](file:///docs/IMPLEMENTATION_PLAN_VI.md) (VI) — Master implementation plan, 5-phase rollout roadmap, sprint milestones, and ticket breakdown.
+4. [Trello Management Skill](file:///.agents/skills/trello-management/SKILL.md) — Project tasks, board lists, and card workflows.
 
 ---
 

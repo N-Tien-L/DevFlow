@@ -1,9 +1,11 @@
 # DevFlow — Product & Feature Specification
 
+> 🌐 **Language:** **English** (Authoritative Agent Product Specification) | [Bản Tiếng Việt (Dành cho Developer)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/PRODUCT_SPEC_VI.md)
+>
 > **Purpose of this document**
 > This is the source-of-truth product spec for DevFlow. It exists so that both human contributors and AI coding agents (Cursor, Claude Code, etc.) share the same understanding of *what* the product is and *why* each feature exists, before any architecture or tech-stack decisions are made.
 >
-> **Status:** Idea & feature scope is locked. Architecture and tech stack are **not yet decided** — do not assume a specific stack, framework, or service topology when generating code from this document alone. Check for an `ARCHITECTURE.md` (if present) for those decisions.
+> **Status:** Idea & feature scope is locked. Architecture and tech stack are decided in [docs/ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md) (or [docs/ARCHITECTURE_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md)).
 
 ---
 

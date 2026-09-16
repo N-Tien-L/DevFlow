@@ -1,6 +1,8 @@
 # DevFlow — Architecture
 
-> Companion to `PRODUCT_SPEC.md`. Read that first for *what* and *why*; this document covers *how* the system is structured.
+> 🌐 **Language:** **English** (Authoritative Agent Architecture Specification) | [Bản Tiếng Việt (Dành cho Developer)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md)
+>
+> Companion to `PRODUCT_SPEC.md` / `PRODUCT_SPEC_VI.md`. Read that first for *what* and *why*; this document covers *how* the system is structured.
 >
 > **Status:** Architecture style, module boundaries, and tech stack are decided (see Section 9).
 
