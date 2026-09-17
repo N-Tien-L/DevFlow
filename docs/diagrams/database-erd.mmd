@@ -1,0 +1,212 @@
+erDiagram
+    %% ==========================================
+    %% DEVFLOW - COMPLETE SYSTEM DATABASE ERD
+    %% Modular Monolith / Service-Oriented Architecture
+    %% ==========================================
+
+    %% ==========================================
+    %% 1. AUTH MODULE (Identity, Workspaces, Roles)
+    %% ==========================================
+    users {
+        uuid id PK "gen_random_uuid()"
+        varchar email UK "255, NOT NULL"
+        varchar password_hash "255, NOT NULL"
+        varchar full_name "255, NOT NULL"
+        varchar avatar_url "512, NULL"
+        timestamptz created_at "DEFAULT CURRENT_TIMESTAMP"
+        timestamptz updated_at "DEFAULT CURRENT_TIMESTAMP"
+    }
+
+    workspaces {
+        uuid id PK "gen_random_uuid()"
+        varchar name "255, NOT NULL"
+        varchar slug UK "100, NOT NULL"
+        uuid owner_id FK "users.id (Hard FK nội bộ Auth)"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    workspace_members {
+        uuid id PK "gen_random_uuid()"
+        uuid workspace_id FK "workspaces.id (Hard FK)"
+        uuid user_id FK "users.id (Hard FK)"
+        varchar role "50, NOT NULL [OWNER, ADMIN, MEMBER]"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    users ||--o{ workspaces : "owns"
+    workspaces ||--|{ workspace_members : "has"
+    users ||--|{ workspace_members : "joins"
+
+    %% ==========================================
+    %% 2. BOARD MODULE (Kanban, Tasks, Comments)
+    %% ==========================================
+    boards {
+        uuid id PK "gen_random_uuid()"
+        uuid workspace_id "Soft Ref -> workspaces"
+        varchar name "255, NOT NULL"
+        text description "NULL"
+        boolean is_archived "DEFAULT FALSE"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    columns {
+        uuid id PK "gen_random_uuid()"
+        uuid board_id FK "boards.id (Hard FK)"
+        varchar name "100, NOT NULL"
+        int position "NOT NULL"
+        varchar status_category "50 [TODO, IN_PROGRESS, IN_REVIEW, DONE]"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    tasks {
+        uuid id PK "gen_random_uuid()"
+        uuid column_id FK "columns.id (Hard FK)"
+        varchar title "255, NOT NULL"
+        text description "NULL (Markdown supported)"
+        int position "NOT NULL"
+        varchar priority "50 [LOW, MEDIUM, HIGH, URGENT]"
+        uuid assignee_id "Soft Ref -> users"
+        timestamptz due_date "NULL"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    task_comments {
+        uuid id PK "gen_random_uuid()"
+        uuid task_id FK "tasks.id (Hard FK)"
+        uuid author_id "Soft Ref -> users"
+        text content "NOT NULL"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    task_tags {
+        uuid id PK "gen_random_uuid()"
+        uuid board_id FK "boards.id (Hard FK)"
+        varchar name "50, NOT NULL"
+        varchar color "20, NOT NULL"
+    }
+
+    task_tag_mappings {
+        uuid task_id FK "tasks.id (Hard FK)"
+        uuid tag_id FK "task_tags.id (Hard FK)"
+    }
+
+    boards ||--|{ columns : "contains"
+    columns ||--o{ tasks : "groups"
+    tasks ||--o{ task_comments : "has"
+    boards ||--o{ task_tags : "manages"
+    tasks ||--o{ task_tag_mappings : "tagged_with"
+    task_tags ||--o{ task_tag_mappings : "applies_to"
+
+    %% ==========================================
+    %% 3. GIT & CI MODULE (VCS, Pipelines, Triage)
+    %% ==========================================
+    repositories {
+        uuid id PK "gen_random_uuid()"
+        uuid workspace_id "Soft Ref -> workspaces"
+        varchar provider "50 [GITHUB, GITLAB]"
+        varchar remote_repo_id "100, NOT NULL"
+        varchar name "255, NOT NULL"
+        varchar webhook_secret "255, NOT NULL"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    git_commits {
+        uuid id PK "gen_random_uuid()"
+        uuid repository_id FK "repositories.id (Hard FK)"
+        varchar sha UK "64, NOT NULL"
+        text message "NOT NULL"
+        varchar author_name "255, NOT NULL"
+        varchar author_email "255, NOT NULL"
+        uuid task_id "Soft Ref -> tasks"
+        timestamptz committed_at "NOT NULL"
+        timestamptz created_at
+    }
+
+    pull_requests {
+        uuid id PK "gen_random_uuid()"
+        uuid repository_id FK "repositories.id (Hard FK)"
+        int pr_number "NOT NULL"
+        varchar title "255, NOT NULL"
+        varchar source_branch "255, NOT NULL"
+        varchar target_branch "255, NOT NULL"
+        varchar status "50 [OPEN, MERGED, CLOSED]"
+        uuid task_id "Soft Ref -> tasks"
+        varchar pr_url "512, NOT NULL"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ci_pipelines {
+        uuid id PK "gen_random_uuid()"
+        uuid repository_id FK "repositories.id (Hard FK)"
+        varchar pipeline_id "100, NOT NULL"
+        varchar commit_sha "64, NOT NULL"
+        varchar branch "255, NOT NULL"
+        varchar status "50 [PENDING, RUNNING, SUCCESS, FAILED]"
+        timestamptz started_at
+        timestamptz finished_at
+        timestamptz created_at
+    }
+
+    ci_failures {
+        uuid id PK "gen_random_uuid()"
+        uuid pipeline_id FK "ci_pipelines.id (Hard FK)"
+        varchar stage_name "100, NOT NULL"
+        varchar job_name "100, NOT NULL"
+        text error_summary "NULL"
+        text raw_log_snippet "NULL"
+        text ai_summary "NULL"
+        uuid related_task_id "Soft Ref -> tasks"
+        timestamptz created_at
+    }
+
+    repositories ||--o{ git_commits : "receives"
+    repositories ||--o{ pull_requests : "tracks"
+    repositories ||--o{ ci_pipelines : "executes"
+    ci_pipelines ||--o{ ci_failures : "captures"
+
+    %% ==========================================
+    %% 4. AI MODULE (Conversations, Messages)
+    %% ==========================================
+    ai_conversations {
+        uuid id PK "gen_random_uuid()"
+        uuid workspace_id "Soft Ref -> workspaces"
+        uuid user_id "Soft Ref -> users"
+        varchar title "255, NOT NULL"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ai_messages {
+        uuid id PK "gen_random_uuid()"
+        uuid conversation_id FK "ai_conversations.id (Hard FK)"
+        varchar sender_type "50 [USER, ASSISTANT, SYSTEM]"
+        text content "NOT NULL"
+        int tokens_used "DEFAULT 0"
+        timestamptz created_at
+    }
+
+    ai_conversations ||--|{ ai_messages : "contains"
+
+    %% ==========================================
+    %% 5. NOTIFICATION MODULE (In-App Alerts)
+    %% ==========================================
+    notifications {
+        uuid id PK "gen_random_uuid()"
+        uuid recipient_id "Soft Ref -> users"
+        uuid workspace_id "Soft Ref -> workspaces"
+        varchar title "255, NOT NULL"
+        text content "NOT NULL"
+        varchar type "50 [TASK_ASSIGNED, CI_FAILED, RISK_ALERT, SYSTEM]"
+        varchar reference_type "50 [TASK, PIPELINE]"
+        uuid reference_id "Soft Ref -> tasks or pipelines"
+        boolean is_read "DEFAULT FALSE"
+        timestamptz created_at
+    }

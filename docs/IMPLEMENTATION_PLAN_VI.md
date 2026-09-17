@@ -209,6 +209,7 @@ gantt
 Dưới đây là danh sách các thẻ mẫu sẵn sàng chuyển thành ticket chính thức trên Trello (đặt mã `T-XXX`):
 
 ### Phase 1 Tickets
+- `T-000`: Thiết kế Kiến trúc CSDL, Sơ đồ ERD & Ranh giới Dữ liệu Liên Module (`docs/DATABASE_DESIGN_VI.md`)
 - `T-001`: Thiết lập Flyway Migration & Base Schema (`V1__init_schema.sql`)
 - `T-002`: Hiện thực Entity User & Workspace kèm Spring Data JPA Repositories
 - `T-003`: Xây dựng Stateless JWT Authentication & Security Filter Chain

@@ -208,6 +208,7 @@ gantt
 All work must be tracked with tickets using the format `T-XXX` and mapped to GitHub feature branches `feature/T-XXX-<description>`.
 
 ### Phase 1: Foundation & Identity
+- `T-000`: System Database Architecture, ERD Specification & Inter-Module Data Boundaries (`docs/DATABASE_DESIGN.md`)
 - `T-001`: Setup Flyway Database Migration & Base Schema (`V1__init_schema.sql`)
 - `T-002`: Implement JPA Entities for User, Workspace, WorkspaceMember with Repositories
 - `T-003`: Configure Stateless JWT Authentication, Token Provider & SecurityFilterChain

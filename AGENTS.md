@@ -58,6 +58,7 @@ DevFlow enforces clean separation of concerns at compile/build time:
 | [`coding-conventions.md`](file:///.agents/rules/coding-conventions.md) | Naming patterns, package organization, REST standards, React component rules |
 | [`git-workflow.md`](file:///.agents/rules/git-workflow.md) | Branch naming (`feature/T-XXX-...`), commit messages (Conventional Commits), PR guidelines |
 | [`module-boundaries.md`](file:///.agents/rules/module-boundaries.md) | Dependency rules, event-driven isolation, forbidden patterns |
+| [`response-formatting.md`](file:///.agents/rules/response-formatting.md) | Chat output formatting (no Mermaid/KaTeX in chat, DevFlow ASCII diagrams, link format) |
 
 ---
 
