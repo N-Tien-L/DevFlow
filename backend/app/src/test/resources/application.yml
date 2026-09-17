@@ -9,6 +9,8 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+  flyway:
+    enabled: false
   ai:
     model:
       chat: none
