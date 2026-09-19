@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("JwtTokenProvider Tests")
 class JwtTokenProviderTest {
@@ -105,5 +106,20 @@ class JwtTokenProviderTest {
         assertThat(token).isNotBlank();
         assertThat(shortKeyProvider.validateToken(token)).isTrue();
         assertThat(shortKeyProvider.getUserIdFromToken(token)).isEqualTo(testUserId);
+    }
+
+    @Test
+    @DisplayName("Should throw IllegalStateException when secret is not configured")
+    void validateConfiguration_shouldThrowWhenSecretMissing() {
+        JwtProperties emptyProps = new JwtProperties();
+        JwtTokenProvider unconfiguredProvider = new JwtTokenProvider(emptyProps);
+
+        assertThatThrownBy(unconfiguredProvider::validateConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT secret key is not configured");
+
+        assertThatThrownBy(() -> unconfiguredProvider.generateAccessToken(testUserId, testEmail))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT secret key is not configured");
     }
 }

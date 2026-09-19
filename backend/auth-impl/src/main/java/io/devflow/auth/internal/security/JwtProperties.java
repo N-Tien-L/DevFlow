@@ -13,9 +13,9 @@ public class JwtProperties {
 
     /**
      * Secret key for signing HMAC-SHA256 (HS256) tokens.
-     * Default key is a 256-bit key for local development.
+     * Must be configured via 'devflow.jwt.secret' or JWT_SECRET environment variable.
      */
-    private String secret = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
+    private String secret;
 
     /**
      * Access token expiration in milliseconds (default: 3600000 ms = 1 hour).

@@ -5,6 +5,7 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,15 @@ public class JwtTokenProvider {
 
     public JwtTokenProvider(JwtProperties jwtProperties) {
         this.jwtProperties = jwtProperties;
+    }
+
+    @PostConstruct
+    public void validateConfiguration() {
+        String secret = jwtProperties.getSecret();
+        if (secret == null || secret.trim().isEmpty()) {
+            throw new IllegalStateException(
+                    "JWT secret key is not configured. Please define 'devflow.jwt.secret' in application.yml or set JWT_SECRET environment variable.");
+        }
     }
 
     /**
@@ -134,6 +144,10 @@ public class JwtTokenProvider {
 
     private SecretKey getSigningKey() {
         String secret = jwtProperties.getSecret();
+        if (secret == null || secret.trim().isEmpty()) {
+            throw new IllegalStateException(
+                    "JWT secret key is not configured. Please define 'devflow.jwt.secret' in application.yml or set JWT_SECRET environment variable.");
+        }
         byte[] keyBytes;
         try {
             keyBytes = Decoders.BASE64.decode(secret);
