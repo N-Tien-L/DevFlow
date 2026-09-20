@@ -3,6 +3,9 @@ build/
 .gradle/
 app/build/
 */build/
+bin/
+**/bin/
+
 
 # IDE
 .idea/
