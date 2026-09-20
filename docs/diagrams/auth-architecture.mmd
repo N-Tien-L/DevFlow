@@ -1,0 +1,85 @@
+%% =============================================================================
+%% DEVFLOW - AUTH MODULE ARCHITECTURE & SEQUENCE FLOWS
+%% =============================================================================
+
+flowchart TD
+    subgraph ClientLayer ["Client Layer"]
+        SPA["Web Client (React / Vite)"]
+        CLI["MCP Server / API Client"]
+    end
+
+    subgraph SecurityFilterChain ["Spring Security 6 Filter Chain (Stateless)"]
+        direction TB
+        CORS["CorsFilter"]
+        JWT_FILTER["JwtAuthenticationFilter<br/>(OncePerRequestFilter)"]
+        USER_PASS["UsernamePasswordAuthenticationFilter<br/>(Bypass / Unused)"]
+        AUTH_FILTER["AuthorizationFilter<br/>(URL Pattern Rules)"]
+        EX_FILTER["ExceptionTranslationFilter"]
+        ENTRY_POINT["JwtAuthenticationEntryPoint<br/>(Custom 401 JSON Handler)"]
+    end
+
+    subgraph AuthSecurityCore ["Security Core Components"]
+        TOKEN_PROVIDER["JwtTokenProvider<br/>(HS256 / Claims / Sign / Verify)"]
+        USER_PRINCIPAL["UserPrincipal<br/>(UserDetails adapter)"]
+        SEC_CONTEXT["SecurityContextHolder<br/>(ThreadLocal SecurityContext)"]
+    end
+
+    subgraph ControllerLayer ["REST Controller Layer"]
+        AUTH_CTRL["AuthController<br/>(/api/v1/auth)"]
+        HEALTH_CTRL["AuthHealthController<br/>(/api/v1/auth/health)"]
+    end
+
+    subgraph ServiceLayer ["Service & API Contract Layer"]
+        AUTH_SERVICE["AuthServiceImpl<br/>(Business Logic)"]
+        AUTH_API["AuthApi (Interface in auth-api)<br/>(findUser, isWorkspaceMember)"]
+        PWD_ENC["PasswordEncoder<br/>(BCrypt)"]
+    end
+
+    subgraph RepositoryLayer ["Data Access Layer (Spring Data JPA)"]
+        USER_REPO["UserRepository"]
+        WS_REPO["WorkspaceRepository"]
+        MEMBER_REPO["WorkspaceMemberRepository"]
+    end
+
+    subgraph DatabaseLayer ["PostgreSQL Database (Schema devflow)"]
+        DB_USERS[("users")]
+        DB_WS[("workspaces")]
+        DB_MEMBERS[("workspace_members")]
+    end
+
+    %% Client requests
+    SPA --> CORS
+    CLI --> CORS
+    CORS --> JWT_FILTER
+    JWT_FILTER --> USER_PASS
+    USER_PASS --> AUTH_FILTER
+
+    %% Filter & Security Core interaction
+    JWT_FILTER -->|1. Validate & Parse| TOKEN_PROVIDER
+    JWT_FILTER -->|2. Build Principal| USER_PRINCIPAL
+    JWT_FILTER -->|3. Set Authentication| SEC_CONTEXT
+
+    %% Exception handling
+    AUTH_FILTER -->|Deny / Unauthenticated| EX_FILTER
+    EX_FILTER -->|Trigger on 401| ENTRY_POINT
+    ENTRY_POINT -.->|Response 401 JSON| SPA
+
+    %% Dispatch to Controller
+    AUTH_FILTER -->|Permitted / Authenticated| AUTH_CTRL
+    AUTH_FILTER -->|Permitted| HEALTH_CTRL
+
+    %% Controller to Service
+    AUTH_CTRL --> AUTH_SERVICE
+    AUTH_SERVICE --> PWD_ENC
+    AUTH_SERVICE --> TOKEN_PROVIDER
+    AUTH_SERVICE -.->|Implements| AUTH_API
+
+    %% Service to Repositories
+    AUTH_SERVICE --> USER_REPO
+    AUTH_SERVICE --> WS_REPO
+    AUTH_SERVICE --> MEMBER_REPO
+
+    %% Repositories to Database
+    USER_REPO --> DB_USERS
+    WS_REPO --> DB_WS
+    MEMBER_REPO --> DB_MEMBERS
