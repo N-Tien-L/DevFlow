@@ -54,8 +54,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
                         // Module health checks
                         .requestMatchers("/api/v1/*/health").permitAll()
-                        // Specific protected endpoint within auth module (for T-004)
-                        .requestMatchers("/api/v1/auth/me").authenticated()
+                        // Specific protected endpoints within auth module (for T-004)
+                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/workspaces/**", "/api/v1/auth/workspaces").authenticated()
                         // Public auth endpoints (registration, login, refresh, etc.)
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         // WebSocket and MCP entry points

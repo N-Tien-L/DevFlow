@@ -153,10 +153,25 @@ Because the module never had a direct dependency on another module's internals, 
 | Monitoring | Prometheus + Grafana, via **Spring Boot Actuator + Micrometer** | Actuator exposes a Prometheus-format metrics endpoint with minimal setup |
 | DNS / CDN / frontend hosting | **Cloudflare** (DNS + proxy in front of the domain, Cloudflare Pages for the frontend build) | Low effort, free tier: HTTPS, basic DDoS protection, fast static hosting — makes the deployed app closer to production-grade for minimal cost |
 
-### 9.1 Third parties considered and rejected
+### 9.1 Third parties considered and infrastructure decisions
 
 - **Supabase — not used.** Supabase bundles hosted Postgres, Auth, and Realtime, aimed at apps that call it directly from the frontend. This project already owns Auth as a Spring Security-backed module and Postgres via the PaaS's managed database — adding Supabase Auth would create a second, competing auth system and break the "each module owns its own concern" boundary from Section 3.
-- **Redis — deferred, not part of the MVP.** No concrete problem in the current scope requires it. Add it later only if a specific need appears — e.g. caching repeated CI/CD failure summaries to avoid redundant LLM calls, or rate-limiting AI requests per user. Adding it without one of those concrete needs would be infrastructure for its own sake.
+- **Redis — planned for rate limiting and distributed caching.** Initially, in-memory implementations (Bucket4j in-memory, Caffeine cache) serve development and initial staging. As production traffic scales or when multi-instance backend deployment is required, Redis will serve as the distributed token-bucket rate limiter, cache store, and ephemeral token repository.
+
+### 9.2 Cross-Cutting Concerns & NFR Implementation
+
+To satisfy the Quality Standards & NFRs defined in `PRODUCT_SPEC.md` Section 8, the following architectural mechanisms and libraries are integrated across the backend:
+
+| NFR Domain | Technical Implementation in DevFlow Stack |
+|---|---|
+| **Rate Limiting** | `bucket4j-spring-boot-starter` or custom `HandlerInterceptor` with token-bucket algorithm per IP / User ID on sensitive routes (`/api/v1/auth/**`, `/api/v1/ai/**`). |
+| **Input Validation** | Jakarta Bean Validation (`jakarta.validation.*`: `@Valid`, `@NotBlank`, `@Email`, `@Size`, `@Pattern`) + custom domain validators; sanitized at DTO boundary. |
+| **Email Verification** | Dedicated `verification_tokens` entity with secure random tokens, expiry timestamps, scheduled purge; transactional emails dispatched asynchronously via external SMTP/API (AWS SES / SendGrid / Resend). |
+| **Bot Detection / CAPTCHA** | Cloudflare Turnstile token validation on public mutation endpoints (registration, password reset); verified server-side against Cloudflare Siteverify API. |
+| **Structured Logging** | Logback with Logstash JSON Encoder producing standard JSON logs; MDC (Mapped Diagnostic Context) filter injecting `correlationId`, `userId`, and `clientIp`. |
+| **Circuit Breaker & Retry** | Resilience4j (`resilience4j-spring-boot3`) wrapping external network dependencies (Spring AI LLM providers, Git host APIs, email provider) with circuit breakers, timeouts, and exponential backoff retries. |
+| **Audit Logging** | Domain-level `@AuditLog` annotation + Spring AOP aspect intercepting state mutations, persisting actor, timestamp, action, and diff payload to an `audit_events` table. |
+| **Caching Layer** | Spring Cache abstraction (`@Cacheable`, `@CacheEvict`) backed by Caffeine for single-instance, ready for Spring Data Redis in clustered deployment. |
 
 ## 10. Notes for AI coding agents
 
@@ -165,4 +180,6 @@ Because the module never had a direct dependency on another module's internals, 
 - The AI service module is the single implementation behind both the chat gateway and the MCP server — when adding a capability to one, check whether it belongs in AI service so both access paths get it, rather than implementing it twice.
 - Do not introduce Kubernetes, a message broker, or additional deployable services unless explicitly asked — the current architecture is deliberately a single deployable unit (see Section 7).
 - The backend is Java/Spring Boot, not Node.js — do not generate Node/Express code for the backend even if earlier context or training data defaults there.
-- Do not add Supabase or Redis unless explicitly asked — see Section 9.1 for why they were deliberately left out.
+- Always apply production-grade standards per Section 9.2 and `PRODUCT_SPEC.md` Section 8: validation, error handling, rate limiting, and observability are mandatory requirements for every endpoint.
+- Do not add Supabase. For Redis, adhere to the staged approach in Section 9.1 (in-memory first, Redis when distributed coordination is needed).
+

@@ -169,10 +169,25 @@ Vì module chưa từng phụ thuộc trực tiếp vào ruột của module kh�
 | Giám sát | Prometheus + Grafana qua **Spring Boot Actuator + Micrometer** | Actuator xuất metrics định dạng Prometheus sẵn sàng với cấu hình tối thiểu |
 | CDN & Frontend Hosting | **Cloudflare Pages** | Miễn phí, tốc độ cao, hỗ trợ SSL tự động và chống DDoS cơ bản |
 
-### 9.1 Các công nghệ được cân nhắc nhưng chủ động loại bỏ
+### 9.1 Các công nghệ được cân nhắc và định hướng hạ tầng
 
 - **Supabase — Không sử dụng.** Supabase hướng tới việc gọi trực tiếp từ client vào DB/Auth bên ngoài. DevFlow đã tự sở hữu module Auth bằng Spring Security và database Postgres riêng. Việc nhồi thêm Supabase sẽ tạo ra 2 hệ thống Auth song song và phá vỡ ranh giới module.
-- **Redis — Tạm hoãn, không nằm trong MVP.** Hiện chưa có bài toán cụ thể nào bắt buộc phải dùng Redis trong giai đoạn đầu. Sẽ chỉ bổ sung khi thực sự cần (ví dụ: cache kết quả tóm tắt CI failure để tiết kiệm chi phí gọi LLM, hoặc rate-limiting AI request). Thêm Redis quá sớm chỉ làm phình hạ tầng không cần thiết.
+- **Redis — Lộ trình cho rate limiting và bộ nhớ đệm phân tán.** Giai đoạn dev và staging ban đầu sử dụng các bản cài đặt in-memory (Bucket4j in-memory, Caffeine cache). Khi triển khai production phục vụ nhiều instance hoặc lưu lượng cao, Redis sẽ đóng vai trò token-bucket rate limiter phân tán, cache store dùng chung và kho lưu trữ token tạm thời.
+
+### 9.2 Các Vấn đề Xuyên suốt & Cài đặt NFR (Cross-Cutting Concerns & NFR Implementation)
+
+Nhằm đáp ứng Tiêu chuẩn Chất lượng & Yêu cầu Phi chức năng đã quy định tại `PRODUCT_SPEC_VI.md` Mục 8, các cơ chế kỹ thuật và thư viện sau được tích hợp xuyên suốt backend:
+
+| Lĩnh vực NFR | Giải pháp Kỹ thuật trong DevFlow Stack |
+|---|---|
+| **Giới hạn Tần suất (Rate Limiting)** | Sử dụng `bucket4j-spring-boot-starter` hoặc `HandlerInterceptor` tùy biến theo thuật toán Token Bucket theo IP / User ID trên các route nhạy cảm (`/api/v1/auth/**`, `/api/v1/ai/**`). |
+| **Xác thực Dữ liệu Đầu vào (Validation)** | Jakarta Bean Validation (`jakarta.validation.*`: `@Valid`, `@NotBlank`, `@Email`, `@Size`, `@Pattern`) kết hợp custom validator; làm sạch dữ liệu ngay tại ranh giới DTO. |
+| **Quy trình Xác thực Email** | Bảng thực thể riêng `verification_tokens` với token ngẫu nhiên bảo mật cao, thời hạn hết hạn ngắn, cron job định kỳ dọn dẹp; gửi email giao dịch bất đồng bộ qua SMTP/API (AWS SES / SendGrid / Resend). |
+| **Phòng chống Bot / CAPTCHA** | Xác thực token Cloudflare Turnstile trên các endpoint mutation công khai (đăng ký, quên mật khẩu); kiểm tra phía server qua API Cloudflare Siteverify. |
+| **Ghi Log Có cấu trúc (Logging)** | Logback kết hợp Logstash JSON Encoder xuất log chuẩn JSON; cấu hình bộ lọc MDC (Mapped Diagnostic Context) chèn `correlationId`, `userId`, `clientIp` vào mọi log dòng. |
+| **Ngắt mạch & Thử lại (Circuit Breaker & Retry)** | Sử dụng Resilience4j (`resilience4j-spring-boot3`) bọc các lời gọi mạng ngoại vi (Spring AI LLM, Git Host API, dịch vụ gửi email) với circuit breaker, timeout và exponential backoff retry. |
+| **Ghi Log Kiểm toán (Audit Logging)** | Custom annotation `@AuditLog` kết hợp Spring AOP chặn các thay đổi dữ liệu quan trọng, lưu vết người thực hiện, thời gian, hành động và payload thay đổi vào bảng `audit_events`. |
+| **Tầng Lưu đệm (Caching Layer)** | Trừu tượng hóa Spring Cache (`@Cacheable`, `@CacheEvict`) với Caffeine cho môi trường đơn instance, thiết kế sẵn sàng chuyển sang Spring Data Redis khi mở rộng phân tán. |
 
 ---
 
@@ -181,5 +196,8 @@ Vì module chưa từng phụ thuộc trực tiếp vào ruột của module kh�
 - **Tôn trọng ranh giới module tuyệt đối:** Không bao giờ viết code trong một module mà import trực tiếp các class nội bộ (Entities, Repositories, Services) từ module khác. Mọi tương tác liên module phải qua Event Bus hoặc API Interface công khai (`-api`).
 - **Khi cần tương tác mới giữa 2 module:** Kiểm tra trước tại [Mục 4](#4-hợp-đồng-giao-tiếp--event-bus-domain-events) xem có Event nào phù hợp không. Nếu chưa có, tạo Event mới theo quy ước đặt tên `domain.event_past_tense`.
 - **Module AI Service là bản cài đặt duy nhất:** Cả Chat Gateway lẫn MCP Server đều dùng chung logic này — khi thêm tính năng mới, hãy thêm vào AI Service để cả 2 kênh đều được hưởng lợi.
-- **Không tự ý thêm Kubernetes, Message Broker, hay Redis** trừ khi có yêu cầu cụ thể từ người phụ trách.
+- **Không tự ý thêm Kubernetes hoặc Message Broker** trừ khi có yêu cầu cụ thể từ người phụ trách.
 - **Backend bắt buộc viết bằng Java/Spring Boot**, không dùng Node/Express.
+- **Bắt buộc tuân thủ tiêu chuẩn production-grade** theo Mục 9.2 và `PRODUCT_SPEC_VI.md` Mục 8: validation, xử lý lỗi chuẩn RFC 7807, rate limiting và logging cấu trúc là bắt buộc cho mọi endpoint.
+- **Không thêm Supabase.** Với Redis, tuân theo lộ trình phân kỳ tại Mục 9.1 (in-memory trước, Redis khi scale phân tán).
+
