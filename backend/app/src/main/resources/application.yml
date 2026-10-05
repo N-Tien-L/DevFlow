@@ -20,6 +20,15 @@ spring:
       # "none" keeps the app bootable without a provider key. Set to "openai" and
       # provide OPENAI_API_KEY to enable the LLM client in the AI service module.
       chat: ${AI_MODEL_CHAT:none}
+      # The OpenAI starter enables every supported model type by default. DevFlow
+      # currently uses chat only, so keep the unused clients disabled; otherwise
+      # they require an API key even while chat is set to "none".
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
     openai:
       api-key: ${OPENAI_API_KEY:}
     mcp:
