@@ -213,9 +213,11 @@ Dưới đây là danh sách các thẻ mẫu sẵn sàng chuyển thành ticket
 - `T-001`: Thiết lập Flyway Migration & Base Schema (`V1__init_schema.sql`)
 - `T-002`: Hiện thực Entity User & Workspace kèm Spring Data JPA Repositories
 - `T-003`: Xây dựng Stateless JWT Authentication & Security Filter Chain
-- `T-004`: Hiện thực Auth REST API (`/login`, `/register`, `/me`, `/workspaces`)
+- `T-004`: Hiện thực Core Auth REST API (`/login`, `/me`, `/workspaces`, `AuthApi`, RFC 7807 ProblemDetail, Rate Limiting)
+- `T-004A`: Hiện thực Quy trình Đăng ký & Xác thực Email (`verification_tokens`, Async Email Service, `/register`, `/verify-email`, `/resend-verification`)
+- `T-004B`: Hiện thực Chống lạm dụng Đăng ký & Bảo vệ Bot (Cloudflare Turnstile, lọc disposable email, kiểm tra DNS MX)
 - `T-005`: Xây dựng Axios Client, Auth Interceptor & Auth Context trên Frontend
-- `T-006`: Thiết kế giao diện Đăng ký, Đăng nhập & Chọn Workspace
+- `T-006`: Thiết kế giao diện Đăng ký, Đăng nhập, Xác thực Email & Chọn Workspace
 
 ### Phase 2 Tickets
 - `T-010`: Thiết lập Flyway Migration cho Board Schema (`V2__board_schema.sql`)

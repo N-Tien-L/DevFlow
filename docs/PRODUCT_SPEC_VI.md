@@ -15,6 +15,8 @@
 
 DevFlow là công cụ quản lý dự án dạng thẻ/bảng Kanban (phong cách Trello) được thiết kế chuyên biệt cho lập trình viên. Khác với các công cụ quản lý dự án thông thường, DevFlow kết nối trực tiếp với hoạt động viết code thực tế (Git commits, Pull Requests, CI/CD pipelines) để tự động cập nhật trạng thái công việc một cách chính xác; đồng thời tích hợp một trợ lý AI giúp người dùng tạo thẻ, theo dõi tiến độ và tóm tắt lỗi hệ thống mà không cần thao tác thủ công lặp đi lặp lại.
 
+**Mục tiêu Triển khai (Deployment Target):** DevFlow được thiết kế và xây dựng như một ứng dụng SaaS chuẩn sản xuất (production-grade) — triển khai trên hạ tầng cloud công khai (Render/AWS/GCP), truy cập qua tên miền tùy chỉnh, sẵn sàng phục vụ người dùng thật với lưu lượng truy cập thực tế. Tiêu chuẩn chất lượng hướng tới khả năng thương mại hóa: mọi module đều phải có khả năng xử lý dữ liệu đối kháng, các trường hợp lỗi thực tế trong vận hành và các mối quan tâm kỹ thuật như thể đang phục vụ khách hàng trả phí.
+
 ---
 
 ## 2. Vấn đề Thực tế Cần Giải quyết
@@ -55,7 +57,7 @@ Việc thu hẹp phạm vi vào riêng đối tượng lập trình viên là qu
 Tính năng được mô tả ở cấp độ giá trị sản phẩm, chia theo từng nhóm nghiệp vụ:
 
 ### 5.1 Các tính năng Quản lý Dự án Cốt lõi (Core PM - Baseline)
-- **Tài khoản & Workspace:** Đăng ký/đăng nhập, tạo dự án/workspace, mời thành viên.
+- **Tài khoản & Workspace:** Quy trình đăng ký chuẩn sản xuất (validate client-side, phòng chống bot/CAPTCHA, làm sạch dữ liệu server-side, kiểm tra email trùng lặp & email rác/disposable, kiểm tra bản ghi DNS MX, quy trình xác thực email qua OTP/token, kích hoạt tài khoản), đăng nhập an toàn với JWT access/refresh token, quản lý hồ sơ (GET /me), tạo dự án/workspace, mời thành viên với phân quyền rõ ràng.
 - **Bảng Kanban trực quan:** Tạo các cột trạng thái (To Do, In Progress, Done...), tạo/sửa/xóa thẻ, kéo thả mượt mà giữa các cột.
 - **Chi tiết Công việc (Task Details):** Người thực hiện (assignee), hạn hoàn thành (due date), nhãn mức độ ưu tiên, mô tả Markdown, bình luận.
 - **Lịch sử hoạt động:** Ghi nhận ai đã thay đổi nội dung gì và vào thời điểm nào.
@@ -133,7 +135,22 @@ Xoay quanh 3 trụ cột: (1) Tích hợp Git & CI/CD thực tế, (2) Trợ lý
 
 ---
 
-## 8. Bảng Thuật ngữ (Glossary)
+## 8. Tiêu chuẩn Chất lượng & Yêu cầu Phi chức năng (Quality Standards & NFRs)
+
+DevFlow vận hành theo định hướng một ứng dụng SaaS thực tế chuẩn sản xuất. Ngoài các tính năng nghiệp vụ, mọi module đều phải đáp ứng 6 trụ cột Yêu cầu Phi chức năng (NFR) sau đây nhằm đảm bảo tính toàn vẹn, bảo mật và khả năng phục hồi của hệ thống:
+
+| # | Trụ cột NFR | Quy chuẩn & Yêu cầu Kỹ thuật | Phạm vi Toàn hệ thống |
+|---|---|---|---|
+| **1** | **Bảo mật Tăng cường (Security Hardening)** | Toàn bộ dữ liệu đầu vào từ client phải được xác thực và làm sạch nghiêm ngặt phía server. Bắt buộc áp dụng rate limiting cho các endpoint nhạy cảm (auth, mutations, AI API). Xác thực email bắt buộc khi đăng ký. Tích hợp phòng chống bot/CAPTCHA (Cloudflare Turnstile) cho form công khai. Tuân thủ nghiêm ngặt OWASP Top 10 (chống XSS, CSRF, SQLi, IDOR). | Auth, Board API, Webhook, AI Chat |
+| **2** | **Khả năng Quan sát (Observability & Monitoring)** | Ghi log có cấu trúc (định dạng JSON) kèm mã định danh MDC correlation ID xuyên suốt luồng request. Endpoint kiểm tra sức khỏe (`/actuator/health`) cho liveness/readiness probe. Chuẩn hóa xuất metrics qua Micrometer cho Prometheus. Thiết lập cảnh báo cho tỷ lệ lỗi tăng vọt, độ trễ P99 và cạn kiệt tài nguyên. | Mọi Module, Docker & Cloud Infra |
+| **3** | **Khả năng Mở rộng & Hiệu năng (Scalability & Performance)** | Cấu hình tối ưu connection pool HikariCP cho tải đồng thời production. Tầng lưu đệm (in-memory Caffeine giai đoạn đầu, kiến trúc sẵn sàng cắm Redis) cho các truy vấn nóng. Xử lý bất đồng bộ (`@Async` / event workers) cho tác vụ nặng (gọi LLM, gửi email, fan-out webhook). Độ trễ P95 phản hồi API CRUD cốt lõi dưới 200ms. | AI Service, Notification, Auth, Board |
+| **4** | **Độ tin cậy & Khả năng Phục hồi (Reliability & Resilience)** | Xử lý lỗi tinh tế theo chuẩn RFC 7807 (`ProblemDetail`) — tuyệt đối không để lộ stack trace ra phía client. Cơ chế thử lại (retry) với exponential backoff và jitter cho các lời gọi ra ngoài (LLM provider, dịch vụ email, Git API). Áp dụng mẫu Circuit Breaker (Resilience4j) tránh sập lan truyền. Có quy trình sao lưu DB định kỳ và chiến lược khôi phục tại một thời điểm (PITR). | Git & CI, AI Service, Notification |
+| **5** | **Bảo mật Dữ liệu & Quyền riêng tư (Data Privacy & Compliance)** | Tuân thủ các nguyên tắc cốt lõi của GDPR: quyền được xóa tài khoản (xóa cascade hoặc ẩn danh hóa dữ liệu). Ghi log kiểm toán (Audit Logging) đầy đủ cho các sự kiện nhạy cảm và thay đổi dữ liệu lớn (ai làm, hành động gì, tài nguyên nào, thời gian, IP). Băm mật khẩu bằng BCrypt với cost factor an toàn. Token xác thực tạm thời phải có hạn sử dụng ngắn và hủy ngay sau một lần dùng. | Auth, User profile, Board Audit |
+| **6** | **Toàn vẹn Dữ liệu & Chống Lạm dụng (Input Integrity & Anti-Abuse)** | Mô hình Zero-Trust với client: validation phía server là bắt buộc cho mọi request. Làm sạch dữ liệu chặt chẽ (trim khoảng trắng, chuẩn hóa email chữ thường, loại bỏ thẻ HTML). Lọc và chặn tên miền email dùng một lần (disposable email) khi đăng ký. Kiểm tra bản ghi DNS MX của tên miền email. Giới hạn dung lượng payload và phân trang bắt buộc cho mọi danh sách. | Auth, Board, Chat, Tiếp nhận Webhook |
+
+---
+
+## 9. Bảng Thuật ngữ (Glossary)
 
 | Thuật ngữ | Ý nghĩa |
 |---|---|
@@ -145,8 +162,9 @@ Xoay quanh 3 trụ cột: (1) Tích hợp Git & CI/CD thực tế, (2) Trợ lý
 
 ---
 
-## 9. Lưu ý Dành cho Lập trình viên & AI Coding Agents
+## 10. Lưu ý Dành cho Lập trình viên & AI Coding Agents
 
 - Không tự ý suy đoán kiến trúc, công nghệ từ tài liệu này — mọi quyết định kiến trúc kỹ thuật nằm tại [docs/ARCHITECTURE_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md) hoặc [docs/ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md).
 - AI Service là **một bộ não duy nhất** phục vụ cả Chat UI lẫn MCP Server — tránh duplicate logic ở 2 nơi.
 - Mọi tính năng đánh dấu **Later** đều nằm ngoài phạm vi thực thi trừ khi có chỉ đạo mới.
+- Tuân thủ nghiêm ngặt các Tiêu chuẩn Chất lượng & Yêu cầu Phi chức năng đã quy định tại Mục 8. Tuyệt đối không chấp nhận các bản cài đặt chỉ dừng lại ở mức "chạy được ở kịch bản lý tưởng" (happy-path).

@@ -37,6 +37,9 @@ function loadCredentials() {
           if (key === 'TRELLO_API_KEY') apiKey = apiKey || val;
           if (key === 'TRELLO_TOKEN') token = token || val;
           if (key === 'TRELLO_DEFAULT_BOARD_ID') defaultBoardId = defaultBoardId || val;
+          if (key === 'TRELLO_MEMBER_ID') process.env.TRELLO_MEMBER_ID = val;
+          if (key === 'TRELLO_USERNAME') process.env.TRELLO_USERNAME = val;
+          if (key === 'TRELLO_FULL_NAME') process.env.TRELLO_FULL_NAME = val;
         }
       } catch (e) {}
     }
@@ -96,6 +99,31 @@ function apiRequest(method, endpoint, body = null) {
   });
 }
 
+// 2.1 Current User Discovery
+let cachedCurrentUser = null;
+async function getCurrentUser() {
+  if (cachedCurrentUser) return cachedCurrentUser;
+  if (process.env.TRELLO_MEMBER_ID && process.env.TRELLO_USERNAME) {
+    cachedCurrentUser = {
+      id: process.env.TRELLO_MEMBER_ID,
+      username: process.env.TRELLO_USERNAME,
+      fullName: process.env.TRELLO_FULL_NAME || process.env.TRELLO_USERNAME
+    };
+    return cachedCurrentUser;
+  }
+  try {
+    const me = await apiRequest('GET', '/members/me?fields=id,username,fullName');
+    cachedCurrentUser = me;
+    return me;
+  } catch (e) {
+    return {
+      id: process.env.TRELLO_MEMBER_ID || '68639fd09f37de1717567ea2',
+      username: process.env.TRELLO_USERNAME || 'tienlam15',
+      fullName: process.env.TRELLO_FULL_NAME || 'Current User'
+    };
+  }
+}
+
 // 3. CLI Argument Parser
 function parseArgs(args) {
   const result = { _: [] };
@@ -150,6 +178,51 @@ async function main() {
         break;
       }
 
+      case 'list-members': {
+        const boardId = parsed._[1] || defaultBoardId;
+        const [members, me] = await Promise.all([
+          apiRequest('GET', `/boards/${boardId}/members?fields=fullName,username,id`),
+          getCurrentUser()
+        ]);
+        console.log(`\n👥 Members of Board [${boardId}]:`);
+        members.forEach(m => {
+          const isMe = (m.id === me.id || m.username === me.username) ? ' [CURRENT USER]' : '';
+          console.log(`- ${m.fullName} (@${m.username})${isMe} (ID: ${m.id})`);
+        });
+        break;
+      }
+
+      case 'my-cards': {
+        const boardId = parsed.boardId || defaultBoardId;
+        const filterListId = parsed._[1] || parsed.listId;
+        const me = await getCurrentUser();
+        const [cards, lists] = await Promise.all([
+          apiRequest('GET', `/boards/${boardId}/cards?fields=name,id,url,idList,idMembers,labels&members=true&member_fields=fullName,username`),
+          apiRequest('GET', `/boards/${boardId}/lists?fields=name,id,pos,closed`)
+        ]);
+
+        const myCards = cards.filter(c =>
+          c.idMembers && c.idMembers.includes(me.id) &&
+          (!filterListId || c.idList === filterListId)
+        );
+
+        console.log(`\n👤 Cards assigned to ${me.fullName} (@${me.username}): (${myCards.length} cards found)\n`);
+
+        lists.filter(l => !l.closed).forEach(l => {
+          const inList = myCards.filter(c => c.idList === l.id);
+          if (inList.length > 0) {
+            console.log(`📌 List [${l.name}] (${inList.length}):`);
+            inList.forEach((c, idx) => {
+              const labels = c.labels.map(lbl => `[${lbl.name || lbl.color}]`).join(' ');
+              console.log(`  ${idx + 1}. ${c.name} ${labels}`);
+              console.log(`     ID: ${c.id} | URL: ${c.url}`);
+            });
+            console.log('');
+          }
+        });
+        break;
+      }
+
       case 'create-list': {
         const name = parsed._[1] || parsed.name;
         const boardId = parsed._[2] || parsed.boardId || defaultBoardId;
@@ -169,14 +242,27 @@ async function main() {
       case 'list-cards': {
         const listId = parsed._[1];
         if (!listId) {
-          console.error('Usage: trello list-cards <listId>');
+          console.error('Usage: trello list-cards <listId> [--mine] [--member <username_or_id>]');
           process.exit(1);
         }
-        const cards = await apiRequest('GET', `/lists/${listId}/cards?fields=name,id,url,pos,labels`);
+        let cards = await apiRequest('GET', `/lists/${listId}/cards?fields=name,id,url,pos,labels,idMembers&members=true&member_fields=fullName,username`);
+        if (parsed.mine) {
+          const me = await getCurrentUser();
+          cards = cards.filter(c => c.idMembers && c.idMembers.includes(me.id));
+        } else if (parsed.member) {
+          const target = parsed.member.replace(/^@/, '');
+          cards = cards.filter(c =>
+            (c.idMembers && c.idMembers.includes(target)) ||
+            (c.members && c.members.some(m => m.username === target || m.id === target))
+          );
+        }
+
         console.log(`\n🗂️ Cards in list [${listId}]: (${cards.length} cards)`);
         cards.forEach((c, idx) => {
           const labels = c.labels.map(l => `[${l.name || l.color}]`).join(' ');
-          console.log(`${idx + 1}. ${c.name} ${labels} (ID: ${c.id})`);
+          const members = (c.members || []).map(m => `@${m.username}`).join(' ');
+          const memberStr = members ? ` {${members}}` : '';
+          console.log(`${idx + 1}. ${c.name} ${labels}${memberStr} (ID: ${c.id})`);
           console.log(`   URL: ${c.url}`);
         });
         break;
@@ -260,7 +346,11 @@ async function main() {
         }
         const payload = {};
         if (parsed.name) payload.name = parsed.name;
-        if (parsed.desc) payload.desc = parsed.desc;
+        if (parsed['desc-file']) {
+          payload.desc = fs.readFileSync(path.resolve(parsed['desc-file']), 'utf8');
+        } else if (parsed.desc) {
+          payload.desc = parsed.desc;
+        }
         if (parsed.listId) payload.idList = parsed.listId;
         if (parsed.closed !== undefined) payload.closed = parsed.closed === true || parsed.closed === 'true';
 
@@ -350,19 +440,21 @@ Trello Management CLI Tool
 Usage: node .agents/skills/trello-management/scripts/trello.js <command> [options]
 
 Commands:
-  list-boards                            List all accessible boards
-  list-lists [boardId]                   List all lists/columns on a board
-  create-list <name> [boardId]           Create a new column/list
-  list-cards <listId>                    List all cards in a list
-  get-card <cardId>                      Get card details, description & checklists
-  create-card <listId> --name "..."      Create a new card (supports --desc, --color, --pos)
-  move-card <cardId> <targetListId>      Move card to another column
-  update-card <cardId> [options]         Update card (--name, --desc, --listId, --closed)
-  add-checklist <cardId> --name "..."    Add a checklist to a card
-  add-checkitem <checklistId> --name ".." Add an item to a checklist
-  check-item <cardId> <checkItemId>      Mark checkitem complete or incomplete (--state)
-  add-comment <cardId> --text "..."      Add a comment to a card
-  search <query> [--boardId "..."]       Search cards on the board
+  list-boards                               List all accessible boards
+  list-members [boardId]                    List all members on a board
+  list-lists [boardId]                      List all lists/columns on a board
+  create-list <name> [boardId]              Create a new column/list
+  list-cards <listId> [options]             List cards in a list (--mine, --member <user>)
+  my-cards [listId]                         List all cards assigned to Tien Lam (@tienlam15)
+  get-card <cardId>                         Get card details, description & checklists
+  create-card <listId> --name "..."         Create a new card (supports --desc, --color, --pos)
+  move-card <cardId> <targetListId>         Move card to another column
+  update-card <cardId> [options]            Update card (--name, --desc, --listId, --closed)
+  add-checklist <cardId> --name "..."       Add a checklist to a card
+  add-checkitem <checklistId> --name ".."   Add an item to a checklist
+  check-item <cardId> <checkItemId>         Mark checkitem complete or incomplete (--state)
+  add-comment <cardId> --text "..."         Add a comment to a card
+  search <query> [--boardId "..."]          Search cards on the board
 `);
 }
 

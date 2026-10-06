@@ -29,6 +29,8 @@ Thumbs.db
 *.credentials.json
 .credentials.json
 
-# Personal workspace & private agent skills
+# Personal workspace & private agent skills / rules
 personal/
 .agents/skills/personal-*
+.agents/rules/personal-*
+.agents/rules/*.local.md

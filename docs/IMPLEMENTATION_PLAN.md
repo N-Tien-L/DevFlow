@@ -212,9 +212,11 @@ All work must be tracked with tickets using the format `T-XXX` and mapped to Git
 - `T-001`: Setup Flyway Database Migration & Base Schema (`V1__init_schema.sql`)
 - `T-002`: Implement JPA Entities for User, Workspace, WorkspaceMember with Repositories
 - `T-003`: Configure Stateless JWT Authentication, Token Provider & SecurityFilterChain
-- `T-004`: Implement Auth REST Endpoints (`/login`, `/register`, `/me`, `/workspaces`)
+- `T-004`: Implement Core Auth REST Endpoints (`/login`, `/me`, `/workspaces`, `AuthApi`, RFC 7807 ProblemDetail, Rate Limiting)
+- `T-004A`: Implement Registration Workflow & Email Verification (`verification_tokens` table, Async Email Service, `/register`, `/verify-email`, `/resend-verification`)
+- `T-004B`: Implement Registration Anti-Abuse & Bot Protection (Cloudflare Turnstile verification, disposable email filter, DNS MX check)
 - `T-005`: Implement Frontend Axios Client, JWT Interceptors & Auth Context Store
-- `T-006`: Build Responsive LoginPage, RegisterPage & Workspace Selection UI
+- `T-006`: Build Responsive LoginPage, RegisterPage, EmailVerificationPage & Workspace Selection UI
 
 ### Phase 2: Core Kanban Board
 - `T-010`: Setup Flyway Migration for Board Schema (`V2__board_schema.sql`)

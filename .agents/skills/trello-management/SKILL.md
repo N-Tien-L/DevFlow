@@ -27,12 +27,19 @@ Both files are explicitly excluded in `.gitignore` (`.env.*`, `*.credentials.jso
 ### Columns in `development` Board:
 | Column Name | List ID | Purpose |
 |---|---|---|
+| `📜 Project Charter` | `6ab4e206e8e2b1d5b43b3624` | Formal project charter, dual-course context (SOA & QLDAPM), RACI & governance |
 | `Info` | `6aa2a6ecefc8fea394cfde8a` | Project overview, specs, quick links, DoD (Read-only) |
+| `🔍 Discovery & Scope` | `6ab4d7b23c08b90af8a67c8c` | Product inception, market analysis, personas, scope & feature rationale |
 | `Backlog` | `6aa2a6f3ec35f4c26d96df17` | Future tasks & unplanned user stories |
 | `To Do` | `6aa2a6f88929c8c5e64b0cc6` | Sprint backlog, prioritized tasks ready for work |
 | `In Progress` | `6aa2a708b202fdf02e8858de` | Tasks currently being coded |
 | `In Review` | `6aa2ad215698374992fc6654` | Tasks with open PRs pending peer code review & approval |
 | `Done` | `6aa2a701c3f781dbc0abc59c` | Merged and completed tasks |
+
+### 👥 Team Members Reference:
+- **Tien Lam (Primary User):** `@tienlam15` (ID: `68639fd09f37de1717567ea2`) — Modules: `auth`, `ai`, `notification`, infra
+- **Xuan Le (Teammate):** `@xuanle2` (ID: `6aa2664e0ad1266d74a8efdc`) — Modules: `board`, `gitci`, Docker local
+- **Anh Ly Tuan:** `@anhlytuan` (ID: `6aa26add5a27b7fc8687d7a3`)
 
 ---
 
@@ -44,16 +51,24 @@ All commands are run using Node.js:
 node .agents/skills/trello-management/scripts/trello.js <command> [options]
 ```
 
-### 1. Inspecting Boards & Lists
+### 1. Inspecting Boards, Lists & Members
 ```bash
 # List all accessible boards
 node .agents/skills/trello-management/scripts/trello.js list-boards
 
+# List all board members
+node .agents/skills/trello-management/scripts/trello.js list-members
+
 # List all columns/lists on the default board
 node .agents/skills/trello-management/scripts/trello.js list-lists
 
-# List all cards in a specific column
+# Quick query: List all cards assigned to Tien Lam (@tienlam15) across all columns
+node .agents/skills/trello-management/scripts/trello.js my-cards
+
+# List all cards in a specific column (with optional filter for current user or specific member)
 node .agents/skills/trello-management/scripts/trello.js list-cards <listId>
+node .agents/skills/trello-management/scripts/trello.js list-cards <listId> --mine
+node .agents/skills/trello-management/scripts/trello.js list-cards <listId> --member tienlam15
 ```
 
 ### 2. Reading Card Details

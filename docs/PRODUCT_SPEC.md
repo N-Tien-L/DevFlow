@@ -15,6 +15,8 @@
 
 DevFlow is a board/card-based project management tool (Trello-style) purpose-built for developers. Unlike general-purpose PM tools, DevFlow connects directly to real developer activity (Git, CI/CD) to keep task state accurate automatically, and layers an AI assistant on top to help users create, track, and understand project progress without repetitive manual work.
 
+**Deployment Target:** DevFlow is built as a production-grade SaaS application — deployed on public cloud infrastructure (Render/AWS/GCP), accessible via a custom domain, serving real users with real traffic. The quality standard is commercial viability: every module must handle adversarial input, real-world failure modes, and operational concerns as if serving paying customers.
+
 ## 2. Problem Statement
 
 - General PM tools (Trello, Jira) have no awareness of real code activity — users must manually update task status, which is frequently forgotten or delayed.
@@ -48,7 +50,7 @@ Features are described at the product/value level (not implementation detail), g
 
 ### 5.1 Core PM Features (baseline, present in most PM tools)
 
-- **Accounts & workspaces** — sign up/login, create a project/workspace, invite members.
+- **Accounts & workspaces** — Production-grade registration flow (client-side validation, CAPTCHA/bot detection, server-side sanitization, duplicate & disposable email check, DNS MX verification, email verification with OTP/token, account activation workflow), secure login with JWT access/refresh tokens, profile management (GET /me), create a project/workspace, invite members with role-based access.
 - **Trello-style board** — create status columns (to-do, in progress, done...), create/edit/delete cards, drag-and-drop between columns.
 - **Task details** — assignee, due date, labels/priority, description, comments.
 - **Activity history** — who changed what, and when.
@@ -131,7 +133,20 @@ To keep scope tight for the target audience (developers), the following are inte
 - Enterprise-grade permission systems beyond basic role/member management
 - Competing on breadth of integrations with general-purpose PM suites
 
-## 8. Glossary
+## 8. Quality Standards & Non-Functional Requirements
+
+DevFlow operates as a production SaaS application. Beyond functional requirements, every module must satisfy the following six Non-Functional Requirement (NFR) pillars to ensure system integrity, security, and resilience:
+
+| # | NFR Pillar | Policy & Requirements | System-Wide Scope |
+|---|---|---|---|
+| **1** | **Security Hardening** | All client input must be validated and sanitized server-side. Rate limiting enforced on sensitive endpoints (auth, mutations, AI calls). Mandatory email verification for registration. CAPTCHA/bot detection (Cloudflare Turnstile) on public endpoints. Strict OWASP Top 10 compliance (XSS, CSRF, SQLi, IDOR prevention). | Auth, Board API, Webhooks, AI Chat |
+| **2** | **Observability & Monitoring** | Structured logging (JSON format) with distributed MDC correlation IDs across requests. Health check endpoints (`/actuator/health`) for liveness/readiness. Standardized metrics export via Micrometer to Prometheus. Alerting rules for error rate spikes, P99 latency degradation, and resource exhaustion. | All Modules, Docker & Cloud Infra |
+| **3** | **Scalability & Performance** | HikariCP connection pool tuned for production concurrency. Caching layer (in-memory Caffeine initially, Redis-ready) for hot paths. Asynchronous execution (`@Async` / event workers) for heavy tasks (AI inference, email delivery, webhook fan-out). P95 API response times under 200ms for core CRUD operations. | AI Service, Notification, Auth, Board |
+| **4** | **Reliability & Resilience** | Graceful error responses conforming to RFC 7807 (`ProblemDetail`) — zero stack traces leaked to clients. Retry policies with exponential backoff and jitter for external calls (LLM providers, email delivery, Git APIs). Circuit breaker patterns (Resilience4j) to prevent cascading failures. Documented DB backup and point-in-time recovery strategy. | Git & CI, AI Service, Notification |
+| **5** | **Data Privacy & Compliance** | GDPR-aligned principles: right to erasure (account deletion cascade or anonymization). Complete audit logging for security-sensitive and entity-mutation events (actor, action, resource, timestamp, IP). Password hashing via BCrypt with configurable cost factor. Ephemeral verification token storage with strict expiration and one-time use. | Auth, User profile, Board Audit |
+| **6** | **Input Integrity & Anti-Abuse** | Zero-trust client validation: server-side validation is mandatory for every request. Robust input sanitization (trimming, email normalization, HTML stripping). Disposable email domain filtering on registration. DNS MX record validation for recipient domains. Strict payload size and pagination limits on all collections. | Auth, Board, Chat, Webhook Ingestion |
+
+## 9. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -141,9 +156,10 @@ To keep scope tight for the target audience (developers), the following are inte
 | MCP Server | The adapter exposing AI Service capabilities to external AI coding agents |
 | MVP | Minimum viable product — the required scope for the first shippable version |
 
-## 9. Notes for AI Coding Agents
+## 10. Notes for AI Coding Agents
 
 - Do not invent architecture, service boundaries, or a tech stack based on this document alone — those decisions live in a separate architecture document once finalized.
 - The AI Service is a single shared capability with two client types (chat UI, MCP server) — avoid implementing duplicate logic for each.
 - Treat items marked **Later** as explicitly out of scope unless the human maintainer says otherwise — do not proactively implement them.
 - When in doubt about a feature's intended scope, prefer the description in Section 5 over inferring intent from the feature name alone.
+- Adhere strictly to the Quality Standards & NFRs defined in Section 8. "Happy-path only" implementations are unacceptable.
