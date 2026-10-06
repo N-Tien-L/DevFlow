@@ -35,9 +35,28 @@ spring:
       server:
         name: devflow
         version: 0.0.1-SNAPSHOT
+  # Transactional email (T-004A). Local default targets Mailpit (docker compose, UI on :8025);
+  # production points MAIL_* at the provider's SMTP relay (e.g. Resend / SES) with STARTTLS.
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${MAIL_STARTTLS:false}
+          connectiontimeout: 5000
+          timeout: 10000
+          writetimeout: 10000
 
 server:
   port: ${SERVER_PORT:8080}
+  # Resolve the client IP from X-Forwarded-For only when the request comes through a trusted
+  # (internal) proxy, so rate limits cannot be bypassed with a spoofed header.
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:native}
 
 # Observability per ARCHITECTURE.md Section 9: Prometheus scrapes /actuator/prometheus.
 management:
@@ -48,6 +67,11 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # An SMTP outage must not mark the whole backend unhealthy (container restarts would not help);
+    # delivery failures are tracked by devflow.auth.verification_email{result="failed"} instead.
+    mail:
+      enabled: false
 
 logging:
   level:
@@ -59,4 +83,39 @@ devflow:
     access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:3600000}
     refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
     issuer: devflow
+  verification:
+    token-ttl: ${VERIFICATION_TOKEN_TTL:24h}
+    frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+    mail-from: ${MAIL_FROM:DevFlow <no-reply@devflow.local>}
+    token-retention: 7d
+    unverified-account-retention: 7d
+    purge-cron: "0 0 3 * * *"
+  # Token-bucket policies per client key (capacity requests per period).
+  rate-limit:
+    policies:
+      login: { capacity: 5, period: 1m }
+      register: { capacity: 3, period: 10m }
+      verify-email: { capacity: 10, period: 1m }
+      resend-verification: { capacity: 5, period: 1h }
+      resend-verification-per-email: { capacity: 3, period: 1h }
+
+# Resilience for outbound calls (ARCHITECTURE.md Section 9.2).
+resilience4j:
+  retry:
+    instances:
+      verificationEmail:
+        max-attempts: 3
+        wait-duration: 2s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.mail.MailException
+  circuitbreaker:
+    instances:
+      verificationEmail:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 2
 

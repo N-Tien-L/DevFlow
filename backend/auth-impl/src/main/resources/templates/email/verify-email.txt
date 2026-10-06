@@ -1,0 +1,11 @@
+Hi {{fullName}},
+
+Thanks for signing up for DevFlow. Please confirm your email address to activate your account:
+
+{{verifyUrl}}
+
+This link expires in {{expiresInHours}} hours and can be used once.
+
+If you did not create a DevFlow account, you can ignore this email.
+
+-- DevFlow
