@@ -166,10 +166,32 @@ Lưu trữ thông tin tài khoản và định danh cá nhân của người dù
 | `password_hash`| `VARCHAR(255)` | NOT NULL | Mật khẩu băm (BCrypt định dạng `$2a$10$...`) |
 | `full_name` | `VARCHAR(255)` | NOT NULL | Họ và tên hiển thị của kỹ sư |
 | `avatar_url` | `VARCHAR(512)` | NULL | Đường dẫn ảnh đại diện (CDN hoặc gravatar) |
+| `status` | `VARCHAR(32)` | NOT NULL, DEFAULT `'PENDING_VERIFICATION'` | Trạng thái tài khoản: `PENDING_VERIFICATION`, `ACTIVE` (`ck_users_status`). Chỉ `ACTIVE` mới đăng nhập được. *(V3, T-004A)* |
+| `email_verified_at` | `TIMESTAMPTZ` | NULL | Thời điểm xác thực email *(V3, T-004A)* |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm tạo tài khoản |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật thông tin gần nhất |
 
-- **Chỉ mục:** `idx_users_email` trên `(email)` (B-tree, phục vụ tra cứu đăng nhập tức thì).
+- **Chỉ mục:** `idx_users_email` trên `(email)` (B-tree, phục vụ tra cứu đăng nhập tức thì); `idx_users_status_created_at` trên `(status, created_at)` (dọn tài khoản đăng ký bỏ dở).
+- **Ghi chú migration:** các tài khoản tồn tại trước V3 được backfill thành `ACTIVE`.
+
+---
+
+#### Bảng `verification_tokens` *(V3, T-004A)*
+Token dùng một lần, có hạn, gửi qua email. Chỉ lưu digest SHA-256; token gốc chỉ nằm trong link email.
+
+| Tên cột | Kiểu dữ liệu | Thuộc tính | Mô tả & Ràng buộc |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính |
+| `user_id` | `UUID` | FK, NOT NULL | FK nội bộ tới `users(id)` ON DELETE CASCADE |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | SHA-256 dạng hex của token ngẫu nhiên 256-bit (`uq_verification_tokens_hash`) |
+| `type` | `VARCHAR(32)` | NOT NULL | Mục đích: `EMAIL_VERIFICATION` (`ck_verification_tokens_type`; mở rộng khi có reset mật khẩu) |
+| `expires_at` | `TIMESTAMPTZ` | NOT NULL | Hạn dùng (mặc định 24h) |
+| `used_at` | `TIMESTAMPTZ` | NULL | Gán khi token được dùng hoặc bị thay bởi lần gửi lại; token đã gán bị từ chối |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm phát hành |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật gần nhất |
+
+- **Chỉ mục:** `idx_verification_tokens_user_type` trên `(user_id, type)`; `idx_verification_tokens_expires_at` trên `(expires_at)`.
+- **Lưu trữ:** job chạy hằng đêm xóa token hết hạn/đã dùng quá 7 ngày và tài khoản `PENDING_VERIFICATION` quá 7 ngày (token bị xóa theo cascade).
 
 ---
 
@@ -558,17 +580,26 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Phase 3 (M3): V3__gitci_schema.sql (Git & CI Integration)   │
+│  V3__auth_email_verification.sql (T-004A, Auth hardening)   │
+│  - users.status, users.email_verified_at,                   │
+│    verification_tokens                                      │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Phase 3 (M3): V4__gitci_schema.sql (Git & CI Integration)  │
 │  - repositories, git_commits, pull_requests, ci_pipelines,  │
 │    ci_failures                                              │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Phase 4 (M4): V4__ai_and_notification_schema.sql           │
+│  Phase 4 (M4): V5__ai_and_notification_schema.sql           │
 │  - ai_conversations, ai_messages, notifications             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> **Số version được cấp theo thứ tự merge.** `V3` đã dùng cho migration xác thực email của auth (T-004A), nên script Git/CI và AI/Notification lùi thành `V4` và `V5`. Trước khi thêm migration, kiểm tra `db/migration` trên `develop` để lấy số kế tiếp còn trống.
 
 1. **Giai đoạn 1 (Milestone M1 — Hiện tại):**
    - File: `backend/app/src/main/resources/db/migration/V1__init_schema.sql`
@@ -579,11 +610,11 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
    - Bảng triển khai: 6 bảng phân hệ Board.
    - Lưu ý: Cột `assignee_id` trong `tasks` khai báo `UUID NULL` thuần túy, tuyệt đối không thêm `REFERENCES users(id)`.
 3. **Giai đoạn 3 (Milestone M3 — Sprint 4):**
-   - File: `V3__gitci_schema.sql`
+   - File: `V4__gitci_schema.sql`
    - Bảng triển khai: 5 bảng phân hệ Git & CI.
    - Lưu ý: Cột `task_id` trong `git_commits` và `pull_requests` khai báo `UUID NULL` thuần túy.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
-   - File: `V4__ai_and_notification_schema.sql`
+   - File: `V5__ai_and_notification_schema.sql`
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.
 
 ---

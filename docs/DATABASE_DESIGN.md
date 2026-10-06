@@ -164,10 +164,32 @@ Stores user accounts, credentials, and profile information.
 | `password_hash`| `VARCHAR(255)` | NOT NULL | BCrypt hashed password (`$2a$10$...`) |
 | `full_name` | `VARCHAR(255)` | NOT NULL | User's full display name |
 | `avatar_url` | `VARCHAR(512)` | NULL | Avatar URL hosted on CDN or Gravatar |
+| `status` | `VARCHAR(32)` | NOT NULL, DEFAULT `'PENDING_VERIFICATION'` | Account lifecycle: `PENDING_VERIFICATION`, `ACTIVE` (`ck_users_status`). Only `ACTIVE` accounts can log in. *(V3, T-004A)* |
+| `email_verified_at` | `TIMESTAMPTZ` | NULL | When the email address was confirmed *(V3, T-004A)* |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Account creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Last profile update timestamp |
 
-- **Indexes:** `idx_users_email` on `(email)` (B-Tree, fast login lookup).
+- **Indexes:** `idx_users_email` on `(email)` (B-Tree, fast login lookup); `idx_users_status_created_at` on `(status, created_at)` (purge of abandoned sign-ups).
+- **Migration note:** accounts that existed before V3 were backfilled as `ACTIVE`.
+
+---
+
+#### Table `verification_tokens` *(V3, T-004A)*
+Single-use, expiring tokens delivered by email. Only the SHA-256 digest is stored; the raw token exists solely in the emailed link.
+
+| Column Name | Data Type | Attributes | Description & Constraints |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Token record ID |
+| `user_id` | `UUID` | FK, NOT NULL | Internal FK referencing `users(id)` ON DELETE CASCADE |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | Hex SHA-256 of the 256-bit raw token (`uq_verification_tokens_hash`) |
+| `type` | `VARCHAR(32)` | NOT NULL | Purpose: `EMAIL_VERIFICATION` (`ck_verification_tokens_type`; extend for password reset) |
+| `expires_at` | `TIMESTAMPTZ` | NOT NULL | Expiry (default TTL 24h) |
+| `used_at` | `TIMESTAMPTZ` | NULL | Set when consumed or superseded by a resend; non-null tokens are rejected |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Issue timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Last modification timestamp |
+
+- **Indexes:** `idx_verification_tokens_user_type` on `(user_id, type)`; `idx_verification_tokens_expires_at` on `(expires_at)`.
+- **Retention:** a nightly job deletes tokens expired/used more than 7 days ago, and `PENDING_VERIFICATION` accounts older than 7 days (tokens cascade).
 
 ---
 
@@ -538,7 +560,12 @@ Phase 2 (M2): V2__board_schema.sql (Kanban Core)
   └── task_tag_mappings
         │
         ▼
-Phase 3 (M3): V3__gitci_schema.sql (Git & CI Integration)
+V3__auth_email_verification.sql (T-004A, Auth hardening)
+  ├── users.status, users.email_verified_at
+  └── verification_tokens
+        │
+        ▼
+Phase 3 (M3): V4__gitci_schema.sql (Git & CI Integration)
   ├── repositories
   ├── git_commits
   ├── pull_requests
@@ -546,11 +573,13 @@ Phase 3 (M3): V3__gitci_schema.sql (Git & CI Integration)
   └── ci_failures
         │
         ▼
-Phase 4 (M4): V4__ai_and_notification_schema.sql
+Phase 4 (M4): V5__ai_and_notification_schema.sql
   ├── ai_conversations
   ├── ai_messages
   └── notifications
 ```
+
+> **Version numbers are claimed in merge order.** `V3` was taken by the auth email-verification migration (T-004A), so the Git/CI and AI/Notification scripts shift to `V4` and `V5`. Before adding a migration, check `db/migration` on `develop` for the next free number.
 
 1. **Phase 1 (Milestone M1 — Completed):**
    - Script: `backend/app/src/main/resources/db/migration/V1__init_schema.sql`
@@ -561,11 +590,11 @@ Phase 4 (M4): V4__ai_and_notification_schema.sql
    - Tables: 6 Board module tables.
    - Requirement: `tasks.assignee_id` MUST be declared as `UUID NULL` without `REFERENCES users(id)`.
 3. **Phase 3 (Milestone M3 — Sprint 4):**
-   - Script: `V3__gitci_schema.sql`
+   - Script: `V4__gitci_schema.sql`
    - Tables: 5 Git/CI module tables.
    - Requirement: `git_commits.task_id` and `pull_requests.task_id` MUST be declared as `UUID NULL`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
-   - Script: `V4__ai_and_notification_schema.sql`
+   - Script: `V5__ai_and_notification_schema.sql`
    - Tables: 2 AI module tables and 1 Notification module table.
 
 ---
