@@ -59,7 +59,7 @@ class SecurityConfigIntegrationTest {
     void protectedEndpoint_withoutToken_shouldReturn401Json() throws Exception {
         mockMvc.perform(get("/api/v1/secure-test"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status", is(401)))
                 .andExpect(jsonPath("$.error", is("Unauthorized")))
                 .andExpect(jsonPath("$.path", is("/api/v1/secure-test")));
@@ -71,7 +71,7 @@ class SecurityConfigIntegrationTest {
         mockMvc.perform(get("/api/v1/secure-test")
                         .header("Authorization", "Bearer invalid.jwt.token"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status", is(401)))
                 .andExpect(jsonPath("$.error", is("Unauthorized")));
     }
@@ -84,7 +84,7 @@ class SecurityConfigIntegrationTest {
         mockMvc.perform(get("/api/v1/secure-test")
                         .header("Authorization", "Bearer " + refreshToken))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status", is(401)));
     }
 
@@ -105,7 +105,7 @@ class SecurityConfigIntegrationTest {
     void authMeEndpoint_withoutToken_shouldReturn401() throws Exception {
         mockMvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status", is(401)));
     }
 }

@@ -3,6 +3,7 @@ package io.devflow.auth.internal.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -33,7 +34,7 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
             AuthenticationException authException) throws IOException {
 
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
 
         String message = authException != null && authException.getMessage() != null
                 ? authException.getMessage()
@@ -50,6 +51,11 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         body.put("message", message);
         body.put("path", request.getRequestURI());
         body.put("timestamp", Instant.now().toString());
+        body.put("code", "AUTHENTICATION_REQUIRED");
+        String correlationId = MDC.get("correlationId");
+        if (correlationId != null) {
+            body.put("correlationId", correlationId);
+        }
 
         objectMapper.writeValue(response.getOutputStream(), body);
     }

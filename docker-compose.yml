@@ -23,6 +23,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: devflow
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_MODEL_CHAT: ${AI_MODEL_CHAT:-none}
+      TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
     ports:
       - "8080:8080"
     depends_on:
