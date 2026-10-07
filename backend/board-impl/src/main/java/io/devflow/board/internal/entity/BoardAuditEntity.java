@@ -36,6 +36,12 @@ public class BoardAuditEntity extends BaseEntity {
     @Column(name = "changed_fields", nullable = false, columnDefinition = "text")
     private String changedFields;
 
+    @Column(name = "source_column_id")
+    private UUID sourceColumnId;
+
+    @Column(name = "destination_column_id")
+    private UUID destinationColumnId;
+
     protected BoardAuditEntity() {
         // Required by JPA.
     }
@@ -49,6 +55,21 @@ public class BoardAuditEntity extends BaseEntity {
             UUID correlationId,
             String clientIp,
             String changedFields) {
+        this(actorId, action, resourceType, resourceId, workspaceId, correlationId, clientIp,
+                changedFields, null, null);
+    }
+
+    public BoardAuditEntity(
+            UUID actorId,
+            String action,
+            String resourceType,
+            UUID resourceId,
+            UUID workspaceId,
+            UUID correlationId,
+            String clientIp,
+            String changedFields,
+            UUID sourceColumnId,
+            UUID destinationColumnId) {
         this.actorId = actorId;
         this.action = action;
         this.resourceType = resourceType;
@@ -57,6 +78,8 @@ public class BoardAuditEntity extends BaseEntity {
         this.correlationId = correlationId;
         this.clientIp = clientIp;
         this.changedFields = changedFields;
+        this.sourceColumnId = sourceColumnId;
+        this.destinationColumnId = destinationColumnId;
     }
 
     public UUID getActorId() {
@@ -89,5 +112,13 @@ public class BoardAuditEntity extends BaseEntity {
 
     public String getChangedFields() {
         return changedFields;
+    }
+
+    public UUID getSourceColumnId() {
+        return sourceColumnId;
+    }
+
+    public UUID getDestinationColumnId() {
+        return destinationColumnId;
     }
 }

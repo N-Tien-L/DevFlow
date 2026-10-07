@@ -39,6 +39,28 @@ public final class BoardApiException extends RuntimeException {
         return new BoardApiException(HttpStatus.CONFLICT, code, detail, null);
     }
 
+    public static BoardApiException invalidAssignee() {
+        return badRequest("INVALID_ASSIGNEE", "assigneeId must identify a member of this workspace.");
+    }
+
+    public static BoardApiException boardArchived() {
+        return conflict("BOARD_ARCHIVED", "Restore the board before changing its tasks.");
+    }
+
+    public static BoardApiException botChallengeRequired() {
+        return badRequest("BOT_CHALLENGE_REQUIRED", "Complete the security check before changing this task.");
+    }
+
+    public static BoardApiException botChallengeRejected() {
+        return new BoardApiException(HttpStatus.FORBIDDEN, "BOT_CHALLENGE_REJECTED",
+                "The security check could not be verified.", null);
+    }
+
+    public static BoardApiException botProtectionUnavailable() {
+        return new BoardApiException(HttpStatus.SERVICE_UNAVAILABLE, "BOT_PROTECTION_UNAVAILABLE",
+                "The security check is temporarily unavailable. Please try again.", null);
+    }
+
     public static BoardApiException unavailable() {
         return new BoardApiException(HttpStatus.SERVICE_UNAVAILABLE, "PERMISSION_CHECK_UNAVAILABLE",
                 "Workspace access could not be verified. Please try again.", null);

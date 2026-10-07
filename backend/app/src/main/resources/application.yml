@@ -54,6 +54,12 @@ logging:
     root: info
 
 devflow:
+  turnstile:
+    # Production defaults to fail closed. Local Compose explicitly disables this until
+    # the frontend supplies the public site key and a deployment secret is configured.
+    enabled: ${TURNSTILE_ENABLED:true}
+    secret-key: ${TURNSTILE_SECRET_KEY:}
+    siteverify-url: ${TURNSTILE_SITEVERIFY_URL:https://challenges.cloudflare.com/turnstile/v0/siteverify}
   jwt:
     secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
     access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:3600000}

@@ -42,4 +42,28 @@ public class BoardAuditService {
             throw new IllegalStateException("Could not serialize Board audit metadata", exception);
         }
     }
+
+    public void recordTaskMove(
+            UUID actorId,
+            UUID taskId,
+            UUID workspaceId,
+            UUID sourceColumnId,
+            UUID destinationColumnId) {
+        try {
+            String fields = objectMapper.writeValueAsString(List.of("columnId", "position"));
+            repository.saveAndFlush(new BoardAuditEntity(
+                    actorId,
+                    "MOVE",
+                    "TASK",
+                    taskId,
+                    workspaceId,
+                    BoardRequestContext.correlationId(),
+                    BoardRequestContext.clientIp(),
+                    fields,
+                    sourceColumnId,
+                    destinationColumnId));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Could not serialize Board audit metadata", exception);
+        }
+    }
 }

@@ -339,6 +339,9 @@ public class BoardManagementService {
     private BoardEntity requireLockedAccessibleBoard(UUID boardId, UUID actorId) {
         requireAccessibleBoard(boardId, actorId);
         BoardEntity locked = boardRepository.findByIdForUpdate(boardId).orElseThrow(BoardApiException::notFound);
+        // The first read may have happened before waiting for another mutation's board lock.
+        // Refresh the managed row so archive/workspace decisions use the just-committed state.
+        entityManager.refresh(locked);
         if (!permissionService.isMember(actorId, locked.getWorkspaceId())) {
             throw BoardApiException.notFound();
         }

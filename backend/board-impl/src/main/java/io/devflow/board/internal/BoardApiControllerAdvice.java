@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -86,6 +87,14 @@ public class BoardApiControllerAdvice {
             DataIntegrityViolationException exception, HttpServletRequest request) {
         return response(HttpStatus.CONFLICT, "DATA_CONFLICT",
                 "The requested change conflicts with the current board data.", request);
+    }
+
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> handleBoardBusy(
+            PessimisticLockingFailureException exception, HttpServletRequest request) {
+        log.warn("Board mutation lock was not acquired; correlationId={}", BoardRequestContext.correlationId());
+        return response(HttpStatus.CONFLICT, "BOARD_BUSY",
+                "The board is being updated. Refresh the board and try again.", request);
     }
 
     @ExceptionHandler(Exception.class)
