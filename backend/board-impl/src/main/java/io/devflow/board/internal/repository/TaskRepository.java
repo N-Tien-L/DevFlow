@@ -24,4 +24,24 @@ public interface TaskRepository extends JpaRepository<TaskEntity, UUID> {
     List<TaskEntity> findByBoardIdInDisplayOrder(@Param("boardId") UUID boardId);
 
     Optional<TaskEntity> findByIdAndColumn_Board_Id(UUID id, UUID boardId);
+
+    long countByColumn_Id(UUID columnId);
+
+    @Query("""
+            select task from TaskEntity task
+            join fetch task.column column
+            join fetch column.board board
+            where board.workspaceId = :workspaceId
+            order by board.createdAt asc, board.id asc, column.position asc, column.id asc,
+                     task.position asc, task.id asc
+            """)
+    List<TaskEntity> findByWorkspaceIdInDisplayOrder(@Param("workspaceId") UUID workspaceId);
+
+    @Query("""
+            select task from TaskEntity task
+            join fetch task.column column
+            join fetch column.board board
+            where task.id = :taskId
+            """)
+    Optional<TaskEntity> findTaskWithBoard(@Param("taskId") UUID taskId);
 }

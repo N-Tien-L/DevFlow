@@ -13,5 +13,10 @@ public interface ColumnRepository extends JpaRepository<ColumnEntity, UUID> {
 
     List<ColumnEntity> findByBoard_IdOrderByPositionAscIdAsc(UUID boardId);
 
+    List<ColumnEntity> findAllByBoard_IdOrderByPositionAscIdAsc(UUID boardId);
+
     Optional<ColumnEntity> findByIdAndBoard_Id(UUID id, UUID boardId);
+
+    long countByBoard_Id(UUID boardId);
+
 }
