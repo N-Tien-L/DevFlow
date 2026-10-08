@@ -1,58 +1,63 @@
 package io.devflow.board.internal;
 
-import java.util.Map;
+import io.devflow.board.api.BoardPageResponse;
+import io.devflow.board.api.BoardResponse;
+import io.devflow.board.api.CreateBoardRequest;
+import jakarta.validation.Valid;
+import java.net.URI;
 import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import io.devflow.board.internal.dto.PatchBoardRequest;
 
-/**
- * REST API for the Board module (ARCHITECTURE.md Section 5). All endpoints are stubs —
- * no business logic yet.
- *
- * <p>TODO(PRODUCT_SPEC Section 5.1): Trello-style board — status columns, card
- * create/edit/delete, drag-and-drop between columns, task details (assignee, due date,
- * labels/priority, description, comments), search &amp; filter. Real-time sync of board
- * changes to other viewers goes over the WebSocket gateway (Section 5).
- */
+/** Authenticated REST endpoints for Board lifecycle and workspace-scoped listing. */
 @RestController
-@RequestMapping("/api/v1/boards")
+@RequestMapping("/api/v1")
 public class BoardController {
 
-    @GetMapping("/{boardId}")
-    public ResponseEntity<Map<String, String>> getBoard(@PathVariable UUID boardId) {
-        // TODO(PRODUCT_SPEC 5.1): return the board with its columns and cards.
-        return todo("getBoard");
+    private final BoardManagementService boardService;
+
+    public BoardController(BoardManagementService boardService) {
+        this.boardService = boardService;
     }
 
-    @PostMapping("/{boardId}/cards")
-    public ResponseEntity<Map<String, String>> createCard(@PathVariable UUID boardId) {
-        // TODO(PRODUCT_SPEC 5.1): create a card in the given column; publish TaskCreatedEvent.
-        return todo("createCard");
+    @PostMapping("/boards")
+    public ResponseEntity<BoardResponse> createBoard(@Valid @RequestBody CreateBoardRequest request) {
+        BoardResponse board = boardService.createBoard(request);
+        return ResponseEntity.created(URI.create("/api/v1/boards/" + board.id())).body(board);
     }
 
-    @PatchMapping("/cards/{cardId}")
-    public ResponseEntity<Map<String, String>> updateCard(@PathVariable UUID cardId) {
-        // TODO(PRODUCT_SPEC 5.1): edit title/description/assignee/due date/labels.
-        return todo("updateCard");
+    @GetMapping("/workspaces/{workspaceId}/boards")
+    public BoardPageResponse listBoards(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size,
+            @RequestParam(name = "includeArchived", defaultValue = "false") boolean includeArchived) {
+        return boardService.listBoards(workspaceId, page, size, includeArchived);
     }
 
-    @PatchMapping("/cards/{cardId}/move")
-    public ResponseEntity<Map<String, String>> moveCard(@PathVariable UUID cardId) {
-        // TODO(PRODUCT_SPEC 5.1): drag-and-drop between columns;
-        //   publish TaskStatusChangedEvent with cause MANUAL.
-        return todo("moveCard");
+    @GetMapping("/boards/{boardId}")
+    public BoardResponse getBoard(@PathVariable("boardId") UUID boardId) {
+        return boardService.getBoard(boardId);
     }
 
-    private ResponseEntity<Map<String, String>> todo(String endpoint) {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
-                .body(Map.of(
-                        "todo", endpoint + " — not implemented yet",
-                        "spec", "PRODUCT_SPEC.md Section 5.1"));
+    @PatchMapping("/boards/{boardId}")
+    public BoardResponse updateBoard(
+            @PathVariable("boardId") UUID boardId, @RequestBody PatchBoardRequest request) {
+        return boardService.updateBoard(boardId, request);
+    }
+
+    @DeleteMapping("/boards/{boardId}")
+    public ResponseEntity<Void> deleteBoard(@PathVariable("boardId") UUID boardId) {
+        boardService.deleteBoard(boardId);
+        return ResponseEntity.noContent().build();
     }
 }

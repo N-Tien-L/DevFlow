@@ -98,15 +98,18 @@ Các module xuất bản (publish) và đăng ký nhận (subscribe) các sự k
 
 | Tên Event | Xuất bản bởi | Nhận bởi | Dữ liệu Payload (Khái niệm) |
 |---|---|---|---|
-| `task.created` | Board | AI Service, Notification | task id, project id, description |
-| `task.status_changed` | Board, Git & CI | Notification, AI Service | task id, old status, new status, cause (manual / git) |
+| `workspace.membership_check_requested` | Board (yêu cầu đồng bộ) | Auth | correlation id, actor id, workspace id; Auth ghi đúng một quyết định membership trước khi publish trả về; không xử lý bất đồng bộ |
+| `task.created` | Board | AI Service, Notification | taskId, projectId (workspace id), boardId, columnId, description, eventId, correlationId, actorId, occurredAt |
+| `task.status_changed` | Board (chuyển thủ công hoặc do Git kích hoạt) | Notification, AI Service | taskId, boardId, workspaceId, sourceColumnId, destinationColumnId, oldStatus/newStatus (tên cột), oldStatusCategory/newStatusCategory, cause (manual / git), eventId, correlationId, actorId (có thể null với tự động hóa hệ thống), occurredAt |
 | `git.commit_linked` | Git & CI | Board | task id, commit sha, repo, author |
 | `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo |
 | `ci.failure_detected` | Git & CI | AI Service | pipeline id, raw log reference, repo, commit sha |
 | `ci.failure_summarized` | AI Service | Board, Notification | pipeline id, summary text, related task id (if resolved) |
 | `risk.deadline_flagged` | AI Service | Notification | task id or sprint id, reason, severity |
 
-**Quy tắc:** Một module chỉ được đọc dữ liệu của module khác bằng cách đăng ký nhận Event của nó (hoặc đối với các nhu cầu đồng bộ tức thời, gọi qua một hàm hẹp trên Public API Interface `-api` — tuyệt đối không bao giờ import Model hay Repository nội bộ giữa các thư mục module).
+**Quy tắc:** theo hướng dẫn workspace đang áp dụng, giao tiếp liên module chỉ dùng typed event kế thừa `DevFlowEvent`; không gọi trực tiếp public interface hoặc import nội bộ của module khác. Event yêu cầu/quyết định đồng bộ phải chạy trên thread publish, trả đúng một quyết định và từ chối an toàn nếu không có phản hồi hợp lệ. Các event thông báo nghiệp vụ vẫn là typed event thông thường.
+
+**Delivery của task event:** Board chụp trạng thái task thành event snapshot bất biến và chỉ publish `task.created` / `task.status_changed` sau khi transaction database commit. Sắp xếp task trong cùng một column không đổi status và không phát `task.status_changed`. Event bus Spring chạy trong process và đồng bộ; event không được lưu bền khi process lỗi, không bảo đảm FIFO giữa các commit đồng thời và không tự retry. Cần một thay đổi riêng về transactional outbox và consumer idempotent trước khi dùng các event này kích hoạt side effect không được phép mất.
 
 ---
 
