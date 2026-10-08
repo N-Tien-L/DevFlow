@@ -8,11 +8,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.devflow.ai.internal.AiEventListeners;
 import io.devflow.auth.internal.security.JwtTokenProvider;
+import io.devflow.board.api.CreateTaskRequest;
+import io.devflow.board.internal.TaskManagementService;
+import io.devflow.common.security.AuthenticatedActor;
+import io.devflow.common.event.TaskCreatedEvent;
+import io.devflow.common.event.TaskStatusChangedEvent;
+import io.devflow.notification.internal.NotificationEventListeners;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,10 +31,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -72,6 +88,18 @@ class BoardColumnApiIntegrationTest {
     @Autowired
     private JwtTokenProvider tokenProvider;
 
+    @MockitoSpyBean
+    private AiEventListeners aiEventListeners;
+
+    @MockitoSpyBean
+    private NotificationEventListeners notificationEventListeners;
+
+    @Autowired
+    private TaskManagementService taskManagementService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     private UUID memberId;
     private UUID outsiderId;
     private UUID workspaceId;
@@ -79,6 +107,7 @@ class BoardColumnApiIntegrationTest {
 
     @BeforeEach
     void createWorkspaceFixtures() {
+        clearInvocations(aiEventListeners, notificationEventListeners);
         memberId = UUID.randomUUID();
         outsiderId = UUID.randomUUID();
         workspaceId = UUID.randomUUID();
@@ -89,6 +118,136 @@ class BoardColumnApiIntegrationTest {
         insertWorkspace(otherWorkspaceId, outsiderId, "outsider-workspace");
         insertMember(workspaceId, memberId);
         insertMember(otherWorkspaceId, outsiderId);
+    }
+
+    @Test
+    void publishesCommittedCreatedEventToAiAndNotificationListeners() throws Exception {
+        UUID boardId = createBoard("Task event board", memberId);
+        UUID columnId = createColumn(boardId, "To do", "TODO");
+        String correlationId = UUID.randomUUID().toString();
+
+        MvcResult result = mockMvc.perform(post("/api/v1/columns/{columnId}/tasks", columnId)
+                        .header("Authorization", bearer(memberId))
+                        .header("X-Correlation-ID", correlationId)
+                        .contentType("application/json")
+                        .content(json(Map.of("title", "Created for event", "description", "safe description"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID taskId = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString())
+                .get("id").asText());
+
+        var aiCaptor = org.mockito.ArgumentCaptor.forClass(TaskCreatedEvent.class);
+        var notificationCaptor = org.mockito.ArgumentCaptor.forClass(TaskCreatedEvent.class);
+        verify(aiEventListeners).on(aiCaptor.capture());
+        verify(notificationEventListeners).on(notificationCaptor.capture());
+        TaskCreatedEvent aiEvent = aiCaptor.getValue();
+        TaskCreatedEvent notificationEvent = notificationCaptor.getValue();
+        org.assertj.core.api.Assertions.assertThat(aiEvent.eventId()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(aiEvent.eventId()).isEqualTo(notificationEvent.eventId());
+        org.assertj.core.api.Assertions.assertThat(aiEvent.taskId()).isEqualTo(taskId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.boardId()).isEqualTo(boardId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.projectId()).isEqualTo(workspaceId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.columnId()).isEqualTo(columnId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.actorId()).isEqualTo(memberId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.correlationId()).isEqualTo(UUID.fromString(correlationId));
+        org.assertj.core.api.Assertions.assertThat(aiEvent.description()).isEqualTo("safe description");
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tasks WHERE id = ?", Long.class, taskId)).isEqualTo(1L);
+        verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
+        verify(notificationEventListeners, never()).on(
+                org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
+    }
+
+    @Test
+    void publishesOnlyCrossColumnMovesAndPreservesTheCommittedStatusSnapshot() throws Exception {
+        UUID boardId = createBoard("Move event board", memberId);
+        UUID sourceColumnId = createColumn(boardId, "To do", "TODO");
+        UUID destinationColumnId = createColumn(boardId, "Done", "DONE");
+        UUID taskId = createTask(sourceColumnId, "Move me", memberId);
+        clearInvocations(aiEventListeners, notificationEventListeners);
+
+        mockMvc.perform(patch("/api/v1/tasks/{taskId}/move", taskId)
+                        .header("Authorization", bearer(memberId))
+                        .contentType("application/json")
+                        .content(json(Map.of("columnId", destinationColumnId, "position", 0))))
+                .andExpect(status().isOk());
+
+        var aiCaptor = org.mockito.ArgumentCaptor.forClass(TaskStatusChangedEvent.class);
+        var notificationCaptor = org.mockito.ArgumentCaptor.forClass(TaskStatusChangedEvent.class);
+        verify(aiEventListeners).on(aiCaptor.capture());
+        verify(notificationEventListeners).on(notificationCaptor.capture());
+        TaskStatusChangedEvent aiEvent = aiCaptor.getValue();
+        TaskStatusChangedEvent notificationEvent = notificationCaptor.getValue();
+        org.assertj.core.api.Assertions.assertThat(aiEvent.eventId()).isEqualTo(notificationEvent.eventId());
+        org.assertj.core.api.Assertions.assertThat(aiEvent.taskId()).isEqualTo(taskId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.boardId()).isEqualTo(boardId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.workspaceId()).isEqualTo(workspaceId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.sourceColumnId()).isEqualTo(sourceColumnId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.destinationColumnId()).isEqualTo(destinationColumnId);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.oldStatus()).isEqualTo("To do");
+        org.assertj.core.api.Assertions.assertThat(aiEvent.newStatus()).isEqualTo("Done");
+        org.assertj.core.api.Assertions.assertThat(aiEvent.oldStatusCategory()).isEqualTo("TODO");
+        org.assertj.core.api.Assertions.assertThat(aiEvent.newStatusCategory()).isEqualTo("DONE");
+        org.assertj.core.api.Assertions.assertThat(aiEvent.cause())
+                .isEqualTo(TaskStatusChangedEvent.StatusChangeCause.MANUAL);
+        org.assertj.core.api.Assertions.assertThat(aiEvent.actorId()).isEqualTo(memberId);
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT column_id FROM tasks WHERE id = ?", UUID.class, taskId)).isEqualTo(destinationColumnId);
+        verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
+        verify(notificationEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
+    }
+
+    @Test
+    void reorderAndRejectedMoveDoNotPublishTaskLifecycleEvents() throws Exception {
+        UUID boardId = createBoard("No event board", memberId);
+        UUID columnId = createColumn(boardId, "To do", "TODO");
+        UUID taskId = createTask(columnId, "Stay here", memberId);
+        clearInvocations(aiEventListeners, notificationEventListeners);
+
+        mockMvc.perform(patch("/api/v1/tasks/{taskId}/move", taskId)
+                        .header("Authorization", bearer(memberId))
+                        .contentType("application/json")
+                        .content(json(Map.of("columnId", columnId, "position", 0))))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/v1/tasks/{taskId}/move", taskId)
+                        .header("Authorization", bearer(memberId))
+                        .contentType("application/json")
+                        .content(json(Map.of("columnId", columnId, "position", 1))))
+                .andExpect(status().isBadRequest());
+
+        verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
+        verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
+        verify(notificationEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
+        verify(notificationEventListeners, never()).on(
+                org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
+    }
+
+    @Test
+    void outerTransactionRollbackLeavesNoTaskOrTaskEvent() throws Exception {
+        UUID boardId = createBoard("Rollback event board", memberId);
+        UUID columnId = createColumn(boardId, "To do", "TODO");
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setTitle("Rolled back task");
+        AuthenticatedActor actor = () -> memberId;
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(actor, "test", List.of()));
+
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                taskManagementService.createTask(columnId, request);
+                status.setRollbackOnly();
+            });
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tasks WHERE column_id = ?", Long.class, columnId)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM board_audit_events WHERE workspace_id = ? AND resource_type = 'TASK'",
+                Long.class, workspaceId)).isZero();
+        verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
+        verify(notificationEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
     }
 
     @AfterEach
