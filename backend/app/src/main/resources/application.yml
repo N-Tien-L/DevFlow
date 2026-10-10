@@ -54,6 +54,11 @@ logging:
     root: info
 
 devflow:
+  websocket:
+    # Explicit browser origins are required in production. Comma-separated origins are supported.
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    board:
+      send-timeout-ms: ${WEBSOCKET_BOARD_SEND_TIMEOUT_MS:100}
   turnstile:
     # Production defaults to fail closed. Local Compose explicitly disables this until
     # the frontend supplies the public site key and a deployment secret is configured.

@@ -20,6 +20,9 @@ import io.devflow.board.internal.TaskManagementService;
 import io.devflow.common.security.AuthenticatedActor;
 import io.devflow.common.event.TaskCreatedEvent;
 import io.devflow.common.event.TaskStatusChangedEvent;
+import java.net.URI;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import io.devflow.notification.internal.NotificationEventListeners;
 import java.util.Map;
 import java.util.UUID;
@@ -30,7 +33,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.messaging.converter.MappingJackson2MessageConverter;
+import org.springframework.messaging.simp.user.SimpUserRegistry;
+import org.springframework.messaging.simp.stomp.StompFrameHandler;
+import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.stomp.StompHeaders;
+import org.springframework.messaging.simp.stomp.StompSession;
+import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -40,12 +52,15 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.web.socket.client.standard.StandardWebSocketClient;
+import org.springframework.web.socket.messaging.WebSocketStompClient;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** Exercises the public Board/Column API, Auth membership event, and migrations on PostgreSQL 17. */
-@SpringBootTest(properties = {
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.ai.model.chat=none",
@@ -87,6 +102,12 @@ class BoardColumnApiIntegrationTest {
 
     @Autowired
     private JwtTokenProvider tokenProvider;
+
+    @Autowired
+    private SimpUserRegistry simpUserRegistry;
+
+    @LocalServerPort
+    private int port;
 
     @MockitoSpyBean
     private AiEventListeners aiEventListeners;
@@ -156,6 +177,66 @@ class BoardColumnApiIntegrationTest {
         verify(aiEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
         verify(notificationEventListeners, never()).on(
                 org.mockito.ArgumentMatchers.any(TaskStatusChangedEvent.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void broadcastsCommittedBoardMutationToAnAuthenticatedTopicSubscriber() throws Exception {
+        UUID boardId = createBoard("Realtime board", memberId);
+        UUID columnId = createColumn(boardId, "To do", "TODO");
+        WebSocketStompClient stompClient = new WebSocketStompClient(new StandardWebSocketClient());
+        stompClient.setMessageConverter(new MappingJackson2MessageConverter());
+        StompSession session = null;
+        CompletableFuture<Map<String, Object>> received = new CompletableFuture<>();
+        try {
+            StompHeaders connectHeaders = new StompHeaders();
+            connectHeaders.add("Authorization", bearer(memberId));
+            WebSocketHttpHeaders handshakeHeaders = new WebSocketHttpHeaders();
+            handshakeHeaders.setOrigin("http://localhost:5173");
+            session = stompClient.connectAsync(
+                            URI.create("ws://localhost:" + port + "/ws"),
+                            handshakeHeaders,
+                            connectHeaders,
+                            new StompSessionHandlerAdapter() {
+                                @Override
+                                public void handleException(StompSession session, StompCommand command,
+                                        StompHeaders headers, byte[] payload, Throwable exception) {
+                                    received.completeExceptionally(exception);
+                                }
+                            })
+                    .get(5, TimeUnit.SECONDS);
+
+            session.subscribe("/topic/boards/" + boardId, new StompFrameHandler() {
+                @Override
+                public java.lang.reflect.Type getPayloadType(StompHeaders headers) {
+                    return Map.class;
+                }
+
+                @Override
+                public void handleFrame(StompHeaders headers, Object payload) {
+                    try {
+                        received.complete((Map<String, Object>) payload);
+                    } catch (Exception exception) {
+                        received.completeExceptionally(exception);
+                    }
+                }
+            });
+            awaitBoardSubscription(memberId, "/topic/boards/" + boardId);
+
+            createTask(columnId, "Created over REST", memberId);
+
+            Map<String, Object> payload = received.get(3, TimeUnit.SECONDS);
+            org.assertj.core.api.Assertions.assertThat(payload.get("schemaVersion")).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(payload.get("type")).isEqualTo("CARD_CREATED");
+            org.assertj.core.api.Assertions.assertThat(payload.get("boardId")).isEqualTo(boardId.toString());
+            Map<?, ?> data = (Map<?, ?>) payload.get("data");
+            org.assertj.core.api.Assertions.assertThat(data.get("columnId")).isEqualTo(columnId.toString());
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+            stompClient.stop();
+        }
     }
 
     @Test
@@ -781,6 +862,20 @@ class BoardColumnApiIntegrationTest {
 
     private String json(Object value) throws Exception {
         return objectMapper.writeValueAsString(value);
+    }
+
+    private void awaitBoardSubscription(UUID userId, String destination) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (System.nanoTime() < deadline) {
+            var user = simpUserRegistry.getUser(userId.toString());
+            if (user != null && user.getSessions().stream()
+                    .flatMap(activeSession -> activeSession.getSubscriptions().stream())
+                    .anyMatch(subscription -> destination.equals(subscription.getDestination()))) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("STOMP broker did not register the board subscription in time");
     }
 
     private void insertUser(UUID id, String label) {

@@ -1,8 +1,11 @@
 package io.devflow.board.internal;
 
 import io.devflow.board.api.BoardPageResponse;
+import io.devflow.board.api.BoardMutationData;
+import io.devflow.board.api.BoardMutationType;
 import io.devflow.board.api.BoardResponse;
 import io.devflow.board.api.BoardSummary;
+import io.devflow.board.api.BoardRefreshTarget;
 import io.devflow.board.api.ColumnResponse;
 import io.devflow.board.api.ColumnStatusCategory;
 import io.devflow.board.api.CreateBoardRequest;
@@ -45,6 +48,7 @@ public class BoardManagementService {
     private final WorkspaceMembershipPermissionService permissionService;
     private final BoardRateLimiter rateLimiter;
     private final BoardAuditService auditService;
+    private final BoardRealtimePublisher realtimePublisher;
     private final JdbcTemplate jdbcTemplate;
     private final EntityManager entityManager;
 
@@ -56,6 +60,7 @@ public class BoardManagementService {
             WorkspaceMembershipPermissionService permissionService,
             BoardRateLimiter rateLimiter,
             BoardAuditService auditService,
+            BoardRealtimePublisher realtimePublisher,
             JdbcTemplate jdbcTemplate,
             EntityManager entityManager) {
         this.boardRepository = boardRepository;
@@ -65,6 +70,7 @@ public class BoardManagementService {
         this.permissionService = permissionService;
         this.rateLimiter = rateLimiter;
         this.auditService = auditService;
+        this.realtimePublisher = realtimePublisher;
         this.jdbcTemplate = jdbcTemplate;
         this.entityManager = entityManager;
     }
@@ -165,6 +171,9 @@ public class BoardManagementService {
             String action = changedFields.contains("archived")
                     ? (board.isArchived() ? "ARCHIVE" : "RESTORE") : "UPDATE";
             auditService.record(actorId, action, "BOARD", board.getId(), board.getWorkspaceId(), changedFields);
+            realtimePublisher.publish(board.getId(), BoardMutationType.BOARD_UPDATED,
+                    new BoardMutationData(null, null, null, null, null, null, List.of(), changedFields,
+                            List.of(BoardRefreshTarget.BOARD)), actorId);
         }
         return toResponse(board, columnRepository.findAllByBoard_IdOrderByPositionAscIdAsc(boardId)
                 .stream().map(BoardManagementService::toResponse).toList());
@@ -178,6 +187,9 @@ public class BoardManagementService {
         UUID workspaceId = board.getWorkspaceId();
         auditService.record(actorId, "DELETE", "BOARD", boardId, workspaceId,
                 List.of("board", "columns", "tasks", "comments", "tags"));
+        realtimePublisher.publish(boardId, BoardMutationType.BOARD_DELETED,
+                new BoardMutationData(null, null, null, null, null, null, List.of(), List.of("deleted"),
+                        List.of(BoardRefreshTarget.BOARD)), actorId);
         int deleted = jdbcTemplate.update("DELETE FROM boards WHERE id = ?", boardId);
         if (deleted != 1) {
             throw BoardApiException.notFound();
@@ -208,6 +220,10 @@ public class BoardManagementService {
         column = columnRepository.saveAndFlush(column);
         auditService.record(actorId, "CREATE", "COLUMN", column.getId(), board.getWorkspaceId(),
                 List.of("boardId", "name", "position", "statusCategory"));
+        realtimePublisher.publish(boardId, BoardMutationType.COLUMN_CREATED,
+                new BoardMutationData(null, column.getId(), null, null, null, column.getPosition(),
+                        List.of(column.getId()), List.of("name", "position", "statusCategory"),
+                        List.of(BoardRefreshTarget.COLUMNS)), actorId);
         return toResponse(column);
     }
 
@@ -268,6 +284,9 @@ public class BoardManagementService {
 
         if (!changedFields.isEmpty()) {
             auditService.record(actorId, "UPDATE", "COLUMN", columnId, board.getWorkspaceId(), changedFields);
+            realtimePublisher.publish(boardId, BoardMutationType.COLUMN_UPDATED,
+                    new BoardMutationData(null, columnId, null, null, null, null, List.of(columnId), changedFields,
+                            List.of(BoardRefreshTarget.COLUMNS, BoardRefreshTarget.TASK_DETAIL)), actorId);
         }
         return toResponse(column);
     }
@@ -285,6 +304,7 @@ public class BoardManagementService {
         if (taskRepository.countByColumn_Id(columnId) > 0) {
             throw BoardApiException.conflict("COLUMN_NOT_EMPTY", "Move or delete the tasks before deleting this column.");
         }
+        int fromPosition = column.getPosition();
         List<ColumnEntity> columns = columnRepository.findAllByBoard_IdOrderByPositionAscIdAsc(boardId);
         columns.removeIf(candidate -> candidate.getId().equals(columnId));
         columnRepository.delete(column);
@@ -292,6 +312,9 @@ public class BoardManagementService {
             columns.get(index).setPosition(index);
         }
         auditService.record(actorId, "DELETE", "COLUMN", columnId, board.getWorkspaceId(), List.of("column"));
+        realtimePublisher.publish(boardId, BoardMutationType.COLUMN_DELETED,
+                new BoardMutationData(null, columnId, null, null, fromPosition, null, List.of(columnId),
+                        List.of("deleted", "position"), List.of(BoardRefreshTarget.COLUMNS)), actorId);
     }
 
     @Transactional
@@ -305,6 +328,7 @@ public class BoardManagementService {
 
         List<ColumnEntity> columns = columnRepository.findAllByBoard_IdOrderByPositionAscIdAsc(boardId);
         int oldIndex = indexOf(columns, columnId);
+        int oldPosition = columns.get(oldIndex).getPosition();
         if (targetPosition < 0 || targetPosition >= columns.size()) {
             throw BoardApiException.badRequest("INVALID_POSITION",
                     "position must be between 0 and " + (columns.size() - 1) + ".");
@@ -324,6 +348,11 @@ public class BoardManagementService {
         if (changed) {
             auditService.record(actorId, "REORDER", "COLUMN", columnId, board.getWorkspaceId(),
                     List.of("position"));
+            int newPosition = moving.getPosition();
+            realtimePublisher.publish(boardId, BoardMutationType.COLUMN_REORDERED,
+                    new BoardMutationData(null, columnId, null, null, oldPosition, newPosition,
+                            reordered.stream().map(ColumnEntity::getId).toList(), List.of("position"),
+                            List.of(BoardRefreshTarget.COLUMNS)), actorId);
         }
         return reordered.stream().map(BoardManagementService::toResponse).toList();
     }
