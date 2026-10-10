@@ -142,6 +142,11 @@ public class JwtTokenProvider {
         return claims.get("type", String.class);
     }
 
+    /** Returns the configured issuer without exposing the signing key. */
+    public String getIssuer() {
+        return jwtProperties.getIssuer();
+    }
+
     private SecretKey getSigningKey() {
         String secret = jwtProperties.getSecret();
         if (secret == null || secret.trim().isEmpty()) {
