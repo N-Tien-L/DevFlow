@@ -33,6 +33,7 @@ public class TaskRequestSizeLimitFilter extends OncePerRequestFilter {
     private static final Pattern TASK_CREATE = Pattern.compile("^/api/v1/columns/[^/]+/tasks$");
     private static final Pattern TASK_ITEM = Pattern.compile("^/api/v1/tasks/[^/]+$");
     private static final Pattern TASK_MOVE = Pattern.compile("^/api/v1/tasks/[^/]+/move$");
+    private static final Pattern TASK_COMMENT = Pattern.compile("^/api/v1/tasks/[^/]+/comments$");
 
     private final ObjectMapper objectMapper;
     private final int maxBytes;
@@ -55,13 +56,15 @@ public class TaskRequestSizeLimitFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        if (request.getContentLengthLong() > maxBytes) {
+        boolean commentRequest = isTaskCommentMutation(request);
+        int bodyLimit = commentRequest ? Math.min(maxBytes, 32_768) : maxBytes;
+        if (request.getContentLengthLong() > bodyLimit) {
             writeTooLarge(request, response);
             return;
         }
 
-        byte[] body = request.getInputStream().readNBytes(maxBytes + 1);
-        if (body.length > maxBytes) {
+        byte[] body = request.getInputStream().readNBytes(bodyLimit + 1);
+        if (body.length > bodyLimit) {
             writeTooLarge(request, response);
             return;
         }
@@ -80,7 +83,20 @@ public class TaskRequestSizeLimitFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         return ("POST".equals(method) && TASK_CREATE.matcher(path).matches())
                 || (("PUT".equals(method) || "DELETE".equals(method)) && TASK_ITEM.matcher(path).matches())
-                || ("PATCH".equals(method) && TASK_MOVE.matcher(path).matches());
+                || ("PATCH".equals(method) && TASK_MOVE.matcher(path).matches())
+                || ("POST".equals(method) && TASK_COMMENT.matcher(path).matches());
+    }
+
+    private static boolean isTaskCommentMutation(HttpServletRequest request) {
+        String path = request.getServletPath();
+        if (path == null || path.isBlank()) {
+            path = request.getRequestURI();
+            String contextPath = request.getContextPath();
+            if (contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
+                path = path.substring(contextPath.length());
+            }
+        }
+        return "POST".equals(request.getMethod()) && TASK_COMMENT.matcher(path).matches();
     }
 
     private void writeTooLarge(HttpServletRequest request, HttpServletResponse response) throws IOException {

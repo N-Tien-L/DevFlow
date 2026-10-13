@@ -35,6 +35,16 @@ public final class BoardApiException extends RuntimeException {
         return new BoardApiException(HttpStatus.BAD_REQUEST, code, detail, null);
     }
 
+    public static BoardApiException preconditionRequired() {
+        return new BoardApiException(HttpStatus.PRECONDITION_REQUIRED, "PRECONDITION_REQUIRED",
+                "Fetch the latest task before saving changes.", null);
+    }
+
+    public static BoardApiException preconditionFailed() {
+        return new BoardApiException(HttpStatus.PRECONDITION_FAILED, "TASK_CHANGED",
+                "This task changed after you opened it. Reload it before saving.", null);
+    }
+
     public static BoardApiException conflict(String code, String detail) {
         return new BoardApiException(HttpStatus.CONFLICT, code, detail, null);
     }

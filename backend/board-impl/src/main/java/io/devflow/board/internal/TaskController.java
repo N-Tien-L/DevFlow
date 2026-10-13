@@ -6,9 +6,14 @@ import io.devflow.board.api.TaskMoveResponse;
 import io.devflow.board.api.TaskPageResponse;
 import io.devflow.board.api.TaskResponse;
 import io.devflow.board.api.UpdateTaskRequest;
+import io.devflow.board.api.CreateTaskCommentRequest;
+import io.devflow.board.api.TaskCommentPageResponse;
+import io.devflow.board.api.TaskCommentResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,12 +33,17 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class TaskController {
 
+    private static final Pattern TASK_ETAG = Pattern.compile("^\\\"task-([0-9a-fA-F-]{36})-v(\\d+)\\\"$");
+
     private final TaskManagementService taskService;
     private final TaskMutationRequestGuard mutationGuard;
+    private final TaskCommentService commentService;
 
-    public TaskController(TaskManagementService taskService, TaskMutationRequestGuard mutationGuard) {
+    public TaskController(TaskManagementService taskService, TaskMutationRequestGuard mutationGuard,
+            TaskCommentService commentService) {
         this.taskService = taskService;
         this.mutationGuard = mutationGuard;
+        this.commentService = commentService;
     }
 
     @PostMapping("/columns/{columnId}/tasks")
@@ -56,18 +66,39 @@ public class TaskController {
     }
 
     @GetMapping("/tasks/{taskId}")
-    public TaskResponse getTask(@PathVariable("taskId") UUID taskId) {
-        return taskService.getTask(taskId);
+    public ResponseEntity<TaskResponse> getTask(@PathVariable("taskId") UUID taskId) {
+        TaskResponse task = taskService.getTask(taskId);
+        return ResponseEntity.ok().eTag(taskEtag(task)).body(task);
     }
 
     @PutMapping("/tasks/{taskId}")
-    public TaskResponse replaceTask(
+    public ResponseEntity<TaskResponse> replaceTask(
             @PathVariable("taskId") UUID taskId,
             @Valid @RequestBody UpdateTaskRequest request,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
+            HttpServletRequest servletRequest) {
+        long expectedVersion = parseVersion(taskId, ifMatch);
+        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+        TaskResponse task = taskService.replaceTask(taskId, request, expectedVersion);
+        return ResponseEntity.ok().eTag(taskEtag(task)).body(task);
+    }
+
+    @GetMapping("/tasks/{taskId}/comments")
+    public TaskCommentPageResponse listComments(@PathVariable UUID taskId,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return commentService.list(taskId, page, size);
+    }
+
+    @PostMapping("/tasks/{taskId}/comments")
+    public ResponseEntity<TaskCommentResponse> createComment(@PathVariable UUID taskId,
+            @Valid @RequestBody CreateTaskCommentRequest request,
             @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
             HttpServletRequest servletRequest) {
         mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
-        return taskService.replaceTask(taskId, request);
+        TaskCommentResponse comment = commentService.create(taskId, request);
+        return ResponseEntity.created(URI.create("/api/v1/tasks/" + taskId + "/comments/" + comment.id()))
+                .body(comment);
     }
 
     @DeleteMapping("/tasks/{taskId}")
@@ -88,5 +119,21 @@ public class TaskController {
             HttpServletRequest servletRequest) {
         mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
         return taskService.moveTask(taskId, request);
+    }
+
+    private static long parseVersion(UUID taskId, String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) throw BoardApiException.preconditionRequired();
+        Matcher matcher = TASK_ETAG.matcher(ifMatch);
+        if (!matcher.matches() || !taskId.toString().equalsIgnoreCase(matcher.group(1)))
+            throw BoardApiException.preconditionFailed();
+        try {
+            return Long.parseLong(matcher.group(2));
+        } catch (NumberFormatException exception) {
+            throw BoardApiException.preconditionFailed();
+        }
+    }
+
+    private static String taskEtag(TaskResponse task) {
+        return "task-" + task.id() + "-v" + task.version();
     }
 }

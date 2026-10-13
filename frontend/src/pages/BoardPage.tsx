@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/react';
@@ -8,6 +8,7 @@ import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColu
 import { getBoard, listBoards, listColumns, listTasks, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { useTurnstileToken } from '../hooks/useTurnstileToken';
+const TaskDetailModal = lazy(() => import('../components/board/TaskDetailModal').then((module) => ({ default: module.TaskDetailModal })));
 import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskListItem, type TaskPageResponse, type TaskPriority, type WorkspaceSummary } from '../types/board';
 
 const MAX_PAGES_PER_COLUMN = 50;
@@ -95,6 +96,7 @@ export default function BoardPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [activeDragName, setActiveDragName] = useState('');
   const [loadingBoards, setLoadingBoards] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const generationRef = useRef(0);
 
   const displayColumns = useMemo(() => previewColumns ?? board?.columns ?? [], [board?.columns, previewColumns]);
@@ -169,6 +171,7 @@ export default function BoardPage() {
 
   useEffect(() => {
     if (boardId) {
+      setSelectedTaskId(null);
       void loadBoard(boardId);
       return () => { generationRef.current += 1; };
     }
@@ -392,6 +395,31 @@ export default function BoardPage() {
 
   const clearFilters = () => { setFilterText(''); setAssigneeFilter(''); setPriorityFilter(''); };
 
+  const handleTaskSaved = (updated: import('../types/board').TaskDetail) => {
+    const current = boardRef.current;
+    if (!current) return;
+    const location = locateTask(current.columns, updated.id);
+    if (location && location.columnId !== updated.columnId) {
+      void loadBoard(current.id);
+      return;
+    }
+    setBoard((value) => value ? {
+      ...value,
+      columns: value.columns.map((column) => ({
+        ...column,
+        tasks: column.tasks.map((task) => task.id === updated.id ? {
+          ...task,
+          title: updated.title,
+          priority: updated.priority,
+          assigneeId: updated.assigneeId,
+          dueDate: updated.dueDate,
+          statusCategory: updated.statusCategory,
+          updatedAt: updated.updatedAt,
+        } : task),
+      })),
+    } : value);
+  };
+
   return (
     <main className="min-h-screen bg-[#f6f7fb] text-slate-900">
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
@@ -483,13 +511,16 @@ export default function BoardPage() {
                 canReorder={!board.archived && !pending && !syncBlocked}
                 canMoveCards={!board.archived && !pending && !syncBlocked && !filtersActive && turnstile.enabled && turnstile.ready && column.complete}
                 onMoveTask={moveTaskFromMenu}
+                onOpenTask={setSelectedTaskId}
                 onRetry={() => void loadColumn(column.id, generationRef.current)}
                 onLoadMore={() => void loadColumn(column.id, generationRef.current, false)}
               />)}
             </div>
           </DragDropProvider>
-          <div ref={turnstile.hostRef} className="fixed bottom-4 left-4 z-40" />
           <p className="sr-only" aria-live="assertive">{activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}</p>
+          {selectedTaskId && <Suspense fallback={<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="status">Đang mở chi tiết task…</div>}><TaskDetailModal key={`${board.id}:${selectedTaskId}`} taskId={selectedTaskId}
+            canEdit={!board.archived && !pending && !syncBlocked && turnstile.enabled}
+            onClose={() => setSelectedTaskId(null)} onSaved={handleTaskSaved} /></Suspense>}
         </>}
       </div>
     </main>
@@ -498,6 +529,7 @@ export default function BoardPage() {
 
 function BoardColumnView({
   column, visibleTasks, availableColumns, index, activeFilters, canReorder, canMoveCards, onMoveTask, onRetry, onLoadMore,
+  onOpenTask,
 }: {
   column: BoardColumn;
   visibleTasks: TaskListItem[];
@@ -507,6 +539,7 @@ function BoardColumnView({
   canReorder: boolean;
   canMoveCards: boolean;
   onMoveTask(taskId: string, destinationColumnId: string): void;
+  onOpenTask(taskId: string): void;
   onRetry(): void;
   onLoadMore(): void;
 }) {
@@ -539,7 +572,7 @@ function BoardColumnView({
         {column.loading && column.tasks.length === 0 && <div className="space-y-3" aria-label="Đang tải công việc"><div className="h-24 animate-pulse rounded-xl bg-white" /><div className="h-24 animate-pulse rounded-xl bg-white" /></div>}
         {column.error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700" role="alert"><p>{column.error}</p><button className="mt-2 font-semibold underline" onClick={onRetry}>Thử tải lại</button></div>}
         {!column.loading && !column.error && visibleTasks.length === 0 && <EmptyTaskTarget column={column} canMoveCards={canMoveCards} activeFilters={activeFilters} />}
-        {visibleTasks.map((task, taskIndex) => <TaskCard key={task.id} task={task} column={column} columns={availableColumns} index={taskIndex} disabled={!canMoveCards} onMoveTask={onMoveTask} />)}
+        {visibleTasks.map((task, taskIndex) => <TaskCard key={task.id} task={task} column={column} columns={availableColumns} index={taskIndex} disabled={!canMoveCards} onMoveTask={onMoveTask} onOpenTask={onOpenTask} />)}
         {column.complete && column.totalElements > column.tasks.length && <button className="w-full rounded-xl border border-dashed border-slate-300 bg-white/60 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-white" onClick={onLoadMore}>Tải thêm công việc</button>}
         {!column.complete && !column.loading && !column.error && column.totalPages > MAX_PAGES_PER_COLUMN && <button className="w-full rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-3 text-xs font-semibold text-amber-800" onClick={onLoadMore}>Tải tiếp {Math.max(0, column.totalElements - column.tasks.length)} công việc</button>}
       </div>
@@ -560,7 +593,7 @@ function EmptyTaskTarget({ column, canMoveCards, activeFilters }: { column: Boar
   </div>;
 }
 
-function TaskCard({ task, column, columns, index, disabled, onMoveTask }: { task: TaskListItem; column: BoardColumn; columns: BoardColumn[]; index: number; disabled: boolean; onMoveTask(taskId: string, destinationColumnId: string): void }) {
+function TaskCard({ task, column, columns, index, disabled, onMoveTask, onOpenTask }: { task: TaskListItem; column: BoardColumn; columns: BoardColumn[]; index: number; disabled: boolean; onMoveTask(taskId: string, destinationColumnId: string): void; onOpenTask(taskId: string): void }) {
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const { ref, handleRef, isDragging, isDropTarget } = useSortable({
     id: `task:${task.id}`,
@@ -582,7 +615,7 @@ function TaskCard({ task, column, columns, index, disabled, onMoveTask }: { task
   return (
       <article id={`task-drop-${task.id}`} ref={ref} className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isDragging ? 'opacity-35' : ''} ${isDropTarget ? 'border-indigo-400 ring-2 ring-indigo-100' : ''}`}>
       <div className="mb-3 flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-800">{task.title}</h3>
+        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-800"><button type="button" onClick={() => onOpenTask(task.id)} className="text-left hover:text-indigo-700 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Mở chi tiết ${task.title}`}>{task.title}</button></h3>
         <button ref={handleRef} type="button" disabled={disabled} className="grid size-7 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default" aria-label={`Kéo để di chuyển ${task.title}`} title={disabled ? 'Xóa bộ lọc và tải đủ cột để sắp xếp' : 'Kéo để di chuyển'}>⠿</button>
       </div>
       <div className="flex flex-wrap items-center gap-2">

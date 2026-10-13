@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +44,10 @@ public class TaskEntity extends BaseEntity {
 
     @Column(name = "due_date")
     private Instant dueDate;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @OneToMany(mappedBy = "task", cascade = {CascadeType.PERSIST, CascadeType.MERGE, CascadeType.REMOVE})
     private List<CommentEntity> comments = new ArrayList<>();
@@ -120,6 +125,10 @@ public class TaskEntity extends BaseEntity {
 
     public Instant getDueDate() {
         return dueDate;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public void setDueDate(Instant dueDate) {

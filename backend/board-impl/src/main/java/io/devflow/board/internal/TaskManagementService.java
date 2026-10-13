@@ -160,7 +160,7 @@ public class TaskManagementService {
     }
 
     @Transactional
-    public TaskResponse replaceTask(UUID taskId, UpdateTaskRequest request) {
+    public TaskResponse replaceTask(UUID taskId, UpdateTaskRequest request, long expectedVersion) {
         UUID actorId = actorProvider.requireUserId();
         UUID boardId = taskRepository.findBoardIdByTaskId(taskId).orElseThrow(BoardApiException::notFound);
         BoardEntity board = lockAccessibleBoard(boardId, actorId);
@@ -168,6 +168,9 @@ public class TaskManagementService {
         TaskEntity task = taskRepository.findTaskWithBoard(taskId).orElseThrow(BoardApiException::notFound);
         if (!task.getColumn().getBoard().getId().equals(boardId)) {
             throw BoardApiException.notFound();
+        }
+        if (task.getVersion() != expectedVersion) {
+            throw BoardApiException.preconditionFailed();
         }
         if (request == null || request.title() == null || request.priority() == null) {
             throw BoardApiException.badRequest("REQUIRED_FIELDS_MISSING", "title and priority are required.");
@@ -386,11 +389,12 @@ public class TaskManagementService {
         if (value == null) {
             return null;
         }
-        String cleaned = Jsoup.clean(value, Safelist.none());
-        if (cleaned.codePointCount(0, cleaned.length()) > MAX_DESCRIPTION_CODE_POINTS) {
+        if (value.codePointCount(0, value.length()) > MAX_DESCRIPTION_CODE_POINTS) {
             throw BoardApiException.badRequest("DESCRIPTION_TOO_LONG", "description exceeds 10000 characters.");
         }
-        return cleaned;
+        // Markdown is stored as source text. The frontend renderer disables raw HTML and
+        // applies a safe URL policy, so stripping HTML-looking text here would corrupt code.
+        return value;
     }
 
     private static Instant normalizeDueDate(Instant dueDate) {
@@ -424,7 +428,7 @@ public class TaskManagementService {
                 task.getId(), column.getId(), board.getId(), board.getWorkspaceId(), task.getTitle(),
                 task.getDescription(), toApiPriority(task.getPriority()), task.getAssigneeId(), task.getDueDate(),
                 task.getPosition(), ColumnStatusCategory.valueOf(column.getStatusCategory().name()),
-                task.getCreatedAt(), task.getUpdatedAt());
+                task.getCreatedAt(), task.getUpdatedAt(), task.getVersion());
     }
 
     private static TaskListItem toListItem(TaskEntity task) {

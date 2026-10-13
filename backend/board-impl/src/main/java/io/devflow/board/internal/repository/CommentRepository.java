@@ -4,6 +4,8 @@ import io.devflow.board.internal.entity.CommentEntity;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -12,6 +14,8 @@ import org.springframework.stereotype.Repository;
 public interface CommentRepository extends JpaRepository<CommentEntity, UUID> {
 
     List<CommentEntity> findByTask_IdOrderByCreatedAtAscIdAsc(UUID taskId);
+
+    Page<CommentEntity> findAllByTask_Id(UUID taskId, Pageable pageable);
 
     Optional<CommentEntity> findByIdAndTask_Id(UUID id, UUID taskId);
 }
