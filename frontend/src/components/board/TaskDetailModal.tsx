@@ -52,15 +52,19 @@ function sameSavedValues(task: TaskDetail, draft: Draft) {
 interface TaskDetailModalProps {
   taskId: string;
   canEdit: boolean;
+  detailRefreshVersion?: number;
+  commentsRefreshVersion?: number;
+  remoteDeleted?: boolean;
   onClose(): void;
   onSaved(task: TaskDetail): void;
 }
 
-export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetailModalProps) {
+export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, commentsRefreshVersion = 0, remoteDeleted = false, onClose, onSaved }: TaskDetailModalProps) {
   const { request } = useAuth();
   const turnstile = useTurnstileToken();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const commentsListRef = useRef<HTMLUListElement>(null);
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [remoteTask, setRemoteTask] = useState<TaskDetail | null>(null);
@@ -85,28 +89,59 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
   const [commentDraft, setCommentDraft] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
+  const [remoteUnavailable, setRemoteUnavailable] = useState(false);
+  const [localDetailRefreshVersion, setLocalDetailRefreshVersion] = useState(0);
+  const [localCommentsRefreshVersion, setLocalCommentsRefreshVersion] = useState(0);
+  const taskRef = useRef(task);
+  const draftRef = useRef(draft);
+  const commentsRef = useRef(comments);
+  const commentPageRef = useRef(commentPage);
+  const savingRef = useRef(false);
+  const sendingCommentRef = useRef(false);
+  const pendingDetailRefreshRef = useRef(false);
+  const pendingCommentsRefreshRef = useRef(false);
+  const detailRequestSequenceRef = useRef(0);
+  const commentsRequestSequenceRef = useRef(0);
+
+  taskRef.current = task;
+  draftRef.current = draft;
+  commentsRef.current = comments;
+  commentPageRef.current = commentPage;
 
   const dirty = Boolean(task && draft && !sameDraft(draft, draftFrom(task)));
   const commentDirty = Boolean(commentDraft.trim());
   const hasUnsaved = dirty || commentDirty;
-  const isArchived = !canEdit;
+  const isArchived = !canEdit || remoteDeleted || remoteUnavailable;
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
+  const detailRefreshKey = detailRefreshVersion + localDetailRefreshVersion;
+  const commentsRefreshKey = commentsRefreshVersion + localCommentsRefreshVersion;
 
   const loadTask = useCallback(async (signal?: AbortSignal) => {
+    const sequence = ++detailRequestSequenceRef.current;
     setLoading(true);
     setLoadingError(null);
     try {
       const result = await getTaskDetail(request, taskId, signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || sequence !== detailRequestSequenceRef.current) return;
       setTask(result);
       setDraft(draftFrom(result));
       setRemoteTask(null);
+      setRemoteUnavailable(false);
     } catch (reason) {
-      if (!signal?.aborted) setLoadingError(errorText(reason));
+      if (!signal?.aborted && sequence === detailRequestSequenceRef.current) {
+        setLoadingError(errorText(reason));
+        if (reason instanceof ApiError && (reason.status === 403 || reason.status === 404)) setRemoteUnavailable(true);
+      }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && sequence === detailRequestSequenceRef.current) setLoading(false);
     }
   }, [request, taskId]);
+
+  useEffect(() => {
+    if (!remoteDeleted) return;
+    setRemoteUnavailable(true);
+    setError('Task đã bị xóa hoặc bạn không còn quyền truy cập. Bản nháp đang mở sẽ không được gửi.');
+  }, [remoteDeleted]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -140,17 +175,63 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    if (remoteDeleted || remoteUnavailable) {
+      commentsRequestSequenceRef.current += 1;
+      setCommentsLoading(false);
+      return () => { active = false; controller.abort(); };
+    }
+    const sequence = ++commentsRequestSequenceRef.current;
     setCommentsLoading(true);
     setCommentsError(null);
-    void listTaskComments(request, taskId, 0).then((result: TaskCommentPage) => {
-      if (!active) return;
+    void listTaskComments(request, taskId, 0, controller.signal).then((result: TaskCommentPage) => {
+      if (!active || sequence !== commentsRequestSequenceRef.current) return;
       setComments(result.items);
       setCommentPage(0);
       setCommentTotalPages(result.totalPages);
-    }).catch((reason: unknown) => { if (active) setCommentsError(errorText(reason)); })
-      .finally(() => { if (active) setCommentsLoading(false); });
-    return () => { active = false; };
-  }, [request, taskId]);
+    }).catch((reason: unknown) => { if (active && sequence === commentsRequestSequenceRef.current) setCommentsError(errorText(reason)); })
+      .finally(() => { if (active && sequence === commentsRequestSequenceRef.current) setCommentsLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [remoteDeleted, remoteUnavailable, request, taskId]);
+
+  useEffect(() => {
+    if (detailRefreshKey === 0 || remoteDeleted || remoteUnavailable) return;
+    const controller = new AbortController();
+    const base = taskRef.current;
+    if (!base || base.id !== taskId) return undefined;
+    const sequence = ++detailRequestSequenceRef.current;
+    void getTaskDetail(request, taskId, controller.signal).then((latest) => {
+      if (controller.signal.aborted || sequence !== detailRequestSequenceRef.current || latest.id !== taskId) return;
+      const currentTask = taskRef.current;
+      const currentDraft = draftRef.current;
+      if (!currentTask || currentTask.id !== latest.id || !currentDraft) return;
+      if (savingRef.current) {
+        pendingDetailRefreshRef.current = true;
+        return;
+      }
+      if (latest.version < currentTask.version) return;
+      if (!sameDraft(currentDraft, draftFrom(currentTask))) {
+        if (latest.version !== currentTask.version) {
+          setRemoteTask(latest);
+          setError('Task đã được cập nhật ở nơi khác. Bản nháp của bạn vẫn được giữ.');
+        }
+        return;
+      }
+      setTask(latest);
+      setDraft(draftFrom(latest));
+      setRemoteTask(null);
+      setRemoteUnavailable(false);
+    }).catch((reason: unknown) => {
+      if (controller.signal.aborted || sequence !== detailRequestSequenceRef.current) return;
+      if (reason instanceof ApiError && (reason.status === 403 || reason.status === 404)) {
+        setRemoteUnavailable(true);
+        setError('Task không còn tồn tại hoặc bạn không có quyền xem. Bản nháp đang mở sẽ không được gửi.');
+      } else {
+        setNotice('Không tải được phiên bản task mới. Nội dung đang sửa được giữ.');
+      }
+    });
+    return () => controller.abort();
+  }, [detailRefreshKey, remoteDeleted, remoteUnavailable, request, task?.id, taskId]);
 
   useEffect(() => {
     if (!hasUnsaved) return;
@@ -180,21 +261,23 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
   };
 
   const loadMoreComments = async () => {
-    if (commentsLoading || commentPage + 1 >= commentTotalPages) return;
+    if (commentsLoading || remoteDeleted || remoteUnavailable || commentPage + 1 >= commentTotalPages) return;
+    const sequence = ++commentsRequestSequenceRef.current;
     setCommentsLoading(true);
     try {
       const nextPage = commentPage + 1;
       const result = await listTaskComments(request, taskId, nextPage);
+      if (sequence !== commentsRequestSequenceRef.current) return;
       setComments((current) => [...current, ...result.items.filter((item) => !current.some((entry) => entry.id === item.id))]);
       setCommentPage(nextPage);
       setCommentTotalPages(result.totalPages);
-    } catch (reason) { setCommentsError(errorText(reason)); }
-    finally { setCommentsLoading(false); }
+    } catch (reason) { if (sequence === commentsRequestSequenceRef.current) setCommentsError(errorText(reason)); }
+    finally { if (sequence === commentsRequestSequenceRef.current) setCommentsLoading(false); }
   };
 
   const saveTask = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!task || !draft || !dirty || saving || !canEdit) return;
+    if (!task || !draft || !dirty || saving || !canEdit || remoteDeleted || remoteUnavailable) return;
     const title = draft.title.trim();
     if (!title || [...title].length > 255 || [...draft.description].length > 10_000) {
       setError('Tiêu đề phải có 1–255 ký tự; mô tả tối đa 10.000 ký tự.');
@@ -211,6 +294,7 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
       if (roundTrip !== draft.dueLocal) { setError('Thời gian này không hợp lệ trong múi giờ hiện tại.'); return; }
       dueDate = parsed.toISOString();
     }
+    savingRef.current = true;
     setSaving(true); setError(null); setNotice(null); setRemoteTask(null);
     try {
       const token = await turnstile.getToken();
@@ -234,7 +318,14 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
           }
         } catch { setError('Chưa thể xác nhận kết quả lưu. Bản nháp được giữ; tải lại dữ liệu trước khi thử lại.'); }
       }
-    } finally { setSaving(false); }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      if (pendingDetailRefreshRef.current) {
+        pendingDetailRefreshRef.current = false;
+        setLocalDetailRefreshVersion((version) => version + 1);
+      }
+    }
   };
 
   const mergeRemote = () => {
@@ -254,27 +345,66 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
 
   const sendComment = async () => {
     const content = commentDraft.trim();
-    if (!content || [...content].length > 5_000 || sendingComment || !canEdit) return;
+    if (!content || [...content].length > 5_000 || sendingComment || !canEdit || remoteDeleted || remoteUnavailable) return;
+    sendingCommentRef.current = true;
     setSendingComment(true); setCommentsError(null); setCommentNotice(null);
     try {
       const token = await turnstile.getToken();
       const saved = await createTaskComment(request, taskId, content, token);
-      setComments((current) => [...current.filter((comment) => comment.id !== saved.id), saved].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
+      if (!remoteDeleted && !remoteUnavailable) setComments((current) => [...current.filter((comment) => comment.id !== saved.id), saved].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
       setCommentDraft(''); setCommentNotice('Đã gửi bình luận.');
     } catch (reason) {
       setCommentsError(errorText(reason));
       if (reason instanceof ApiError && reason.uncertain) setCommentNotice('Kết quả gửi chưa xác định. Tải lại bình luận trước khi gửi tiếp.');
-    } finally { setSendingComment(false); }
+    } finally {
+      sendingCommentRef.current = false;
+      setSendingComment(false);
+      if (pendingCommentsRefreshRef.current) {
+        pendingCommentsRefreshRef.current = false;
+        setLocalCommentsRefreshVersion((version) => version + 1);
+      }
+      if (pendingDetailRefreshRef.current) {
+        pendingDetailRefreshRef.current = false;
+        setLocalDetailRefreshVersion((version) => version + 1);
+      }
+    }
   };
 
-  const refreshComments = async () => {
+  const refreshComments = useCallback(async (signal?: AbortSignal) => {
+    if (remoteDeleted || remoteUnavailable) return;
+    if (sendingCommentRef.current) {
+      pendingCommentsRefreshRef.current = true;
+      return;
+    }
+    const sequence = ++commentsRequestSequenceRef.current;
+    const pageCount = Math.max(1, commentPageRef.current + 1);
     setCommentsLoading(true); setCommentsError(null);
     try {
-      const result = await listTaskComments(request, taskId, 0);
-      setComments(result.items); setCommentPage(0); setCommentTotalPages(result.totalPages); setCommentNotice(null);
-    } catch (reason) { setCommentsError(errorText(reason)); }
-    finally { setCommentsLoading(false); }
-  };
+      const results = await Promise.all(Array.from({ length: pageCount }, (_, page) => listTaskComments(request, taskId, page, signal)));
+      if (signal?.aborted || sequence !== commentsRequestSequenceRef.current) return;
+      const latestPages = results.flatMap((result) => result.items);
+      const merged = [...new Map([...commentsRef.current, ...latestPages].map((comment) => [comment.id, comment])).values()]
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const scrollTop = commentsListRef.current?.scrollTop ?? 0;
+      setComments(merged);
+      setCommentPage(Math.min(pageCount - 1, Math.max(0, results[0]?.totalPages ?? 1) - 1));
+      setCommentTotalPages(results[0]?.totalPages ?? 0);
+      setCommentNotice(null);
+      requestAnimationFrame(() => { if (commentsListRef.current) commentsListRef.current.scrollTop = scrollTop; });
+    } catch (reason) { if (!signal?.aborted && sequence === commentsRequestSequenceRef.current) setCommentsError(errorText(reason)); }
+    finally { if (!signal?.aborted && sequence === commentsRequestSequenceRef.current) setCommentsLoading(false); }
+  }, [remoteDeleted, remoteUnavailable, request, taskId]);
+
+  useEffect(() => {
+    if (commentsRefreshKey === 0 || remoteDeleted || remoteUnavailable) return;
+    if (sendingCommentRef.current) {
+      pendingCommentsRefreshRef.current = true;
+      return undefined;
+    }
+    const controller = new AbortController();
+    void refreshComments(controller.signal);
+    return () => controller.abort();
+  }, [commentsRefreshKey, refreshComments, remoteDeleted, remoteUnavailable]);
 
   const handleCancel = (event: React.SyntheticEvent<HTMLDialogElement>) => { event.preventDefault(); requestClose(); };
 
@@ -304,7 +434,7 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
               {commentsLoading && comments.length === 0 && <p className="mt-3 text-sm text-slate-500" role="status">Đang tải bình luận…</p>}
               {commentsError && <p className="mt-3 text-sm text-rose-700" role="alert">{commentsError}</p>}
               {!commentsLoading && !commentsError && comments.length === 0 && <p className="mt-3 text-sm text-slate-500">Chưa có bình luận.</p>}
-              <ul className="mt-3 max-h-64 space-y-3 overflow-y-auto">{comments.map((comment: TaskComment) => <li key={comment.id} className="rounded-lg bg-slate-50 p-3"><div className="flex justify-between gap-3 text-xs"><span className="font-semibold text-slate-700">Thành viên {comment.authorId.slice(0, 8)}</span><time dateTime={comment.createdAt} className="shrink-0 text-slate-400">{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(comment.createdAt))}</time></div><p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.content}</p></li>)}</ul>
+              <ul ref={commentsListRef} className="mt-3 max-h-64 space-y-3 overflow-y-auto">{comments.map((comment: TaskComment) => <li key={comment.id} className="rounded-lg bg-slate-50 p-3"><div className="flex justify-between gap-3 text-xs"><span className="font-semibold text-slate-700">Thành viên {comment.authorId.slice(0, 8)}</span><time dateTime={comment.createdAt} className="shrink-0 text-slate-400">{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(comment.createdAt))}</time></div><p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.content}</p></li>)}</ul>
               {commentPage + 1 < commentTotalPages && <button type="button" disabled={commentsLoading} onClick={() => void loadMoreComments()} className="mt-3 text-xs font-semibold text-indigo-700 underline">Tải bình luận cũ hơn</button>}
               {commentNotice && <p className="mt-3 text-xs text-indigo-700" role="status">{commentNotice}</p>}
               <label className="mt-4 block"><span className="mb-1.5 block text-xs font-semibold">Viết bình luận</span><textarea ref={commentInputRef} rows={3} maxLength={5000} disabled={isArchived || sendingComment} value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} placeholder="Nhập nội dung…" className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100" /></label>
@@ -317,14 +447,14 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
             <label className="block"><span className="mb-1.5 block text-sm font-semibold">Người phụ trách</span><input type="search" disabled={isArchived || saving} value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="Tìm thành viên…" className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" /><select disabled={isArchived || saving || membersLoading && members.length === 0} value={draft.assigneeId} onChange={(event) => setDraft({ ...draft, assigneeId: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100"><option value="">Chưa giao</option>{draft.assigneeId && !members.some((member) => member.userId === draft.assigneeId) && <option value={draft.assigneeId}>Thành viên {draft.assigneeId.slice(0, 8)} (đang được giao)</option>}{members.map((member) => <option key={member.userId} value={member.userId}>{member.fullName || `Thành viên ${member.userId.slice(0, 8)}`}</option>)}</select>{membersLoading && <span className="mt-1 block text-xs text-slate-500" role="status">Đang tải thành viên…</span>}{membersError && <span className="mt-1 block text-xs text-rose-700" role="alert">{membersError}</span>}{memberPage + 1 < memberTotalPages && <button type="button" disabled={membersLoading} onClick={() => void loadMoreMembers()} className="mt-1 text-xs font-semibold text-indigo-700 underline">Tải thêm thành viên</button>}</label>
             <label className="block"><span className="mb-1.5 block text-sm font-semibold">Hạn hoàn thành</span><input type="datetime-local" disabled={isArchived || saving} value={draft.dueLocal} onChange={(event) => setDraft({ ...draft, dueLocal: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-100" /><span className="mt-1 block text-xs text-slate-500">Múi giờ: {timezone}</span></label>
             <dl className="space-y-2 border-t border-slate-200 pt-4 text-xs text-slate-500"><div className="flex justify-between gap-2"><dt>Trạng thái</dt><dd>{task.statusCategory}</dd></div><div className="flex justify-between gap-2"><dt>Tạo lúc</dt><dd>{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium' }).format(new Date(task.createdAt))}</dd></div><div className="flex justify-between gap-2"><dt>Cập nhật</dt><dd>{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.updatedAt))}</dd></div></dl>
-            {isArchived && <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Board đã lưu trữ. Bạn chỉ có thể xem task.</p>}
+            {isArchived && <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{remoteDeleted || remoteUnavailable ? 'Task không còn khả dụng. Bản nháp hiện có được giữ và không thể gửi.' : 'Board đang lưu trữ, đồng bộ hoặc mất kết nối. Bạn chỉ có thể xem task cho đến khi quyền sửa được xác nhận.'}</p>}
           </aside>
         </div>
 
         {error && <div className="mx-5 mb-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-800 sm:mx-7" role="alert">{error}{remoteTask && <div className="mt-2 flex flex-wrap items-center gap-3"><span>Phiên bản mới nhất đã sẵn sàng.</span><button type="button" onClick={mergeRemote} className="font-semibold underline">Nạp bản mới và giữ phần đang sửa</button></div>}</div>}
         {notice && <p className="mx-5 mb-3 text-sm text-emerald-700 sm:mx-7" role="status">{notice}</p>}
         {turnstile.error && <p className="mx-5 mb-3 text-sm text-rose-700 sm:mx-7" role="alert">{turnstile.error}</p>}
-        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:px-7"><span className="text-xs text-slate-500">{hasUnsaved ? 'Có nội dung chưa gửi' : 'Đã đồng bộ'}</span><div className="flex gap-2"><button type="button" onClick={requestClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Đóng</button><button disabled={isArchived || !dirty || saving || !turnstile.enabled || !turnstile.ready} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Đang lưu…' : 'Lưu thay đổi'}</button></div></footer>
+        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:px-7"><span className="text-xs text-slate-500">{hasUnsaved ? 'Có bản nháp chưa lưu' : isArchived ? 'Chỉ xem' : 'Đã lưu'}</span><div className="flex gap-2"><button type="button" onClick={requestClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Đóng</button><button disabled={isArchived || !dirty || saving || !turnstile.enabled || !turnstile.ready} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Đang lưu…' : 'Lưu thay đổi'}</button></div></footer>
       </form>}
     </div>
     <div ref={turnstile.hostRef} className="fixed bottom-3 left-3 z-[1000]" />

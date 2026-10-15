@@ -5,13 +5,15 @@ import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/react
 import { useSortable } from '@dnd-kit/react/sortable';
 import { useDroppable } from '@dnd-kit/react';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
-import { getBoard, listBoards, listColumns, listTasks, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
+import { getBoard, listBoards, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { useTurnstileToken } from '../hooks/useTurnstileToken';
+import { useBoardSync, type BoardConnectionStatus } from '../hooks/useBoardSync';
+import { emptyBoardSyncScopes, fetchBoardSnapshot, fetchEveryTaskPage, hasBoardSyncWork, mapWithConcurrency, MAX_PAGES_PER_COLUMN, mergeBoardSyncScopes, type BoardSyncScopes } from '../board/boardSyncCoordinator';
+import type { BoardMutationMessage } from '../realtime/boardMutation';
 const TaskDetailModal = lazy(() => import('../components/board/TaskDetailModal').then((module) => ({ default: module.TaskDetailModal })));
-import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskListItem, type TaskPageResponse, type TaskPriority, type WorkspaceSummary } from '../types/board';
+import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskListItem, type TaskPriority, type WorkspaceSummary } from '../types/board';
 
-const MAX_PAGES_PER_COLUMN = 50;
 const PRIORITIES: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
 const PRIORITY_LABEL: Record<TaskPriority, string> = { LOW: 'Thấp', MEDIUM: 'Trung bình', HIGH: 'Cao', URGENT: 'Khẩn cấp' };
 
@@ -45,39 +47,10 @@ function errorMessage(reason: unknown) {
   return 'Đã có lỗi xảy ra. Vui lòng thử lại.';
 }
 
-async function fetchEveryTaskPage(
-  request: <T>(path: string, init?: RequestInit) => Promise<T>,
-  columnId: string,
-  startPage = 0,
-): Promise<{ tasks: TaskListItem[]; page: TaskPageResponse; complete: boolean; nextPage: number }> {
-  let page = await listTasks(request, columnId, startPage);
-  const tasks = [...page.items];
-  let currentPage = startPage + 1;
-  while (currentPage < page.totalPages && currentPage < MAX_PAGES_PER_COLUMN) {
-    page = await listTasks(request, columnId, currentPage);
-    tasks.push(...page.items);
-    currentPage += 1;
-    if (page.items.length === 0) break;
-  }
-  const uniqueTasks = [...new Map(tasks.map((task) => [task.id, task])).values()]
-    .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id));
-  return { tasks: uniqueTasks, page, complete: currentPage >= page.totalPages || page.totalPages === 0, nextPage: currentPage };
-}
-
-async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const item = items[next++];
-      if (item !== undefined) await worker(item);
-    }
-  }));
-}
-
 export default function BoardPage() {
   const { boardId } = useParams();
   const navigate = useNavigate();
-  const { user, request, signOut } = useAuth();
+  const { user, ready: authReady, request, signOut, getValidAccessToken, sessionGeneration } = useAuth();
   const turnstile = useTurnstileToken();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
@@ -97,24 +70,57 @@ export default function BoardPage() {
   const [activeDragName, setActiveDragName] = useState('');
   const [loadingBoards, setLoadingBoards] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<BoardConnectionStatus>('idle');
+  const [taskDetailRefreshVersion, setTaskDetailRefreshVersion] = useState(0);
+  const [commentsRefreshVersion, setCommentsRefreshVersion] = useState(0);
+  const [selectedTaskDeleted, setSelectedTaskDeleted] = useState(false);
   const generationRef = useRef(0);
+  const connectionStatusRef = useRef<BoardConnectionStatus>('idle');
+  const syncBlockedRef = useRef(syncBlocked);
+  const activeDragRef = useRef(false);
+  const dragInvalidatedRef = useRef(false);
+  const connectionResyncTimerRef = useRef<number | undefined>(undefined);
+  const malformedResyncTimerRef = useRef<number | undefined>(undefined);
+  const periodicSyncTimerRef = useRef<number | undefined>(undefined);
+  const syncRetryTimerRef = useRef<number | undefined>(undefined);
+  const syncDebounceTimerRef = useRef<number | undefined>(undefined);
+  const retryAttemptRef = useRef(0);
+  const lastSyncBatchStartedAtRef = useRef(0);
+  const reconciliationRunningRef = useRef(false);
+  const reconciliationWorkerTokenRef = useRef(0);
+  const eventRevisionRef = useRef(0);
+  const seenEventIdsRef = useRef(new Map<string, number>());
+  const queuedSyncRef = useRef<BoardSyncScopes>(emptyBoardSyncScopes());
+  const debounceStartedAtRef = useRef(0);
+  const reconciliationControllerRef = useRef<AbortController | null>(null);
+  const initialLoadControllerRef = useRef<AbortController | null>(null);
+  const selectedTaskIdRef = useRef(selectedTaskId);
+  const columnLoadSequenceRef = useRef(new Map<string, number>());
+  const workspaceIdRef = useRef(workspaceId);
 
   const displayColumns = useMemo(() => previewColumns ?? board?.columns ?? [], [board?.columns, previewColumns]);
   const filtersActive = Boolean(filterText.trim() || assigneeFilter || priorityFilter);
   const allTasksComplete = Boolean(board?.columns.every((column) => column.complete));
   const allAssignees = useMemo(() => [...new Set((board?.columns ?? []).flatMap((column) => column.tasks.map((task) => task.assigneeId).filter((id): id is string => Boolean(id))))].sort(), [board]);
   boardRef.current = board;
+  syncBlockedRef.current = syncBlocked;
+  selectedTaskIdRef.current = selectedTaskId;
+  workspaceIdRef.current = workspaceId;
 
   const updateColumn = useCallback((columnId: string, update: (column: BoardColumn) => BoardColumn, generation = generationRef.current) => {
     if (generation !== generationRef.current) return;
     setBoard((current) => current ? { ...current, columns: current.columns.map((column) => column.id === columnId ? update(column) : column) } : current);
   }, []);
 
-  const loadColumn = useCallback(async (columnId: string, generation: number, replace = true): Promise<boolean> => {
+  const loadColumn = useCallback(async (columnId: string, generation: number, replace = true, signal?: AbortSignal): Promise<boolean> => {
+    if (!replace && syncBlockedRef.current) return false;
+    const sequence = (columnLoadSequenceRef.current.get(columnId) ?? 0) + 1;
+    columnLoadSequenceRef.current.set(columnId, sequence);
     updateColumn(columnId, (column) => ({ ...column, loading: true, error: null }), generation);
     try {
       const pageStart = replace ? 0 : (boardRef.current?.columns.find((column) => column.id === columnId)?.loadedPages ?? 0);
-      const result = await fetchEveryTaskPage(request, columnId, pageStart);
+      const result = await fetchEveryTaskPage(request, columnId, pageStart, signal);
+      if (signal?.aborted || generation !== generationRef.current || columnLoadSequenceRef.current.get(columnId) !== sequence) return false;
       updateColumn(columnId, (column) => ({
         ...column,
         tasks: replace ? result.tasks : [...new Map([...column.tasks, ...result.tasks].map((task) => [task.id, task])).values()].sort((left, right) => left.position - right.position),
@@ -125,35 +131,44 @@ export default function BoardPage() {
         loading: false,
         error: null,
       }), generation);
-      if (!result.complete) setNotice(`Cột chưa tải hết do giới hạn ${MAX_PAGES_PER_COLUMN} trang. Dùng nút tải thêm để tiếp tục.`);
+      if (!result.complete) setNotice(`Lượt tải cột dừng ở giới hạn ${MAX_PAGES_PER_COLUMN} trang. Dùng nút tải thêm để tiếp tục.`);
+      else if (connectionStatusRef.current === 'connected' && boardRef.current?.columns.every((column) => column.id === columnId || column.complete)) setNotice(null);
       return result.complete;
     } catch (reason) {
+      if (signal?.aborted || generation !== generationRef.current || columnLoadSequenceRef.current.get(columnId) !== sequence) return false;
       updateColumn(columnId, (column) => ({ ...column, loading: false, error: errorMessage(reason) }), generation);
       return false;
     }
   }, [request, updateColumn]);
 
   const loadBoard = useCallback(async (id: string) => {
+    initialLoadControllerRef.current?.abort();
+    reconciliationControllerRef.current?.abort();
+    columnLoadSequenceRef.current.clear();
+    const controller = new AbortController();
+    initialLoadControllerRef.current = controller;
     const generation = ++generationRef.current;
     setLoading(true);
     setError(null);
     setNotice(null);
-    setSyncBlocked(false);
+    setSyncBlocked(true);
+    syncBlockedRef.current = true;
     setBoard(null);
     try {
-      const response = await getBoard(request, id);
-      if (generation !== generationRef.current) return;
+      const response = await getBoard(request, id, controller.signal);
+      if (controller.signal.aborted || generation !== generationRef.current) return;
       const initial = toBoardState(response);
       setBoard(initial);
       setWorkspaceId(response.workspaceId);
       const columnIds = initial.columns.map((column) => column.id);
       await mapWithConcurrency(columnIds, 4, async (columnId) => {
-        await loadColumn(columnId, generation);
+        await loadColumn(columnId, generation, true, controller.signal);
       });
     } catch (reason) {
-      if (generation === generationRef.current) setError(errorMessage(reason));
+      if (!controller.signal.aborted && generation === generationRef.current) setError(errorMessage(reason));
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (!controller.signal.aborted && generation === generationRef.current) setLoading(false);
+      if (initialLoadControllerRef.current === controller) initialLoadControllerRef.current = null;
     }
   }, [loadColumn, request]);
 
@@ -172,13 +187,21 @@ export default function BoardPage() {
   useEffect(() => {
     if (boardId) {
       setSelectedTaskId(null);
+      setSelectedTaskDeleted(false);
       void loadBoard(boardId);
-      return () => { generationRef.current += 1; };
+      return () => {
+        reconciliationWorkerTokenRef.current += 1;
+        reconciliationRunningRef.current = false;
+        queuedSyncRef.current = emptyBoardSyncScopes();
+        generationRef.current += 1;
+        initialLoadControllerRef.current?.abort();
+        reconciliationControllerRef.current?.abort();
+      };
     }
     setBoard(null);
     setLoading(false);
     return undefined;
-  }, [boardId, loadBoard]);
+  }, [boardId, loadBoard, sessionGeneration]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -194,24 +217,309 @@ export default function BoardPage() {
     return () => { active = false; };
   }, [boardId, navigate, request, workspaceId]);
 
-  const refreshColumns = useCallback(async (columnIds: string[], generation: number) => {
-    const outcomes = await Promise.all([...new Set(columnIds)].map((columnId) => loadColumn(columnId, generation)));
-    if (outcomes.some((complete) => !complete)) throw new Error('Board reconciliation was incomplete.');
-  }, [loadColumn]);
+  const reconcileBoardSnapshot = useCallback(async (scopes: BoardSyncScopes): Promise<'current' | 'partial' | 'superseded'> => {
+    const id = boardId;
+    const generation = generationRef.current;
+    const eventRevision = eventRevisionRef.current;
+    if (!id) return 'partial';
 
-  const refreshBoardColumns = useCallback(async (generation: number) => {
-    const currentBoardId = boardRef.current?.id;
-    if (!currentBoardId) return;
-    const columns = await listColumns(request, currentBoardId);
-    if (generation !== generationRef.current) return;
-    setBoard((current) => current ? {
-      ...current,
-      columns: columns.sort((left, right) => left.position - right.position).map((column) => {
-        const existing = current.columns.find((item) => item.id === column.id);
-        return existing ? { ...existing, ...column } : { ...column, tasks: [], totalElements: 0, totalPages: 1, loadedPages: 0, complete: false, loading: false, error: null };
-      }),
-    } : current);
-  }, [request]);
+    initialLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    reconciliationControllerRef.current = controller;
+    try {
+      const loadedPagesByColumn = new Map<string, number>();
+      if (boardRef.current?.id === id) {
+        for (const column of boardRef.current.columns) loadedPagesByColumn.set(column.id, Math.max(1, column.loadedPages));
+      }
+      const snapshotResult = await fetchBoardSnapshot(request, id, scopes, controller.signal, loadedPagesByColumn);
+      const response = snapshotResult.board;
+      if (controller.signal.aborted || generation !== generationRef.current || id !== boardId) return 'superseded';
+
+      const columns = [...response.columns].sort((left, right) => left.position - right.position);
+      const current = boardRef.current;
+      for (const columnId of snapshotResult.requestedColumnIds) {
+        columnLoadSequenceRef.current.set(columnId, (columnLoadSequenceRef.current.get(columnId) ?? 0) + 1);
+      }
+
+      if (controller.signal.aborted || generation !== generationRef.current || id !== boardId) return 'superseded';
+      if (eventRevisionRef.current !== eventRevision) return 'superseded';
+
+      const nextColumns: BoardColumn[] = columns.map((column) => {
+        const snapshot = snapshotResult.snapshots.get(column.id);
+        const previous = current?.columns.find((item) => item.id === column.id);
+        if (snapshot) {
+          return {
+            ...column,
+            tasks: snapshot.tasks,
+            totalElements: snapshot.page.totalElements,
+            totalPages: snapshot.page.totalPages,
+            loadedPages: snapshot.nextPage,
+            complete: snapshot.complete,
+            loading: false,
+            error: null,
+          };
+        }
+        if (previous) return { ...previous, ...column };
+        return { ...column, tasks: [], totalElements: 0, totalPages: 1, loadedPages: 0, complete: false, loading: false, error: null };
+      });
+      setBoard({ ...response, columns: nextColumns });
+      setLoading(false);
+      setWorkspaceId(response.workspaceId);
+      setBoards((items) => items.map((item) => item.id === response.id ? { ...item, name: response.name, description: response.description, archived: response.archived, updatedAt: response.updatedAt } : item));
+      setSelectedTaskDeleted(false);
+      return nextColumns.every((column) => column.complete) ? 'current' : 'partial';
+    } finally {
+      if (reconciliationControllerRef.current === controller) reconciliationControllerRef.current = null;
+    }
+  }, [boardId, request]);
+
+  const scheduleBoardSync = useCallback((incoming: BoardSyncScopes) => {
+    if (!boardId) return;
+    mergeBoardSyncScopes(queuedSyncRef.current, incoming);
+    eventRevisionRef.current += 1;
+
+    const structural = incoming.full || incoming.refreshColumns.size > 0;
+    if (structural && activeDragRef.current) {
+      dragInvalidatedRef.current = true;
+      previewRef.current = null;
+      setPreviewColumns(null);
+    }
+    setSyncBlocked(true);
+    syncBlockedRef.current = true;
+    setNotice('Đang đồng bộ dữ liệu mới…');
+    if (connectionStatusRef.current !== 'connected') return;
+    if (syncRetryTimerRef.current !== undefined) {
+      setNotice('Đang chờ thời điểm thử đồng bộ tiếp theo…');
+      return;
+    }
+
+    const now = Date.now();
+    if (debounceStartedAtRef.current === 0) debounceStartedAtRef.current = now;
+    if (syncDebounceTimerRef.current !== undefined) window.clearTimeout(syncDebounceTimerRef.current);
+    const debounceWait = Math.min(75, Math.max(0, 250 - (now - debounceStartedAtRef.current)));
+    const throttleWait = Math.max(0, 250 - (now - lastSyncBatchStartedAtRef.current));
+    const wait = Math.max(debounceWait, throttleWait);
+    syncDebounceTimerRef.current = window.setTimeout(() => {
+      syncDebounceTimerRef.current = undefined;
+      debounceStartedAtRef.current = 0;
+      if (reconciliationRunningRef.current) return;
+      const workerToken = ++reconciliationWorkerTokenRef.current;
+      const workerGeneration = generationRef.current;
+      reconciliationRunningRef.current = true;
+
+      void (async () => {
+        let iterations = 0;
+        let failure: unknown;
+        let terminal = false;
+        let incompleteSnapshot = false;
+        while (iterations < 8) {
+          const scopes = queuedSyncRef.current;
+          if (!hasBoardSyncWork(scopes)) break;
+          queuedSyncRef.current = emptyBoardSyncScopes();
+          iterations += 1;
+          lastSyncBatchStartedAtRef.current = Date.now();
+          try {
+            if (scopes.refreshTaskDetail && selectedTaskIdRef.current) setTaskDetailRefreshVersion((version) => version + 1);
+            if (scopes.refreshComments && selectedTaskIdRef.current) setCommentsRefreshVersion((version) => version + 1);
+            const result = scopes.full || scopes.refreshColumns.size > 0
+              ? await reconcileBoardSnapshot(scopes)
+              : 'current';
+            if (workerToken !== reconciliationWorkerTokenRef.current || workerGeneration !== generationRef.current) break;
+            if (result === 'superseded') mergeBoardSyncScopes(queuedSyncRef.current, scopes);
+            else if (result === 'partial') {
+              incompleteSnapshot = true;
+            } else if (scopes.full || scopes.refreshColumns.size > 0) {
+              incompleteSnapshot = false;
+            }
+            failure = undefined;
+            break;
+          } catch (reason) {
+            if (workerToken !== reconciliationWorkerTokenRef.current || workerGeneration !== generationRef.current) break;
+            failure = reason;
+            setLoading(false);
+            if (reason instanceof ApiError && (reason.status === 403 || reason.status === 404)) {
+              setBoard(null);
+              setSelectedTaskId(null);
+              setNotice('Board không còn tồn tại hoặc bạn không có quyền truy cập.');
+              setSyncBlocked(true);
+              syncBlockedRef.current = true;
+              if (workspaceIdRef.current) void listBoards(request, workspaceIdRef.current).then((result) => setBoards(result.items)).catch(() => undefined);
+              terminal = true;
+              failure = undefined;
+              navigate('/boards', { replace: true });
+              break;
+            }
+            mergeBoardSyncScopes(queuedSyncRef.current, scopes);
+            break;
+          }
+        }
+        if (workerToken !== reconciliationWorkerTokenRef.current || workerGeneration !== generationRef.current) return;
+        reconciliationRunningRef.current = false;
+        if (terminal) return;
+        if (failure !== undefined) {
+          const attempt = retryAttemptRef.current++;
+          const retryAfter = failure instanceof ApiError ? failure.problem?.retryAfterSeconds : undefined;
+          const delay = retryAfter ? retryAfter * 1_000 : Math.min(30_000, 2_000 * 2 ** Math.min(attempt, 4));
+          setSyncBlocked(true);
+          syncBlockedRef.current = true;
+          setNotice(`${errorMessage(failure)} Đang thử đồng bộ lại.`);
+          if (syncRetryTimerRef.current !== undefined) window.clearTimeout(syncRetryTimerRef.current);
+          syncRetryTimerRef.current = window.setTimeout(() => {
+            syncRetryTimerRef.current = undefined;
+            scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+          }, delay);
+          return;
+        }
+        const remaining = queuedSyncRef.current;
+        if (hasBoardSyncWork(remaining)) {
+          scheduleBoardSync(emptyBoardSyncScopes());
+          return;
+        }
+        retryAttemptRef.current = 0;
+        if (connectionStatusRef.current === 'connected') {
+          setSyncBlocked(false);
+          syncBlockedRef.current = false;
+          const boardIncomplete = incompleteSnapshot || Boolean(boardRef.current?.columns.some((column) => !column.complete));
+          setNotice(boardIncomplete ? `Board chưa tải đủ task (mỗi lượt tối đa ${MAX_PAGES_PER_COLUMN} trang mỗi cột). Tải thêm để xem toàn bộ task; các cột chưa tải đủ không thể kéo thả.` : null);
+        }
+      })();
+    }, wait);
+  }, [boardId, navigate, reconcileBoardSnapshot, request]);
+
+  const handleBoardMutation = useCallback((message: BoardMutationMessage) => {
+    const now = Date.now();
+    const seen = seenEventIdsRef.current;
+    if (seen.has(message.eventId)) return;
+    seen.set(message.eventId, now);
+    for (const [eventId, timestamp] of seen) {
+      if (now - timestamp > 300_000) seen.delete(eventId);
+    }
+    while (seen.size > 1_000) {
+      const oldest = seen.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      seen.delete(oldest);
+    }
+
+    const refresh = new Set(message.data.refresh);
+    if (message.type === 'BOARD_DELETED') {
+      eventRevisionRef.current += 1;
+      queuedSyncRef.current = emptyBoardSyncScopes();
+      setBoard(null);
+      setSelectedTaskId(null);
+      setSelectedTaskDeleted(false);
+      setSyncBlocked(true);
+      syncBlockedRef.current = true;
+      setNotice('Board đã bị xóa.');
+      if (workspaceIdRef.current) void listBoards(request, workspaceIdRef.current).then((result) => setBoards(result.items)).catch(() => undefined);
+      navigate('/boards', { replace: true });
+      return;
+    }
+
+    if (message.type === 'CARD_DELETED' && message.data.taskId) {
+      const deletedTaskId = message.data.taskId;
+      if (deletedTaskId === selectedTaskId) setSelectedTaskDeleted(true);
+      setBoard((current) => current ? {
+        ...current,
+        columns: current.columns.map((column) => ({
+          ...column,
+          tasks: column.tasks.filter((task) => task.id !== deletedTaskId),
+          totalElements: column.tasks.some((task) => task.id === deletedTaskId) ? Math.max(0, column.totalElements - 1) : column.totalElements,
+        })),
+      } : current);
+    }
+
+    const scopes = emptyBoardSyncScopes();
+    scopes.full = refresh.has('BOARD') || refresh.has('COLUMNS') || message.type.startsWith('COLUMN_');
+    if (refresh.has('TASK_LISTS')) {
+      for (const columnId of message.data.affectedColumnIds) scopes.refreshColumns.add(columnId);
+      if (scopes.refreshColumns.size === 0) scopes.full = true;
+    }
+    const selectedTaskMatches = !message.data.taskId || message.data.taskId === selectedTaskId;
+    scopes.refreshTaskDetail = refresh.has('TASK_DETAIL') && selectedTaskMatches;
+    scopes.refreshComments = scopes.refreshTaskDetail && message.data.changedFields.includes('comments');
+    scheduleBoardSync(scopes);
+  }, [navigate, request, scheduleBoardSync, selectedTaskId]);
+
+  const handleConnectionStatus = useCallback((status: BoardConnectionStatus) => {
+    connectionStatusRef.current = status;
+    setConnectionStatus(status);
+    if (status !== 'connected') {
+      if (status === 'reconnecting' || status === 'offline') queuedSyncRef.current.full = true;
+      setSyncBlocked(true);
+      syncBlockedRef.current = true;
+      setNotice(status === 'offline' ? 'Mất kết nối mạng. Board đang ở trạng thái chỉ đọc.'
+        : status === 'error' ? 'Không thể kết nối đồng bộ board. Hãy thử kết nối lại.'
+          : 'Đang kết nối đồng bộ board…');
+    }
+  }, []);
+
+  const handleConnected = useCallback(() => {
+    scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+    if (connectionResyncTimerRef.current !== undefined) window.clearTimeout(connectionResyncTimerRef.current);
+    connectionResyncTimerRef.current = window.setTimeout(() => {
+      connectionResyncTimerRef.current = undefined;
+      scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+    }, 500);
+  }, [scheduleBoardSync]);
+
+  const handleMalformedBoardMessage = useCallback(() => {
+    if (malformedResyncTimerRef.current !== undefined) return;
+    scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+    malformedResyncTimerRef.current = window.setTimeout(() => {
+      malformedResyncTimerRef.current = undefined;
+    }, 2_000);
+  }, [scheduleBoardSync]);
+
+  const realtime = useBoardSync({
+    boardId,
+    enabled: authReady && Boolean(user),
+    sessionGeneration,
+    getValidAccessToken,
+    onMessage: handleBoardMutation,
+    onMalformedMessage: handleMalformedBoardMessage,
+    onConnected: handleConnected,
+    onStatus: handleConnectionStatus,
+  });
+
+  useEffect(() => {
+    if (!boardId) return undefined;
+    const seenEventIds = seenEventIdsRef.current;
+    const reconcileWhenVisible = () => {
+      if (document.visibilityState === 'visible') scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+    };
+    const scheduleNextPeriodic = () => {
+      periodicSyncTimerRef.current = window.setTimeout(() => {
+        periodicSyncTimerRef.current = undefined;
+        reconcileWhenVisible();
+        scheduleNextPeriodic();
+      }, 30_000 + Math.random() * 5_000);
+    };
+    document.addEventListener('visibilitychange', reconcileWhenVisible);
+    window.addEventListener('focus', reconcileWhenVisible);
+    window.addEventListener('pageshow', reconcileWhenVisible);
+    scheduleNextPeriodic();
+    return () => {
+      document.removeEventListener('visibilitychange', reconcileWhenVisible);
+      window.removeEventListener('focus', reconcileWhenVisible);
+      window.removeEventListener('pageshow', reconcileWhenVisible);
+      if (periodicSyncTimerRef.current !== undefined) window.clearTimeout(periodicSyncTimerRef.current);
+      if (connectionResyncTimerRef.current !== undefined) window.clearTimeout(connectionResyncTimerRef.current);
+      if (malformedResyncTimerRef.current !== undefined) window.clearTimeout(malformedResyncTimerRef.current);
+      if (syncRetryTimerRef.current !== undefined) window.clearTimeout(syncRetryTimerRef.current);
+      if (syncDebounceTimerRef.current !== undefined) window.clearTimeout(syncDebounceTimerRef.current);
+      reconciliationControllerRef.current?.abort();
+      periodicSyncTimerRef.current = undefined;
+      connectionResyncTimerRef.current = undefined;
+      malformedResyncTimerRef.current = undefined;
+      syncRetryTimerRef.current = undefined;
+      syncDebounceTimerRef.current = undefined;
+      debounceStartedAtRef.current = 0;
+      retryAttemptRef.current = 0;
+      lastSyncBatchStartedAtRef.current = 0;
+      queuedSyncRef.current = emptyBoardSyncScopes();
+      seenEventIds.clear();
+    };
+  }, [boardId, scheduleBoardSync]);
 
   const announce = (message: string) => setNotice(message);
 
@@ -239,11 +547,21 @@ export default function BoardPage() {
   };
 
   const finishTaskMove = async (taskId: string, original: BoardColumn[], draft: BoardColumn[]) => {
+    if (dragInvalidatedRef.current || syncBlockedRef.current || connectionStatusRef.current !== 'connected') {
+      previewRef.current = null;
+      setPreviewColumns(null);
+      setActiveDragName('');
+      activeDragRef.current = false;
+      dragInvalidatedRef.current = false;
+      announce('Board vừa thay đổi hoặc mất kết nối. Dữ liệu đã được tải lại; hãy kéo lại task.');
+      return;
+    }
     const position = locateTask(draft, taskId);
     const previous = locateTask(original, taskId);
     if (!position || !previous || (position.columnId === previous.columnId && position.index === previous.index)) {
       previewRef.current = null;
       setPreviewColumns(null);
+      activeDragRef.current = false;
       return;
     }
     const fromColumn = original.find((column) => column.id === previous.columnId);
@@ -251,11 +569,13 @@ export default function BoardPage() {
     if (!fromColumn?.complete || !toColumn?.complete) {
       previewRef.current = null;
       setPreviewColumns(null);
+      activeDragRef.current = false;
       announce('Cần tải đủ công việc trong hai cột trước khi sắp xếp.');
       return;
     }
 
     const generation = generationRef.current;
+    const startingEventRevision = eventRevisionRef.current;
     const optimistic = draft.map((column) => ({ ...column, loading: false }));
     previewRef.current = null;
     setPreviewColumns(null);
@@ -267,39 +587,34 @@ export default function BoardPage() {
       const token = await turnstile.getToken();
       await moveTask(request, taskId, position.columnId, position.index, token);
       committed = true;
-      setNotice('Đã lưu vị trí. Đang đồng bộ board…');
-      await refreshColumns([previous.columnId, position.columnId], generation);
-      if (generation === generationRef.current) {
-        setSyncBlocked(false);
-        setNotice('Đã lưu vị trí công việc.');
-      }
+      scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
+      if (generation === generationRef.current) setNotice('Đã lưu vị trí. Đang đồng bộ board…');
     } catch (reason) {
       const uncertain = committed || (reason instanceof ApiError && reason.uncertain);
-      if (generation === generationRef.current && !uncertain) {
+      const concurrentRemoteChange = eventRevisionRef.current !== startingEventRevision;
+      if (generation === generationRef.current && !uncertain && !concurrentRemoteChange) {
         setBoard((current) => current ? { ...current, columns: original } : current);
         setNotice(errorMessage(reason));
       } else if (generation === generationRef.current) {
         setSyncBlocked(true);
+        syncBlockedRef.current = true;
         setNotice(committed ? 'Đã lưu nhưng chưa tải được dữ liệu mới. Đang kiểm tra lại…' : 'Chưa xác nhận được kết quả lưu. Đang kiểm tra lại dữ liệu máy chủ…');
       }
-      try {
-        await refreshColumns([previous.columnId, position.columnId], generation);
-        if (generation === generationRef.current) {
-          setSyncBlocked(false);
-          if (uncertain) setNotice('Đã đối chiếu lại với máy chủ. Bạn có thể tiếp tục.');
-        }
-      } catch {
-        if (generation === generationRef.current) {
-          setSyncBlocked(true);
-          setNotice(`${errorMessage(reason)} Dữ liệu chưa đối soát được; hãy tải lại board.`);
-        }
-      }
+      scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
     } finally {
       if (generation === generationRef.current) setPending(false);
     }
   };
 
   const onDragEnd = (event: DragEndEvent) => {
+    activeDragRef.current = false;
+    if (dragInvalidatedRef.current) {
+      dragInvalidatedRef.current = false;
+      previewRef.current = null;
+      setPreviewColumns(null);
+      setActiveDragName('');
+      return;
+    }
     const source = event.operation.source;
     const target = event.operation.target;
     if (!source || event.canceled) {
@@ -339,27 +654,29 @@ export default function BoardPage() {
       const generation = generationRef.current;
       setBoard((current) => current ? { ...current, columns: draft } : current);
       setPending(true);
+      const startingEventRevision = eventRevisionRef.current;
       setNotice('Đang lưu thứ tự cột…');
       void reorderColumn(request, sourceData.columnId, toPosition).then((response: ColumnResponse[]) => {
         if (generation !== generationRef.current) return;
-        setBoard((current) => current ? { ...current, columns: applyColumnOrder(current.columns, response) } : current);
-        setNotice('Đã lưu thứ tự cột.');
+        if (eventRevisionRef.current === startingEventRevision) {
+          setBoard((current) => current ? { ...current, columns: applyColumnOrder(current.columns, response) } : current);
+        }
+        scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+        setNotice('Đã lưu thứ tự cột. Đang đồng bộ board…');
       }).catch(async (reason: unknown) => {
         if (generation !== generationRef.current) return;
-        if (reason instanceof ApiError && !reason.uncertain) setBoard((current) => current ? { ...current, columns: original } : current);
-        try {
-          await refreshBoardColumns(generation);
-          if (generation === generationRef.current) setNotice(errorMessage(reason));
-        } catch {
-          setSyncBlocked(true);
-          setNotice('Chưa xác nhận được thứ tự cột. Hãy tải lại board.');
-        }
+        if (reason instanceof ApiError && !reason.uncertain && eventRevisionRef.current === startingEventRevision) setBoard((current) => current ? { ...current, columns: original } : current);
+        setNotice(errorMessage(reason));
+        scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
       }).finally(() => { if (generation === generationRef.current) setPending(false); });
     }
   };
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (syncBlockedRef.current || connectionStatusRef.current !== 'connected') return;
     const source = event.operation.source?.data as DragData | undefined;
+    activeDragRef.current = true;
+    dragInvalidatedRef.current = false;
     if (source?.kind === 'task' && source.taskId) {
       const task = board?.columns.flatMap((column) => column.tasks).find((item) => item.id === source.taskId);
       setActiveDragName(task?.title ?? 'Công việc');
@@ -399,8 +716,14 @@ export default function BoardPage() {
     const current = boardRef.current;
     if (!current) return;
     const location = locateTask(current.columns, updated.id);
-    if (location && location.columnId !== updated.columnId) {
-      void loadBoard(current.id);
+    if (!location || location.columnId !== updated.columnId) {
+      const affected = new Set([location?.columnId, updated.columnId].filter((id): id is string => Boolean(id)));
+      scheduleBoardSync({
+        full: false,
+        refreshColumns: affected,
+        refreshTaskDetail: false,
+        refreshComments: false,
+      });
       return;
     }
     setBoard((value) => value ? {
@@ -491,10 +814,15 @@ export default function BoardPage() {
             {!allTasksComplete && <p className="mt-2 px-1 text-xs text-amber-700">Kết quả bộ lọc chỉ gồm công việc đã tải; tải đủ từng cột để có kết quả toàn board.</p>}
           </section>
 
-          {notice && <div className={`mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 text-sm ${syncBlocked ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-800'}`} role="status" aria-live="polite">
-            <span>{notice}</span>
-            {syncBlocked && <button className="font-semibold underline" onClick={() => boardId && void loadBoard(boardId)}>Tải lại board</button>}
+          {notice && <div className={`mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 text-sm ${syncBlocked ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-800'}`}>
+            <span role="status" aria-live="polite">{notice}</span>
+            {syncBlocked && connectionStatus === 'connected' && <button className="font-semibold underline" onClick={() => scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true })}>Thử đồng bộ</button>}
+            {(connectionStatus === 'error' || connectionStatus === 'offline') && <button className="font-semibold underline" onClick={realtime.retry}>Kết nối lại</button>}
           </div>}
+          <div className={`mb-4 flex items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${connectionStatus === 'connected' && !syncBlocked ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`} role="status" aria-live="polite">
+            <span>{connectionStatus === 'connected' && !syncBlocked ? 'Đồng bộ realtime đang hoạt động' : connectionStatus === 'offline' ? 'Mất mạng · board chỉ đọc' : connectionStatus === 'error' ? 'Realtime chưa kết nối' : connectionStatus === 'reconnecting' ? 'Đang kết nối lại · dữ liệu cần đối soát' : connectionStatus === 'connecting' ? 'Đang kết nối đồng bộ board…' : 'Chưa kết nối đồng bộ board'}</span>
+            {connectionStatus === 'connected' && !syncBlocked && <span className="text-xs">Dữ liệu đã đối soát</span>}
+          </div>
           {!turnstile.enabled && !board.archived && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Thiếu cấu hình Turnstile. Board vẫn xem được, thao tác kéo thẻ sẽ bị khóa.</p>}
           {turnstile.error && <p className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{turnstile.error}</p>}
           {board.columns.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">Board này chưa có cột nào.</div>}
@@ -508,10 +836,10 @@ export default function BoardPage() {
                 availableColumns={board.columns}
                 index={columnIndex}
                 activeFilters={filtersActive}
-                canReorder={!board.archived && !pending && !syncBlocked}
-                canMoveCards={!board.archived && !pending && !syncBlocked && !filtersActive && turnstile.enabled && turnstile.ready && column.complete}
+                canReorder={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
+                canMoveCards={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && !filtersActive && turnstile.enabled && turnstile.ready && column.complete}
                 onMoveTask={moveTaskFromMenu}
-                onOpenTask={setSelectedTaskId}
+                onOpenTask={(taskId) => { setSelectedTaskDeleted(false); setSelectedTaskId(taskId); }}
                 onRetry={() => void loadColumn(column.id, generationRef.current)}
                 onLoadMore={() => void loadColumn(column.id, generationRef.current, false)}
               />)}
@@ -519,7 +847,10 @@ export default function BoardPage() {
           </DragDropProvider>
           <p className="sr-only" aria-live="assertive">{activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}</p>
           {selectedTaskId && <Suspense fallback={<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="status">Đang mở chi tiết task…</div>}><TaskDetailModal key={`${board.id}:${selectedTaskId}`} taskId={selectedTaskId}
-            canEdit={!board.archived && !pending && !syncBlocked && turnstile.enabled}
+            canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && turnstile.enabled}
+            detailRefreshVersion={taskDetailRefreshVersion}
+            commentsRefreshVersion={commentsRefreshVersion}
+            remoteDeleted={selectedTaskDeleted}
             onClose={() => setSelectedTaskId(null)} onSaved={handleTaskSaved} /></Suspense>}
         </>}
       </div>
