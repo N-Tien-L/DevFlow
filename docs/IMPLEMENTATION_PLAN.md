@@ -118,7 +118,7 @@ gantt
 - **Primary Goal:** Automate developer workflows by connecting Git commits and Pull Requests directly to task statuses, and intercepting CI/CD failure logs.
 - **Duration:** 2 weeks
 - **Technical Scope:**
-  1. **Flyway Migration (`V3__gitci_schema.sql`):**
+  1. **Flyway Migration (`V6__gitci_schema.sql`; historical ticket title used V3, now allocated to Board audit):**
      - Tables: `repositories`, `git_commits`, `pull_requests`, `ci_pipelines`, `ci_failures`.
   2. **Git & CI Service (`gitci-impl`):**
      - Webhook Controller: `POST /api/v1/gitci/webhook/github` (HMAC SHA-256 header validation) and `/gitlab`.
@@ -230,7 +230,7 @@ All work must be tracked with tickets using the format `T-XXX` and mapped to Git
 - `T-018`: Implement Frontend STOMP Client Hook for Multi-Client Real-Time Board Sync
 
 ### Phase 3: Git & CI Integration
-- `T-020`: Setup Flyway Migration for Git & CI Schema (`V3__gitci_schema.sql`)
+- `T-020`: Setup Flyway Migration for Git & CI Schema (`V6__gitci_schema.sql`; V3 in the original ticket title is historical)
 - `T-021`: Implement Webhook Ingestion Controller with HMAC SHA-256 Signature Validation
 - `T-022`: Build Regex Parser to Link Git Commits & Branch Names to Task IDs
 - `T-023`: Implement Domain Event Publishing (`git.commit_linked`, `git.pr_opened`, `git.pr_merged`)
