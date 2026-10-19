@@ -8,6 +8,9 @@ package io.devflow.common.event;
  */
 public final class EventTypes {
 
+    /** Synchronous Auth decision request; publisher must fail closed without exactly one response. */
+    public static final String WORKSPACE_MEMBERSHIP_CHECK_REQUESTED = "workspace.membership_check_requested";
+
     /** Published by Board. Consumed by AI service, Notification. */
     public static final String TASK_CREATED = "task.created";
 
