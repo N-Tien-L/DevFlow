@@ -838,6 +838,31 @@ class BoardColumnApiIntegrationTest {
                 "SELECT COUNT(*) FROM tasks WHERE column_id = ?", Long.class, columnId)).isZero();
     }
 
+    @Test
+    void listsWorkspaceMembersAndCreatesAndPagesTaskComments() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/workspaces/{workspaceId}/members", workspaceId)
+                        .header("Authorization", bearer(memberId)).param("q", "member").param("page", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].userId").value(memberId.toString()));
+
+        UUID boardId = createBoard("Comment board", memberId);
+        UUID columnId = createColumn(boardId, "Todo", "TODO");
+        UUID taskId = createTask(columnId, "Commented", memberId);
+        for (int index = 0; index < 3; index++) {
+            mockMvc.perform(post("/api/v1/tasks/{taskId}/comments", taskId)
+                            .header("Authorization", bearer(memberId)).contentType("application/json")
+                            .content(json(Map.of("content", "Comment " + index))))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/comments", taskId)
+                        .header("Authorization", bearer(memberId)).param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1));
+    }
+
     private UUID createTask(UUID columnId, String title, UUID actorId) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/columns/{columnId}/tasks", columnId)
                         .header("Authorization", bearer(actorId)).contentType("application/json")

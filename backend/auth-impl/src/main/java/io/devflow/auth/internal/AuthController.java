@@ -87,10 +87,10 @@ public class AuthController {
     @GetMapping("/workspaces/{workspaceId}/members")
     public ResponseEntity<WorkspaceMemberPageResponse> getWorkspaceMembers(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable UUID workspaceId,
-            @RequestParam(defaultValue = "") String q,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @PathVariable("workspaceId") UUID workspaceId,
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size) {
         return ResponseEntity.ok(authService.getWorkspaceMembers(principal.getId(), workspaceId, q, page, size));
     }
 
