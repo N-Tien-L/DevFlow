@@ -580,7 +580,8 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  V3__auth_email_verification.sql (T-004A, Auth hardening)   │
+│  V7__auth_email_verification.sql (T-004A, Auth hardening)   │
+│  - chạy sau Board V3–V5 và Git/CI V6                        │
 │  - users.status, users.email_verified_at,                   │
 │    verification_tokens                                      │
 └──────────────────────────────┬──────────────────────────────┘

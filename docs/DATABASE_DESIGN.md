@@ -560,7 +560,7 @@ Phase 2 (M2): V2__board_schema.sql (Kanban Core)
   └── task_tag_mappings
         │
         ▼
-V3__auth_email_verification.sql (T-004A, Auth hardening)
+V7__auth_email_verification.sql (T-004A, Auth hardening; runs after Board V3-V5 and Git/CI V6)
   ├── users.status, users.email_verified_at
   └── verification_tokens
         │

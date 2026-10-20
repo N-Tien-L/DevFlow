@@ -16,7 +16,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Verifies the T-004A V3 migration (user status + verification_tokens) on PostgreSQL. */
+/** Verifies the T-004A V7 migration (user status + verification_tokens) on PostgreSQL. */
 @Testcontainers
 class AuthEmailVerificationMigrationIntegrationTest {
 
@@ -41,7 +41,7 @@ class AuthEmailVerificationMigrationIntegrationTest {
         assertThat(status(schema, legacyUser)).isEqualTo("ACTIVE");
         assertThat(status(schema, newUser)).isEqualTo("PENDING_VERIFICATION");
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM " + schema + ".flyway_schema_history WHERE version = '3' AND success",
+                "SELECT COUNT(*) FROM " + schema + ".flyway_schema_history WHERE version = '7' AND success",
                 Long.class)).isEqualTo(1);
     }
 
