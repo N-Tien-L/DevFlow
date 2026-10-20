@@ -108,16 +108,22 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
     }
   }, [request, taskId]);
 
+  // Open once and never close from an effect cleanup: under StrictMode the cleanup's close() queues a
+  // `close` event that would land after the remount reopened the dialog. Unmounting removes the element,
+  // which takes it out of the top layer anyway.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     void loadTask(controller.signal);
     setComments([]);
     setCommentPage(0);
     setCommentTotalPages(0);
     setCommentsError(null);
-    return () => { controller.abort(); if (dialog?.open) dialog.close(); };
+    return () => controller.abort();
   }, [loadTask]);
 
   useEffect(() => {
@@ -280,7 +286,6 @@ export function TaskDetailModal({ taskId, canEdit, onClose, onSaved }: TaskDetai
 
   return <dialog ref={dialogRef} aria-labelledby="task-detail-title" onCancel={handleCancel}
     onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}
-    onClose={() => { if (dialogRef.current?.open) dialogRef.current.close(); }}
     className="m-auto max-h-[min(92dvh,900px)] w-[min(900px,calc(100vw-24px))] max-w-none overflow-hidden rounded-2xl bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/55">
     <div className="flex max-h-[92dvh] flex-col">
       <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-7">
