@@ -82,7 +82,8 @@ export async function fetchBoardSnapshot(
   const snapshots = new Map<string, TaskColumnSnapshot>();
   await mapWithConcurrency([...requestedColumnIds], BOARD_SYNC_FETCH_CONCURRENCY, async (columnId) => {
     if (!columns.some((column) => column.id === columnId)) return;
-    const maxPages = loadedPagesByColumn.get(columnId) ?? 1;
+    // Columns not loaded yet (initial load, new columns) fetch up to the page limit, like loadColumn.
+    const maxPages = loadedPagesByColumn.get(columnId) ?? MAX_PAGES_PER_COLUMN;
     const snapshot = await fetchEveryTaskPage(request, columnId, 0, signal, maxPages);
     snapshots.set(columnId, snapshot);
   });

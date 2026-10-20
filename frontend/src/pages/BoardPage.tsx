@@ -97,6 +97,7 @@ export default function BoardPage() {
   const selectedTaskIdRef = useRef(selectedTaskId);
   const columnLoadSequenceRef = useRef(new Map<string, number>());
   const workspaceIdRef = useRef(workspaceId);
+  const boardIdRef = useRef(boardId);
 
   const displayColumns = useMemo(() => previewColumns ?? board?.columns ?? [], [board?.columns, previewColumns]);
   const filtersActive = Boolean(filterText.trim() || assigneeFilter || priorityFilter);
@@ -106,6 +107,7 @@ export default function BoardPage() {
   syncBlockedRef.current = syncBlocked;
   selectedTaskIdRef.current = selectedTaskId;
   workspaceIdRef.current = workspaceId;
+  boardIdRef.current = boardId;
 
   const updateColumn = useCallback((columnId: string, update: (column: BoardColumn) => BoardColumn, generation = generationRef.current) => {
     if (generation !== generationRef.current) return;
@@ -231,11 +233,17 @@ export default function BoardPage() {
     try {
       const loadedPagesByColumn = new Map<string, number>();
       if (boardRef.current?.id === id) {
-        for (const column of boardRef.current.columns) loadedPagesByColumn.set(column.id, Math.max(1, column.loadedPages));
+        // Complete columns must stay complete as they grow, and columns whose initial load this
+        // reconciliation just aborted (loadedPages 0) need the full limit too. Only columns the user
+        // deliberately paged keep their loaded page count.
+        for (const column of boardRef.current.columns) {
+          const fullLoad = column.complete || column.loadedPages === 0;
+          loadedPagesByColumn.set(column.id, fullLoad ? MAX_PAGES_PER_COLUMN : column.loadedPages);
+        }
       }
       const snapshotResult = await fetchBoardSnapshot(request, id, scopes, controller.signal, loadedPagesByColumn);
       const response = snapshotResult.board;
-      if (controller.signal.aborted || generation !== generationRef.current || id !== boardId) return 'superseded';
+      if (controller.signal.aborted || generation !== generationRef.current || id !== boardIdRef.current) return 'superseded';
 
       const columns = [...response.columns].sort((left, right) => left.position - right.position);
       const current = boardRef.current;
@@ -243,7 +251,7 @@ export default function BoardPage() {
         columnLoadSequenceRef.current.set(columnId, (columnLoadSequenceRef.current.get(columnId) ?? 0) + 1);
       }
 
-      if (controller.signal.aborted || generation !== generationRef.current || id !== boardId) return 'superseded';
+      if (controller.signal.aborted || generation !== generationRef.current || id !== boardIdRef.current) return 'superseded';
       if (eventRevisionRef.current !== eventRevision) return 'superseded';
 
       const nextColumns: BoardColumn[] = columns.map((column) => {
@@ -276,7 +284,8 @@ export default function BoardPage() {
   }, [boardId, request]);
 
   const scheduleBoardSync = useCallback((incoming: BoardSyncScopes) => {
-    if (!boardId) return;
+    // A completion captured on another board (e.g. a late move response) must not sync this route.
+    if (!boardId || boardId !== boardIdRef.current) return;
     mergeBoardSyncScopes(queuedSyncRef.current, incoming);
     eventRevisionRef.current += 1;
 
@@ -456,7 +465,9 @@ export default function BoardPage() {
   }, []);
 
   const handleConnected = useCallback(() => {
-    scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true });
+    // Events missed while disconnected may include the open task's detail or comments.
+    const modalOpen = Boolean(selectedTaskIdRef.current);
+    scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true, refreshTaskDetail: modalOpen, refreshComments: modalOpen });
     if (connectionResyncTimerRef.current !== undefined) window.clearTimeout(connectionResyncTimerRef.current);
     connectionResyncTimerRef.current = window.setTimeout(() => {
       connectionResyncTimerRef.current = undefined;
@@ -592,7 +603,7 @@ export default function BoardPage() {
       const token = await turnstile.getToken();
       await moveTask(request, taskId, position.columnId, position.index, token);
       committed = true;
-      scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
+      if (generation === generationRef.current) scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
       if (generation === generationRef.current) setNotice('Đã lưu vị trí. Đang đồng bộ board…');
     } catch (reason) {
       const uncertain = committed || (reason instanceof ApiError && reason.uncertain);
@@ -605,7 +616,7 @@ export default function BoardPage() {
         syncBlockedRef.current = true;
         setNotice(committed ? 'Đã lưu nhưng chưa tải được dữ liệu mới. Đang kiểm tra lại…' : 'Chưa xác nhận được kết quả lưu. Đang kiểm tra lại dữ liệu máy chủ…');
       }
-      scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
+      if (generation === generationRef.current) scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
     } finally {
       if (generation === generationRef.current) setPending(false);
     }
@@ -914,7 +925,7 @@ function BoardColumnView({
         {!column.loading && !column.error && visibleTasks.length === 0 && <EmptyTaskTarget column={column} canMoveCards={canMoveCards} activeFilters={activeFilters} />}
         {visibleTasks.map((task, taskIndex) => <TaskCard key={task.id} task={task} column={column} columns={availableColumns} index={taskIndex} disabled={!canMoveCards} onMoveTask={onMoveTask} onOpenTask={onOpenTask} />)}
         {column.complete && column.totalElements > column.tasks.length && <button className="w-full rounded-xl border border-dashed border-slate-300 bg-white/60 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-white" onClick={onLoadMore}>Tải thêm công việc</button>}
-        {!column.complete && !column.loading && !column.error && column.totalPages > MAX_PAGES_PER_COLUMN && <button className="w-full rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-3 text-xs font-semibold text-amber-800" onClick={onLoadMore}>Tải tiếp {Math.max(0, column.totalElements - column.tasks.length)} công việc</button>}
+        {!column.complete && !column.loading && !column.error && column.totalElements > column.tasks.length && <button className="w-full rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-3 text-xs font-semibold text-amber-800" onClick={onLoadMore}>Tải tiếp {Math.max(0, column.totalElements - column.tasks.length)} công việc</button>}
       </div>
     </section>
   );
