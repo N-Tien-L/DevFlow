@@ -237,8 +237,7 @@ public class BoardManagementService {
         BoardEntity board = requireLockedAccessibleBoard(boardId, actorId);
         requireActive(board);
         rateLimiter.check(actorId);
-        ColumnEntity column = columnRepository.findByIdAndBoard_Id(columnId, boardId)
-                .orElseThrow(BoardApiException::notFound);
+        ColumnEntity column = requireFreshColumn(columnId, boardId);
         validatePatchFields(request == null ? Set.of() : request.unknownFields());
         if (request == null || request.suppliedFields().isEmpty()) {
             throw BoardApiException.badRequest("EMPTY_PATCH", "At least one supported field is required.");
@@ -302,6 +301,7 @@ public class BoardManagementService {
         BoardEntity board = requireLockedAccessibleBoard(boardId, actorId);
         requireActive(board);
         rateLimiter.check(actorId);
+        requireFreshColumn(columnId, boardId);
 
         List<ColumnEntity> columns = columnRepository.findAllByBoard_IdOrderByPositionAscIdAsc(boardId);
         int oldIndex = indexOf(columns, columnId);
@@ -346,6 +346,18 @@ public class BoardManagementService {
             throw BoardApiException.notFound();
         }
         return locked;
+    }
+
+    /**
+     * Re-reads a column after its board lock is held. The column was first loaded to find its board,
+     * possibly before waiting for another mutation's lock; without a refresh Hibernate keeps that stale
+     * managed instance and the full-row UPDATE would overwrite the fields the previous holder committed.
+     */
+    private ColumnEntity requireFreshColumn(UUID columnId, UUID boardId) {
+        ColumnEntity column = columnRepository.findByIdAndBoard_Id(columnId, boardId)
+                .orElseThrow(BoardApiException::notFound);
+        entityManager.refresh(column);
+        return column;
     }
 
     private static void requireActive(BoardEntity board) {
