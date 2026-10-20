@@ -56,7 +56,15 @@ abstract class GitCiPostgresSupport {
         }
     }
 
-    Flyway migration(String target) { return migrationAt("classpath:db/migration", target); }
+    /**
+     * These tests pin the Git/CI contract at V6. Later modules add migrations after it (e.g. Auth V7),
+     * so the classpath migration stops at V6 unless a test asks for an earlier target.
+     */
+    static final String GITCI_SCHEMA_VERSION = "6";
+
+    Flyway migration(String target) {
+        return migrationAt("classpath:db/migration", target == null ? GITCI_SCHEMA_VERSION : target);
+    }
 
     Flyway migrationAt(String location, String target) {
         var config = Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())

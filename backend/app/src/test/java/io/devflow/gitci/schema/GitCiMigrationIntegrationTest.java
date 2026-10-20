@@ -175,7 +175,8 @@ class GitCiMigrationIntegrationTest extends GitCiPostgresSupport {
                     POSTGRES.getUsername(), POSTGRES.getPassword()));
             assertThat(legacySnapshot(cloneJdbc, true)).isEqualTo(before);
             Flyway.configure().dataSource(cloneUrl, POSTGRES.getUsername(), POSTGRES.getPassword())
-                    .schemas(schema).defaultSchema(schema).baselineOnMigrate(false).load().migrate();
+                    .schemas(schema).defaultSchema(schema).baselineOnMigrate(false)
+                    .target(GITCI_SCHEMA_VERSION).load().migrate();
             assertThat(cloneJdbc.queryForObject("SELECT version FROM tasks", Long.class)).isEqualTo(7);
             assertThat(cloneJdbc.queryForObject("SELECT count(*) FROM repositories", Long.class)).isZero();
             assertThat(legacySnapshot(cloneJdbc, true)).isEqualTo(before);
