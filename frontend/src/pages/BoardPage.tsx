@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useNavigate, useParams } from 'react-router-dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/react';
-import { useSortable } from '@dnd-kit/react/sortable';
+import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import { useDroppable } from '@dnd-kit/react';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
 import { getBoard, listBoards, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
@@ -151,6 +151,8 @@ export default function BoardPage() {
     setLoading(true);
     setError(null);
     setNotice(null);
+    // A mutation started on the previous board only clears pending for its own generation.
+    setPending(false);
     setSyncBlocked(true);
     syncBlockedRef.current = true;
     setBoard(null);
@@ -524,10 +526,13 @@ export default function BoardPage() {
   const announce = (message: string) => setNotice(message);
 
   const onDragOver = (event: DragOverEvent) => {
-    if (pending || syncBlocked) return;
     const source = event.operation.source?.data as DragData | undefined;
     const target = event.operation.target?.data as DragData | undefined;
-    if (source?.kind !== 'task' || !source.taskId || !target) return;
+    if (source?.kind !== 'task' || !source.taskId) return;
+    // Task previews are rendered from React state. Letting OptimisticSortingPlugin also move the
+    // card's DOM node across columns makes React remove a node it no longer owns (removeChild crash).
+    event.preventDefault();
+    if (pending || syncBlocked || !target) return;
     const base = previewRef.current ?? cloneColumns(board?.columns ?? []);
     let beforeTaskId = target.kind === 'task' ? target.taskId : undefined;
     if (target.kind === 'task' && target.taskId) {
@@ -645,10 +650,14 @@ export default function BoardPage() {
       void finishTaskMove(sourceData.taskId, original, draft);
       return;
     }
-    if (sourceData.kind === 'column' && targetData?.kind === 'column' && board) {
-      const original = board?.columns ?? [];
-      const draft = reorderColumnById(original, sourceData.columnId, targetData.columnId);
+    if (sourceData.kind === 'column' && board && isSortable(source)) {
+      const original = board.columns;
+      // OptimisticSortingPlugin reorders the DOM while dragging, so on drop the target is usually the
+      // source column itself. The sortable indexes carry the real start and drop positions.
+      const targetColumnId = original[source.index]?.id;
       setActiveDragName('');
+      if (source.initialIndex === source.index || !targetColumnId) return;
+      const draft = reorderColumnById(original, sourceData.columnId, targetColumnId);
       if (draft === original) return;
       const toPosition = draft.findIndex((column) => column.id === sourceData.columnId);
       const generation = generationRef.current;
