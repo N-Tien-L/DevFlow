@@ -27,6 +27,12 @@ import io.devflow.notification.internal.NotificationEventListeners;
 import java.util.Map;
 import java.util.UUID;
 import java.util.List;
+import io.devflow.board.internal.BoardManagementService;
+import io.devflow.board.internal.dto.PatchColumnRequest;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -117,6 +123,9 @@ class BoardColumnApiIntegrationTest {
 
     @Autowired
     private TaskManagementService taskManagementService;
+
+    @Autowired
+    private BoardManagementService boardService;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -829,6 +838,31 @@ class BoardColumnApiIntegrationTest {
                 "SELECT COUNT(*) FROM tasks WHERE column_id = ?", Long.class, columnId)).isZero();
     }
 
+    @Test
+    void listsWorkspaceMembersAndCreatesAndPagesTaskComments() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/workspaces/{workspaceId}/members", workspaceId)
+                        .header("Authorization", bearer(memberId)).param("q", "member").param("page", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].userId").value(memberId.toString()));
+
+        UUID boardId = createBoard("Comment board", memberId);
+        UUID columnId = createColumn(boardId, "Todo", "TODO");
+        UUID taskId = createTask(columnId, "Commented", memberId);
+        for (int index = 0; index < 3; index++) {
+            mockMvc.perform(post("/api/v1/tasks/{taskId}/comments", taskId)
+                            .header("Authorization", bearer(memberId)).contentType("application/json")
+                            .content(json(Map.of("content", "Comment " + index))))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/comments", taskId)
+                        .header("Authorization", bearer(memberId)).param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1));
+    }
+
     private UUID createTask(UUID columnId, String title, UUID actorId) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/columns/{columnId}/tasks", columnId)
                         .header("Authorization", bearer(actorId)).contentType("application/json")
@@ -836,6 +870,78 @@ class BoardColumnApiIntegrationTest {
                 .andExpect(status().isCreated()).andReturn();
         return UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString())
                 .get("id").asText());
+    }
+
+    @Test
+    void columnPatchWaitingForBoardLockKeepsFieldsCommittedByTheLockHolder() throws Exception {
+        UUID boardId = createBoard("Lock board", memberId);
+        UUID columnId = createColumn(boardId, "Todo", "TODO");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?>[] patch = new Future<?>[1];
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                jdbc.queryForObject("SELECT id FROM boards WHERE id = ? FOR UPDATE", UUID.class, boardId);
+                jdbc.update("UPDATE columns SET status_category = 'IN_PROGRESS' WHERE id = ?", columnId);
+                patch[0] = executor.submit(() -> {
+                    AuthenticatedActor actor = () -> memberId;
+                    SecurityContextHolder.getContext().setAuthentication(
+                            new UsernamePasswordAuthenticationToken(actor, null, List.of()));
+                    try {
+                        PatchColumnRequest request = new PatchColumnRequest();
+                        request.setName("Renamed");
+                        boardService.updateColumn(columnId, request);
+                    } finally {
+                        SecurityContextHolder.clearContext();
+                    }
+                });
+                awaitBoardLockWaiter();
+            });
+            patch[0].get(20, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForMap(
+                        "SELECT name, status_category FROM columns WHERE id = ?", columnId))
+                .containsEntry("name", "Renamed")
+                .containsEntry("status_category", "IN_PROGRESS");
+    }
+
+    @Test
+    void rejectsOversizedJsonBodyBeforeDeserialization() throws Exception {
+        UUID boardId = createBoard("Size board", memberId);
+        UUID columnId = createColumn(boardId, "Todo", "TODO");
+
+        mockMvc.perform(patch("/api/v1/columns/{columnId}", columnId)
+                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .content("{\"unknown\":\"" + "x".repeat(100_000) + "\"}"))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(header().string("Content-Type", org.hamcrest.Matchers.startsWith("application/problem+json")))
+                .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT name FROM columns WHERE id = ?", String.class, columnId)).isEqualTo("Todo");
+    }
+
+    private void awaitBoardLockWaiter() {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < deadline) {
+            jdbc.execute("SELECT pg_stat_clear_snapshot()");
+            Integer waiting = jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM pg_stat_activity
+                    WHERE datname = current_database() AND pid <> pg_backend_pid()
+                      AND wait_event_type = 'Lock' AND query ILIKE '%boards%'
+                    """, Integer.class);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(exception);
+            }
+        }
+        throw new IllegalStateException("The concurrent column PATCH never waited for the board lock.");
     }
 
     private UUID createBoard(String name, UUID actorId) throws Exception {

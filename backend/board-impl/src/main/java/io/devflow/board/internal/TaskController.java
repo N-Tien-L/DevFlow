@@ -85,13 +85,14 @@ public class TaskController {
     }
 
     @GetMapping("/tasks/{taskId}/comments")
-    public TaskCommentPageResponse listComments(@PathVariable UUID taskId,
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+    public TaskCommentPageResponse listComments(@PathVariable("taskId") UUID taskId,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size) {
         return commentService.list(taskId, page, size);
     }
 
     @PostMapping("/tasks/{taskId}/comments")
-    public ResponseEntity<TaskCommentResponse> createComment(@PathVariable UUID taskId,
+    public ResponseEntity<TaskCommentResponse> createComment(@PathVariable("taskId") UUID taskId,
             @Valid @RequestBody CreateTaskCommentRequest request,
             @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
             HttpServletRequest servletRequest) {
