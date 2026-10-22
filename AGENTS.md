@@ -60,7 +60,7 @@ Before marking any feature or ticket as complete, verify that the implementation
 
 - [ ] **Input Validation:** All request DTOs enforce Jakarta Bean Validation (`@Valid`, `@NotBlank`, `@Email`, `@Size`, `@Pattern`). Server-side validation exists regardless of client checks. Data is sanitized (trimmed, lowercased email, XSS-stripped).
 - [ ] **Error Handling:** RFC 7807 `ProblemDetail` responses. Zero stack traces or internal exception details leaked to clients.
-- [ ] **Security & Anti-Abuse:** Public and sensitive endpoints protected with rate limiting. Sensitive mutation forms require bot protection (Turnstile). All authorization checks verify ownership/permissions (IDOR prevention).
+- [ ] **Security & Anti-Abuse:** Public and sensitive endpoints protected with rate limiting. Public, unauthenticated forms (register, login, resend verification) require bot protection (Turnstile); authenticated mutations rely on JWT + membership checks + rate limiting instead. All authorization checks verify ownership/permissions (IDOR prevention).
 - [ ] **Structured Logging & Tracing:** Logback JSON format with MDC correlation IDs (`correlationId`, `userId`). No credentials, tokens, or PII logged in plaintext.
 - [ ] **Observability & Metrics:** Critical business and operational events recorded via Micrometer counters/timers. Health checks reflect subsystem availability.
 - [ ] **Resilience & Timeouts:** External network calls (LLM, email, Git APIs) configured with explicit connect/read timeouts, exponential retries, and circuit breakers (Resilience4j).
