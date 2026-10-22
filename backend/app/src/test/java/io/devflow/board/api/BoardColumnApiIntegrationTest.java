@@ -59,8 +59,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "spring.ai.model.image=none",
         "spring.ai.model.moderation=none",
         "spring.ai.model.audio.speech=none",
-        "spring.ai.model.audio.transcription=none",
-        "devflow.turnstile.enabled=false"
+        "spring.ai.model.audio.transcription=none"
 })
 @AutoConfigureMockMvc
 @Testcontainers
