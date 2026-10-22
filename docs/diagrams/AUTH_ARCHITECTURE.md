@@ -261,26 +261,27 @@ sequenceDiagram
     participant RateLimit as RateLimitingInterceptor
     participant Ctrl as AuthController
     participant Turnstile as TurnstileService (Cloudflare)
-    participant Validator as EmailIntegrityValidator
+    participant Validator as EmailDomainValidator
     participant RegSvc as RegistrationService
     participant UserRepo as UserRepository
     participant TokenRepo as VerificationTokenRepository
     participant Mailer as EmailSenderService (@Async)
 
     Client->>RateLimit: POST /api/v1/auth/register { email, password, fullName, turnstileToken }
-    RateLimit->>Ctrl: Kiểm tra rate limit IP hợp lệ
-    Ctrl->>Turnstile: verifyToken(turnstileToken, clientIp)
-    alt Token Turnstile không hợp lệ / Bot phát hiện
-        Turnstile-->>Ctrl: false
-        Ctrl-->>Client: HTTP 400 Bad Request ("Bot verification failed")
-    else Token Turnstile hợp lệ
-        Turnstile-->>Ctrl: true
-        Ctrl->>Validator: validateEmailIntegrity(email)
-        alt Domain là disposable email hoặc DNS không có MX record
-            Validator-->>Ctrl: Ném InvalidEmailDomainException
-            Ctrl-->>Client: HTTP 422 Unprocessable Entity ("Invalid email domain")
-        else Email hợp lệ và domain tin cậy
-            Ctrl->>RegSvc: register(RegisterRequest)
+    RateLimit->>Ctrl: Kiểm tra rate limit IP hợp lệ (3 req / 10 phút)
+    Ctrl->>RegSvc: register(request, clientIp)
+    RegSvc->>Turnstile: verify(turnstileToken, clientIp) [timeout 2s/3s + CircuitBreaker, không retry]
+    alt Token thiếu / bị Cloudflare từ chối
+        Turnstile-->>Client: HTTP 400 code BOT_CHALLENGE_FAILED
+    else Siteverify không phản hồi / circuit mở
+        Turnstile-->>Client: HTTP 503 code BOT_PROTECTION_UNAVAILABLE (fail closed)
+    else Token hợp lệ
+        RegSvc->>Validator: validate(normalizedEmail)
+        alt Domain disposable
+            Validator-->>Client: HTTP 400 code DISPOSABLE_EMAIL (errors.email)
+        else Domain không có MX / null MX / NXDOMAIN
+            Validator-->>Client: HTTP 400 code EMAIL_DOMAIN_UNDELIVERABLE (errors.email)
+        else Có MX, hoặc DNS lỗi/timeout (fail open, cache kết quả chắc chắn 1h)
             RegSvc->>UserRepo: existsByEmail(email)
             alt Email đã tồn tại
                 UserRepo-->>RegSvc: true
@@ -391,6 +392,6 @@ sequenceDiagram
 | **Core Auth Service** | [AuthService.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/AuthService.java) | `T-004`, `T-004A` | Xử lý đăng nhập, cấp token JWT, chặn tài khoản chưa `ACTIVE` (login & refresh) và cài đặt `AuthApi`. |
 | **Registration Service** | `RegistrationService.java` | `T-004A` | Tạo user `PENDING_VERIFICATION`, phát token, verify (consume nguyên tử), resend chống dò email. |
 | **Verification Infrastructure** | `verification/VerificationTokenGenerator.java`, `VerificationEmailListener.java`, `VerificationEmailSender.java`, `VerificationCleanupJob.java`, `VerificationProperties.java` | `T-004A` | Token 256-bit + SHA-256; gửi mail sau commit qua pool riêng; SMTP với Resilience4j Retry/CircuitBreaker; template `templates/email/verify-email.{html,txt}`; job dọn dữ liệu hằng đêm. |
-| **Anti-Abuse & Bot Service** | `TurnstileService.java`, `DisposableEmailValidator.java` | `T-004B` | Kiểm tra token Cloudflare Turnstile, lọc disposable email, kiểm tra bản ghi DNS MX. |
+| **Anti-Abuse & Bot Service** | `antiabuse/TurnstileService.java`, `antiabuse/EmailDomainValidator.java`, `antiabuse/JndiMxLookup.java`, `resources/anti-abuse/disposable-email-domains.txt` | `T-004B` | Kiểm tra token Cloudflare Turnstile (fail closed), lọc disposable email (gồm subdomain + `REGISTRATION_EXTRA_BLOCKED_DOMAINS`), kiểm tra bản ghi DNS MX (fail open khi DNS lỗi). Metric `devflow.auth.anti_abuse{check,result}`. |
 | **JPA Entities & Repositories** | `entity/UserEntity.java`, `VerificationTokenEntity.java`, `WorkspaceEntity.java` | `T-002`, `T-004A` | Quản lý dữ liệu bảng `users` (thêm `status`), `verification_tokens`, `workspaces`, `workspace_members`. |
 
