@@ -11,8 +11,10 @@ interface Session {
 interface AuthContextValue {
   user: UserSummary | null;
   ready: boolean;
+  sessionGeneration: number;
   signIn(email: string, password: string): Promise<void>;
   signOut(): void;
+  getValidAccessToken(options?: { minValidityMs?: number; signal?: AbortSignal }): Promise<string>;
   request<T>(path: string, init?: RequestInit): Promise<T>;
 }
 
@@ -50,6 +52,18 @@ function problemFrom(value: unknown): { message: string; problem?: ApiError['pro
   return { message: problem.detail || problem.title || 'Yêu cầu không thành công.', problem };
 }
 
+function accessTokenExpiresAt(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const claims: unknown = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof claims !== 'object' || claims === null || !('exp' in claims) || typeof claims.exp !== 'number') return null;
+    return claims.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
 async function parseResponse<T>(response: Response, uncertain: boolean): Promise<T> {
   const contentType = response.headers.get('content-type') ?? '';
   let body: unknown;
@@ -76,6 +90,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false);
   const sessionRef = useRef(session);
   const refreshPromise = useRef<Promise<Session | null> | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const [sessionGeneration, setSessionGeneration] = useState(0);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -83,7 +99,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     else sessionStorage.removeItem(STORAGE_KEY);
   }, [session]);
 
-  const applySession = useCallback((next: Session | null) => {
+  const applySession = useCallback((next: Session | null, replaceSession = false) => {
+    const previous = sessionRef.current;
+    if (replaceSession || Boolean(previous) !== Boolean(next) || previous?.user.id !== next?.user.id) {
+      sessionGenerationRef.current += 1;
+      setSessionGeneration(sessionGenerationRef.current);
+    }
     sessionRef.current = next;
     setSession(next);
     if (next) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -94,7 +115,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const current = sessionRef.current;
     if (!current) return Promise.resolve(null);
     if (refreshPromise.current) return refreshPromise.current;
-    refreshPromise.current = (async () => {
+    const generation = sessionGenerationRef.current;
+    const refresh = (async () => {
       try {
         const response = await fetch('/api/v1/auth/refresh', {
           method: 'POST',
@@ -102,29 +124,55 @@ export function AuthProvider({ children }: PropsWithChildren) {
           body: JSON.stringify({ refreshToken: current.refreshToken }),
         });
         const payload = await parseResponse<AuthResponse>(response, false);
+        if (generation !== sessionGenerationRef.current || sessionRef.current?.refreshToken !== current.refreshToken) {
+          return sessionRef.current;
+        }
         const next = { accessToken: payload.accessToken, refreshToken: payload.refreshToken, user: payload.user };
         applySession(next);
         return next;
-      } catch {
-        applySession(null);
-        return null;
+      } catch (reason) {
+        if (generation !== sessionGenerationRef.current || sessionRef.current?.refreshToken !== current.refreshToken) return sessionRef.current;
+        if (reason instanceof ApiError && reason.status >= 400 && reason.status < 500 && reason.status !== 429) {
+          applySession(null);
+          return null;
+        }
+        if (reason instanceof ApiError) throw reason;
+        throw new ApiError('Không thể làm mới phiên do lỗi kết nối. Hãy thử lại khi mạng ổn định.', 0);
       } finally {
-        refreshPromise.current = null;
+        if (refreshPromise.current === refresh) refreshPromise.current = null;
       }
     })();
-    return refreshPromise.current;
+    refreshPromise.current = refresh;
+    return refresh;
   }, [applySession]);
+
+  const getValidAccessToken = useCallback(async ({ minValidityMs = 30_000, signal }: { minValidityMs?: number; signal?: AbortSignal } = {}) => {
+    if (signal?.aborted) throw new DOMException('Token request was cancelled.', 'AbortError');
+    const current = sessionRef.current;
+    if (!current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+    const generation = sessionGenerationRef.current;
+    const expiresAt = accessTokenExpiresAt(current.accessToken);
+    if (expiresAt === null || expiresAt - Date.now() > minValidityMs) return current.accessToken;
+
+    const refreshed = await refreshSession();
+    if (signal?.aborted) throw new DOMException('Token request was cancelled.', 'AbortError');
+    if (generation !== sessionGenerationRef.current) throw new ApiError('Phiên đăng nhập đã thay đổi.', 401);
+    if (!refreshed) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+    return refreshed.accessToken;
+  }, [refreshSession]);
 
   useEffect(() => {
     let active = true;
     const verify = async () => {
       const current = sessionRef.current;
+      const generation = sessionGenerationRef.current;
       if (!current) {
         if (active) setReady(true);
         return;
       }
       try {
         const response = await fetch('/api/v1/auth/me', { headers: { Authorization: `Bearer ${current.accessToken}` } });
+        if (!active || generation !== sessionGenerationRef.current || sessionRef.current?.refreshToken !== current.refreshToken) return;
         if (response.ok) {
           const user = await response.json() as UserSummary;
           applySession({ ...current, user });
@@ -150,14 +198,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
     });
     const payload = await parseResponse<AuthResponse>(response, false);
-    applySession({ accessToken: payload.accessToken, refreshToken: payload.refreshToken, user: payload.user });
+    applySession({ accessToken: payload.accessToken, refreshToken: payload.refreshToken, user: payload.user }, true);
   }, [applySession]);
 
-  const signOut = useCallback(() => applySession(null), [applySession]);
+  const signOut = useCallback(() => applySession(null, true), [applySession]);
 
   const request = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     let current = sessionRef.current;
     if (!current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+    const generation = sessionGenerationRef.current;
     const method = (init.method ?? 'GET').toUpperCase();
     const send = (accessToken: string) => {
       const headers = new Headers(init.headers);
@@ -180,12 +229,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       throw new ApiError('Không kết nối được máy chủ. Trạng thái lưu có thể chưa xác định.', 0, undefined, method !== 'GET');
     }
     if (response.status === 401) {
+      if (generation !== sessionGenerationRef.current) {
+        throw new ApiError('Phiên đăng nhập đã thay đổi. Hãy tải lại dữ liệu trước khi tiếp tục.', 401, undefined, method !== 'GET');
+      }
       if (method !== 'GET') {
         await refreshSession();
         throw new ApiError('Phiên đăng nhập hết hạn. Hãy kiểm tra board rồi thử lại thao tác.', 401, undefined, true);
       }
       current = await refreshSession();
-      if (!current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+      if (!current || generation !== sessionGenerationRef.current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
       try {
         response = await send(current.accessToken);
       } catch {
@@ -195,7 +247,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return parseResponse<T>(response, method !== 'GET' && (response.ok || response.status >= 500));
   }, [refreshSession]);
 
-  const value = useMemo(() => ({ user: session?.user ?? null, ready, signIn, signOut, request }), [session, ready, signIn, signOut, request]);
+  const value = useMemo(() => ({ user: session?.user ?? null, ready, sessionGeneration, signIn, signOut, getValidAccessToken, request }), [session, ready, sessionGeneration, signIn, signOut, getValidAccessToken, request]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -20,16 +20,16 @@ export function listBoards(request: ApiRequest, workspaceId: string, page = 0) {
   return request<BoardPageResponse>(`/api/v1/workspaces/${workspaceId}/boards?page=${page}&size=100&includeArchived=true`);
 }
 
-export function getBoard(request: ApiRequest, boardId: string) {
-  return request<BoardResponse>(`/api/v1/boards/${boardId}`);
+export function getBoard(request: ApiRequest, boardId: string, signal?: AbortSignal) {
+  return request<BoardResponse>(`/api/v1/boards/${boardId}`, { signal });
 }
 
-export function listColumns(request: ApiRequest, boardId: string) {
-  return request<ColumnResponse[]>(`/api/v1/boards/${boardId}/columns`);
+export function listColumns(request: ApiRequest, boardId: string, signal?: AbortSignal) {
+  return request<ColumnResponse[]>(`/api/v1/boards/${boardId}/columns`, { signal });
 }
 
-export function listTasks(request: ApiRequest, columnId: string, page: number) {
-  return request<TaskPageResponse>(`/api/v1/columns/${columnId}/tasks?page=${page}&size=100`);
+export function listTasks(request: ApiRequest, columnId: string, page: number, signal?: AbortSignal) {
+  return request<TaskPageResponse>(`/api/v1/columns/${columnId}/tasks?page=${page}&size=100`, { signal });
 }
 
 export function moveTask(request: ApiRequest, taskId: string, columnId: string, position: number) {
@@ -71,8 +71,8 @@ export function listWorkspaceMembers(request: ApiRequest, workspaceId: string, q
   return request<WorkspaceMemberPage>(`/api/v1/auth/workspaces/${workspaceId}/members?${params}`);
 }
 
-export function listTaskComments(request: ApiRequest, taskId: string, page = 0) {
-  return request<TaskCommentPage>(`/api/v1/tasks/${taskId}/comments?page=${page}&size=20`);
+export function listTaskComments(request: ApiRequest, taskId: string, page = 0, signal?: AbortSignal) {
+  return request<TaskCommentPage>(`/api/v1/tasks/${taskId}/comments?page=${page}&size=20`, { signal });
 }
 
 export function createTaskComment(request: ApiRequest, taskId: string, content: string) {
