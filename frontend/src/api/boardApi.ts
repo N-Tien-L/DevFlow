@@ -32,12 +32,9 @@ export function listTasks(request: ApiRequest, columnId: string, page: number, s
   return request<TaskPageResponse>(`/api/v1/columns/${columnId}/tasks?page=${page}&size=100`, { signal });
 }
 
-export function moveTask(request: ApiRequest, taskId: string, columnId: string, position: number, token: string) {
-  const headers: Record<string, string> = {};
-  if (token) headers['X-Turnstile-Token'] = token;
+export function moveTask(request: ApiRequest, taskId: string, columnId: string, position: number) {
   return request(`/api/v1/tasks/${taskId}/move`, {
     method: 'PATCH',
-    headers,
     body: JSON.stringify({ columnId, position }),
   });
 }
@@ -59,12 +56,11 @@ export function updateTaskDetail(request: ApiRequest, task: TaskDetail, input: {
   priority: TaskDetail['priority'];
   assigneeId: string | null;
   dueDate: string | null;
-}, token: string) {
+}) {
   return request<TaskDetail>(`/api/v1/tasks/${task.id}`, {
     method: 'PUT',
     headers: {
       'If-Match': `"task-${task.id}-v${task.version}"`,
-      ...(token ? { 'X-Turnstile-Token': token } : {}),
     },
     body: JSON.stringify(input),
   });
@@ -79,10 +75,9 @@ export function listTaskComments(request: ApiRequest, taskId: string, page = 0, 
   return request<TaskCommentPage>(`/api/v1/tasks/${taskId}/comments?page=${page}&size=20`, { signal });
 }
 
-export function createTaskComment(request: ApiRequest, taskId: string, content: string, token: string) {
+export function createTaskComment(request: ApiRequest, taskId: string, content: string) {
   return request<TaskComment>(`/api/v1/tasks/${taskId}/comments`, {
     method: 'POST',
-    headers: token ? { 'X-Turnstile-Token': token } : {},
     body: JSON.stringify({ content }),
   });
 }
