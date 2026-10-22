@@ -57,6 +57,9 @@ public class GlobalExceptionHandler {
         problem.setTitle("Validation Failed");
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("errors", Map.of(ex.getField(), ex.getMessage()));
+        if (ex instanceof EmailDomainRejectedException rejected) {
+            problem.setProperty("code", rejected.getCode());
+        }
         problem.setProperty("timestamp", Instant.now().toString());
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
@@ -112,6 +115,34 @@ public class GlobalExceptionHandler {
         problem.setProperty("timestamp", Instant.now().toString());
 
         return ResponseEntity.status(HttpStatus.GONE).body(problem);
+    }
+
+    @ExceptionHandler(BotChallengeFailedException.class)
+    public ResponseEntity<ProblemDetail> handleBotChallengeFailed(
+            BotChallengeFailedException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Bad Request");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "BOT_CHALLENGE_FAILED");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(BotProtectionUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleBotProtectionUnavailable(
+            BotProtectionUnavailableException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setTitle("Service Unavailable");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "BOT_PROTECTION_UNAVAILABLE");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "30")
+                .body(problem);
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)

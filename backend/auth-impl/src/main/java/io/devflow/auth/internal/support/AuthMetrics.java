@@ -43,6 +43,14 @@ public class AuthMetrics {
         registry.counter("devflow.auth.login_blocked", "reason", reason).increment();
     }
 
+    /**
+     * {@code check}: turnstile | disposable_email | mx;
+     * {@code result}: passed | rejected | missing | unavailable | unknown
+     */
+    public void antiAbuse(String check, String result) {
+        registry.counter("devflow.auth.anti_abuse", "check", check, "result", result).increment();
+    }
+
     public void purged(String kind, int count) {
         registry.counter("devflow.auth.purged", "kind", kind).increment(count);
     }

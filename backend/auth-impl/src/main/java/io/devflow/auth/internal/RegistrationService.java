@@ -5,6 +5,8 @@ import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.RegisterResponse;
 import io.devflow.auth.api.ResendVerificationRequest;
 import io.devflow.auth.api.VerifyEmailRequest;
+import io.devflow.auth.internal.antiabuse.EmailDomainValidator;
+import io.devflow.auth.internal.antiabuse.TurnstileService;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.VerificationTokenEntity;
 import io.devflow.auth.internal.entity.VerificationTokenType;
@@ -35,7 +37,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Registration and email verification workflow (T-004A).
+ * Registration and email verification workflow (T-004A), guarded by anti-abuse checks (T-004B).
  *
  * <p>New accounts start as {@code PENDING_VERIFICATION}. A single-use token (stored as a SHA-256 digest)
  * is emailed after the transaction commits; confirming it activates the account.
@@ -59,6 +61,8 @@ public class RegistrationService {
     private final RateLimiterService rateLimiterService;
     private final ApplicationEventPublisher eventPublisher;
     private final AuthMetrics metrics;
+    private final TurnstileService turnstileService;
+    private final EmailDomainValidator emailDomainValidator;
     private final Clock clock;
 
     public RegistrationService(
@@ -70,6 +74,8 @@ public class RegistrationService {
             RateLimiterService rateLimiterService,
             ApplicationEventPublisher eventPublisher,
             AuthMetrics metrics,
+            TurnstileService turnstileService,
+            EmailDomainValidator emailDomainValidator,
             Clock clock) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
@@ -79,19 +85,29 @@ public class RegistrationService {
         this.rateLimiterService = rateLimiterService;
         this.eventPublisher = eventPublisher;
         this.metrics = metrics;
+        this.turnstileService = turnstileService;
+        this.emailDomainValidator = emailDomainValidator;
         this.clock = clock;
     }
 
     /**
      * Creates a {@code PENDING_VERIFICATION} account and schedules the verification email.
+     *
+     * <p>The Turnstile challenge runs first so bots learn nothing about which emails are registered,
+     * then the email domain is screened (disposable providers, missing MX) before any database access.
+     *
+     * @param clientIp caller IP as resolved by the servlet container, forwarded to Siteverify
      */
     @Transactional
-    public RegisterResponse register(RegisterRequest request) {
+    public RegisterResponse register(RegisterRequest request, String clientIp) {
+        turnstileService.verify(request.turnstileToken(), clientIp);
+
         String email = InputSanitizer.normalizeEmail(request.email());
         String fullName = InputSanitizer.sanitizeDisplayName(request.fullName());
         if (fullName.isEmpty()) {
             throw new InvalidFieldException("fullName", "Full name must contain visible characters");
         }
+        emailDomainValidator.validate(email);
 
         if (userRepository.existsByEmail(email)) {
             metrics.registration("duplicate_email");

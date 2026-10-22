@@ -90,6 +90,23 @@ devflow:
     token-retention: 7d
     unverified-account-retention: 7d
     purge-cron: "0 0 3 * * *"
+  # Cloudflare Turnstile on the public registration form (T-004B). Off by default so local runs need
+  # no Cloudflare account; production MUST set TURNSTILE_ENABLED=true and TURNSTILE_SECRET_KEY
+  # (startup fails if enabled without a secret). Siteverify calls are not retried (single-use tokens).
+  turnstile:
+    enabled: ${TURNSTILE_ENABLED:false}
+    secret-key: ${TURNSTILE_SECRET_KEY:}
+    siteverify-url: ${TURNSTILE_SITEVERIFY_URL:https://challenges.cloudflare.com/turnstile/v0/siteverify}
+    connect-timeout: 2s
+    read-timeout: 3s
+  registration:
+    email-domain:
+      disposable-check-enabled: true
+      extra-blocked-domains: ${REGISTRATION_EXTRA_BLOCKED_DOMAINS:}
+      # MX lookups fail open on DNS timeouts; definite answers are cached.
+      mx-check-enabled: ${REGISTRATION_MX_CHECK_ENABLED:true}
+      mx-lookup-timeout: 2s
+      mx-cache-ttl: 1h
   # Token-bucket policies per client key (capacity requests per period).
   rate-limit:
     policies:
@@ -118,4 +135,13 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 60s
         permitted-number-of-calls-in-half-open-state: 2
+      turnstile:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        # A rejected token is a client error, not a Siteverify outage.
+        ignore-exceptions:
+          - io.devflow.auth.internal.exception.BotChallengeFailedException
 

@@ -205,6 +205,27 @@ class AuthControllerTest {
         }
 
         @Test
+        @DisplayName("Disposable email domain returns 400 with code DISPOSABLE_EMAIL and creates no account")
+        void register_disposableEmail_returns400() throws Exception {
+            postJson("/api/v1/auth/register",
+                    new RegisterRequest("bot@Mailinator.com", STRONG_PASSWORD, "Bot"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code", is("DISPOSABLE_EMAIL")))
+                    .andExpect(jsonPath("$.errors.email", containsString("Disposable")));
+
+            assertThat(userRepository.findByEmail("bot@mailinator.com")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Oversized Turnstile token is rejected by Bean Validation")
+        void register_oversizedTurnstileToken_returns400() throws Exception {
+            postJson("/api/v1/auth/register",
+                    new RegisterRequest("token@devflow.io", STRONG_PASSWORD, "Token", "x".repeat(2049)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors.turnstileToken", notNullValue()));
+        }
+
+        @Test
         @DisplayName("Malformed JSON body returns 400 ProblemDetail instead of 500")
         void register_malformedJson_returns400() throws Exception {
             mockMvc.perform(post("/api/v1/auth/register")

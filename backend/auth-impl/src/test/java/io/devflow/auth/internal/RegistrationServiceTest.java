@@ -5,11 +5,15 @@ import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.RegisterResponse;
 import io.devflow.auth.api.ResendVerificationRequest;
 import io.devflow.auth.api.VerifyEmailRequest;
+import io.devflow.auth.internal.antiabuse.EmailDomainValidator;
+import io.devflow.auth.internal.antiabuse.TurnstileService;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.UserStatus;
 import io.devflow.auth.internal.entity.VerificationTokenEntity;
 import io.devflow.auth.internal.entity.VerificationTokenType;
+import io.devflow.auth.internal.exception.BotChallengeFailedException;
 import io.devflow.auth.internal.exception.EmailAlreadyExistsException;
+import io.devflow.auth.internal.exception.EmailDomainRejectedException;
 import io.devflow.auth.internal.exception.InvalidFieldException;
 import io.devflow.auth.internal.exception.InvalidVerificationTokenException;
 import io.devflow.auth.internal.exception.RateLimitExceededException;
@@ -54,6 +58,7 @@ import static org.mockito.Mockito.*;
 class RegistrationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-06T10:00:00Z");
+    private static final String CLIENT_IP = "203.0.113.10";
 
     @Mock
     private UserRepository userRepository;
@@ -73,6 +78,12 @@ class RegistrationServiceTest {
     @Mock
     private AuthMetrics metrics;
 
+    @Mock
+    private TurnstileService turnstileService;
+
+    @Mock
+    private EmailDomainValidator emailDomainValidator;
+
     private final VerificationTokenGenerator tokenGenerator = new VerificationTokenGenerator();
     private final VerificationProperties properties = new VerificationProperties();
     private RegistrationService service;
@@ -91,6 +102,8 @@ class RegistrationServiceTest {
                 rateLimiterService,
                 eventPublisher,
                 metrics,
+                turnstileService,
+                emailDomainValidator,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -123,7 +136,7 @@ class RegistrationServiceTest {
             });
 
             RegisterResponse response = service.register(
-                    new RegisterRequest("  New.User@DevFlow.io ", "StrongP4ssword", "  <b>Alex</b>   Mercer "));
+                    new RegisterRequest("  New.User@DevFlow.io ", "StrongP4ssword", "  <b>Alex</b>   Mercer "), CLIENT_IP);
 
             assertThat(response.email()).isEqualTo(email);
             assertThat(response.status()).isEqualTo("PENDING_VERIFICATION");
@@ -155,7 +168,7 @@ class RegistrationServiceTest {
         void register_duplicateEmail() {
             when(userRepository.existsByEmail(email)).thenReturn(true);
 
-            assertThatThrownBy(() -> service.register(new RegisterRequest(email, "StrongP4ssword", "Alex")))
+            assertThatThrownBy(() -> service.register(new RegisterRequest(email, "StrongP4ssword", "Alex"), CLIENT_IP))
                     .isInstanceOf(EmailAlreadyExistsException.class);
 
             verify(userRepository, never()).saveAndFlush(any());
@@ -169,7 +182,7 @@ class RegistrationServiceTest {
             when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$hash");
             when(userRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("uq_users_email"));
 
-            assertThatThrownBy(() -> service.register(new RegisterRequest(email, "StrongP4ssword", "Alex")))
+            assertThatThrownBy(() -> service.register(new RegisterRequest(email, "StrongP4ssword", "Alex"), CLIENT_IP))
                     .isInstanceOf(EmailAlreadyExistsException.class);
             verifyNoInteractions(eventPublisher);
         }
@@ -178,10 +191,35 @@ class RegistrationServiceTest {
         @DisplayName("Rejects a full name that is empty once HTML is stripped")
         void register_htmlOnlyName() {
             assertThatThrownBy(() -> service.register(
-                    new RegisterRequest(email, "StrongP4ssword", "<script></script>")))
+                    new RegisterRequest(email, "StrongP4ssword", "<script></script>"), CLIENT_IP))
                     .isInstanceOf(InvalidFieldException.class)
                     .extracting("field").isEqualTo("fullName");
             verifyNoInteractions(userRepository);
+        }
+
+        @Test
+        @DisplayName("Verifies the Turnstile token with the client IP before touching the database")
+        void register_failedChallenge_stopsBeforeLookup() {
+            doThrow(new BotChallengeFailedException()).when(turnstileService).verify("bad-token", CLIENT_IP);
+
+            assertThatThrownBy(() -> service.register(
+                    new RegisterRequest(email, "StrongP4ssword", "Alex", "bad-token"), CLIENT_IP))
+                    .isInstanceOf(BotChallengeFailedException.class);
+
+            verifyNoInteractions(userRepository, emailDomainValidator, tokenRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Rejects a disposable or undeliverable domain before the duplicate-email lookup")
+        void register_rejectedDomain_stopsBeforeLookup() {
+            doThrow(new EmailDomainRejectedException("DISPOSABLE_EMAIL", "Disposable"))
+                    .when(emailDomainValidator).validate("alex@mailinator.com");
+
+            assertThatThrownBy(() -> service.register(
+                    new RegisterRequest("Alex@Mailinator.com", "StrongP4ssword", "Alex"), CLIENT_IP))
+                    .isInstanceOf(EmailDomainRejectedException.class);
+
+            verifyNoInteractions(userRepository, tokenRepository, eventPublisher);
         }
     }
 

@@ -11,6 +11,7 @@ import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.VerifyEmailRequest;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.internal.security.UserPrincipal;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -42,11 +43,12 @@ public class AuthController {
 
     /**
      * Registers a new account in {@code PENDING_VERIFICATION} state and emails a verification link.
-     * No tokens are issued until the email is verified.
+     * No tokens are issued until the email is verified. Requires a Turnstile token when bot protection is on.
      */
     @PostMapping("/register")
-    public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
-        RegisterResponse response = registrationService.register(request);
+    public ResponseEntity<RegisterResponse> register(
+            @Valid @RequestBody RegisterRequest request, HttpServletRequest servletRequest) {
+        RegisterResponse response = registrationService.register(request, servletRequest.getRemoteAddr());
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
