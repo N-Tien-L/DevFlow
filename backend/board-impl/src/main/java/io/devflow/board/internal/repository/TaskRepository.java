@@ -4,6 +4,9 @@ import io.devflow.board.internal.entity.TaskEntity;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -24,6 +27,16 @@ public interface TaskRepository extends JpaRepository<TaskEntity, UUID> {
     List<TaskEntity> findByBoardIdInDisplayOrder(@Param("boardId") UUID boardId);
 
     Optional<TaskEntity> findByIdAndColumn_Board_Id(UUID id, UUID boardId);
+
+    @EntityGraph(attributePaths = {"column", "column.board"})
+    Page<TaskEntity> findAllByColumn_Id(UUID columnId, Pageable pageable);
+
+    @Query("""
+            select column.board.id from TaskEntity task
+            join task.column column
+            where task.id = :taskId
+            """)
+    Optional<UUID> findBoardIdByTaskId(@Param("taskId") UUID taskId);
 
     long countByColumn_Id(UUID columnId);
 

@@ -39,6 +39,14 @@ public final class BoardApiException extends RuntimeException {
         return new BoardApiException(HttpStatus.CONFLICT, code, detail, null);
     }
 
+    public static BoardApiException invalidAssignee() {
+        return badRequest("INVALID_ASSIGNEE", "assigneeId must identify a member of this workspace.");
+    }
+
+    public static BoardApiException boardArchived() {
+        return conflict("BOARD_ARCHIVED", "Restore the board before changing its tasks.");
+    }
+
     public static BoardApiException unavailable() {
         return new BoardApiException(HttpStatus.SERVICE_UNAVAILABLE, "PERMISSION_CHECK_UNAVAILABLE",
                 "Workspace access could not be verified. Please try again.", null);

@@ -23,6 +23,9 @@ public interface BoardRepository extends JpaRepository<BoardEntity, UUID> {
 
     Optional<BoardEntity> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
+    @Query("select board.workspaceId from BoardEntity board where board.id = :boardId")
+    Optional<UUID> findWorkspaceIdByBoardId(@Param("boardId") UUID boardId);
+
     Page<BoardEntity> findByWorkspaceId(UUID workspaceId, Pageable pageable);
 
     Page<BoardEntity> findByWorkspaceIdAndArchivedFalse(UUID workspaceId, Pageable pageable);

@@ -16,6 +16,7 @@ public class BoardWebConfiguration implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(metricsInterceptor)
-                .addPathPatterns("/api/v1/boards/**", "/api/v1/columns/**", "/api/v1/workspaces/*/boards");
+                .addPathPatterns("/api/v1/boards/**", "/api/v1/columns/**", "/api/v1/tasks/**",
+                        "/api/v1/workspaces/*/boards");
     }
 }
