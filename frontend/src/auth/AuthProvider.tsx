@@ -54,7 +54,7 @@ async function parseResponse<T>(response: Response, uncertain: boolean): Promise
   const contentType = response.headers.get('content-type') ?? '';
   let body: unknown;
   if (response.status !== 204) {
-    if (!contentType.includes('application/json')) {
+    if (!contentType.includes('json')) {
       if (!response.ok) throw new ApiError(`Yêu cầu thất bại (${response.status}).`, response.status, undefined, uncertain);
       throw new ApiError('Máy chủ trả về dữ liệu không đúng định dạng.', response.status, undefined, uncertain);
     }
@@ -165,7 +165,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 10_000);
-      return fetch(path, { ...init, headers, signal: init.signal ?? controller.signal }).finally(() => window.clearTimeout(timeout));
+      const onCallerAbort = () => controller.abort(init.signal?.reason);
+      init.signal?.addEventListener('abort', onCallerAbort, { once: true });
+      if (init.signal?.aborted) onCallerAbort();
+      return fetch(path, { ...init, headers, signal: controller.signal }).finally(() => {
+        window.clearTimeout(timeout);
+        init.signal?.removeEventListener('abort', onCallerAbort);
+      });
     };
     let response: Response;
     try {

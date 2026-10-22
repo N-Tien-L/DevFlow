@@ -47,6 +47,45 @@ export interface TaskListItem {
   updatedAt: string;
 }
 
+export interface TaskDetail extends TaskListItem {
+  boardId: string;
+  workspaceId: string;
+  description: string | null;
+  createdAt: string;
+  version: number;
+}
+
+export interface WorkspaceMember {
+  userId: string;
+  fullName: string;
+  avatarUrl: string | null;
+}
+
+export interface WorkspaceMemberPage {
+  items: WorkspaceMember[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  authorId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskCommentPage {
+  items: TaskComment[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
 export interface TaskPageResponse {
   items: TaskListItem[];
   page: number;

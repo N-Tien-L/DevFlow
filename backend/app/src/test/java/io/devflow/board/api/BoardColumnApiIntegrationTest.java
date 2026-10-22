@@ -652,11 +652,11 @@ class BoardColumnApiIntegrationTest {
         replacement.put("assigneeId", memberId);
         replacement.put("dueDate", dueDate);
         mockMvc.perform(put("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .header("Authorization", bearer(memberId)).header("If-Match", taskEtag(taskId, 0)).contentType("application/json")
                         .content(json(replacement)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Revised task"))
-                .andExpect(jsonPath("$.description").value("**markdown**"))
+                .andExpect(jsonPath("$.description").value("**markdown** <script>alert(1)</script>"))
                 .andExpect(jsonPath("$.priority").value("HIGH"))
                 .andExpect(jsonPath("$.assigneeId").value(memberId.toString()))
                 .andExpect(jsonPath("$.dueDate").value("2026-10-06T10:15:30.123456Z"))
@@ -670,7 +670,7 @@ class BoardColumnApiIntegrationTest {
         clearOptional.put("assigneeId", null);
         clearOptional.put("dueDate", null);
         mockMvc.perform(put("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .header("Authorization", bearer(memberId)).header("If-Match", taskEtag(taskId, 1)).contentType("application/json")
                         .content(json(clearOptional)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.description").doesNotExist())
@@ -680,7 +680,7 @@ class BoardColumnApiIntegrationTest {
         Map<String, Object> invalidAssignee = new java.util.LinkedHashMap<>(clearOptional);
         invalidAssignee.put("assigneeId", outsiderId);
         mockMvc.perform(put("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .header("Authorization", bearer(memberId)).header("If-Match", taskEtag(taskId, 2)).contentType("application/json")
                         .content(json(invalidAssignee)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ASSIGNEE"));
@@ -762,7 +762,7 @@ class BoardColumnApiIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("BOARD_ARCHIVED"));
         mockMvc.perform(put("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .header("Authorization", bearer(memberId)).header("If-Match", taskEtag(taskId, 0)).contentType("application/json")
                         .content(json(Map.of("title", "Can't edit", "priority", "LOW"))))
                 .andExpect(status().isConflict());
         mockMvc.perform(delete("/api/v1/tasks/{taskId}", taskId)
@@ -812,7 +812,7 @@ class BoardColumnApiIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(put("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", bearer(memberId)).contentType("application/json")
+                        .header("Authorization", bearer(memberId)).header("If-Match", taskEtag(taskId, 0)).contentType("application/json")
                         .content("{\"title\":\"missing priority\"}"))
                 .andExpect(status().isBadRequest());
         org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
@@ -835,6 +835,31 @@ class BoardColumnApiIntegrationTest {
                 .andExpect(jsonPath("$.correlationId").exists());
         org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM tasks WHERE column_id = ?", Long.class, columnId)).isZero();
+    }
+
+    @Test
+    void listsWorkspaceMembersAndCreatesAndPagesTaskComments() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/workspaces/{workspaceId}/members", workspaceId)
+                        .header("Authorization", bearer(memberId)).param("q", "member").param("page", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].userId").value(memberId.toString()));
+
+        UUID boardId = createBoard("Comment board", memberId);
+        UUID columnId = createColumn(boardId, "Todo", "TODO");
+        UUID taskId = createTask(columnId, "Commented", memberId);
+        for (int index = 0; index < 3; index++) {
+            mockMvc.perform(post("/api/v1/tasks/{taskId}/comments", taskId)
+                            .header("Authorization", bearer(memberId)).contentType("application/json")
+                            .content(json(Map.of("content", "Comment " + index))))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(get("/api/v1/tasks/{taskId}/comments", taskId)
+                        .header("Authorization", bearer(memberId)).param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1));
     }
 
     private UUID createTask(UUID columnId, String title, UUID actorId) throws Exception {
@@ -938,6 +963,10 @@ class BoardColumnApiIntegrationTest {
 
     private String bearer(UUID userId) {
         return "Bearer " + tokenProvider.generateAccessToken(userId, userId + "@devflow.test");
+    }
+
+    private static String taskEtag(UUID taskId, long version) {
+        return "\"task-" + taskId + "-v" + version + "\"";
     }
 
     private String json(Object value) throws Exception {

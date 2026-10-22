@@ -6,6 +6,7 @@ import io.devflow.auth.api.RefreshTokenRequest;
 import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.WorkspaceSummary;
+import io.devflow.auth.api.WorkspaceMemberPageResponse;
 import io.devflow.auth.internal.security.UserPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -16,9 +17,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * REST API controller for user registration, authentication, token refresh,
@@ -78,6 +82,16 @@ public class AuthController {
     public ResponseEntity<List<WorkspaceSummary>> getUserWorkspaces(@AuthenticationPrincipal UserPrincipal principal) {
         List<WorkspaceSummary> workspaces = authService.getUserWorkspaces(principal.getId());
         return ResponseEntity.ok(workspaces);
+    }
+
+    @GetMapping("/workspaces/{workspaceId}/members")
+    public ResponseEntity<WorkspaceMemberPageResponse> getWorkspaceMembers(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable("workspaceId") UUID workspaceId,
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size) {
+        return ResponseEntity.ok(authService.getWorkspaceMembers(principal.getId(), workspaceId, q, page, size));
     }
 
     // Stubs for future workspace creation/invitation endpoints

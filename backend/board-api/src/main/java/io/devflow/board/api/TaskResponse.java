@@ -17,5 +17,6 @@ public record TaskResponse(
         int position,
         ColumnStatusCategory statusCategory,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        long version) {
 }
