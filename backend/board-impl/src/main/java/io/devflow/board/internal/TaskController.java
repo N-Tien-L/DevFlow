@@ -9,7 +9,6 @@ import io.devflow.board.api.UpdateTaskRequest;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.UUID;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,10 +37,8 @@ public class TaskController {
     @PostMapping("/columns/{columnId}/tasks")
     public ResponseEntity<TaskResponse> createTask(
             @PathVariable("columnId") UUID columnId,
-            @Valid @RequestBody CreateTaskRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody CreateTaskRequest request) {
+        mutationGuard.authorizeMutation();
         TaskResponse task = taskService.createTask(columnId, request);
         return ResponseEntity.created(URI.create("/api/v1/tasks/" + task.id())).body(task);
     }
@@ -63,19 +59,15 @@ public class TaskController {
     @PutMapping("/tasks/{taskId}")
     public TaskResponse replaceTask(
             @PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody UpdateTaskRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody UpdateTaskRequest request) {
+        mutationGuard.authorizeMutation();
         return taskService.replaceTask(taskId, request);
     }
 
     @DeleteMapping("/tasks/{taskId}")
     public ResponseEntity<Void> deleteTask(
-            @PathVariable("taskId") UUID taskId,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @PathVariable("taskId") UUID taskId) {
+        mutationGuard.authorizeMutation();
         taskService.deleteTask(taskId);
         return ResponseEntity.noContent().build();
     }
@@ -83,10 +75,8 @@ public class TaskController {
     @PatchMapping("/tasks/{taskId}/move")
     public TaskMoveResponse moveTask(
             @PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody MoveTaskRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody MoveTaskRequest request) {
+        mutationGuard.authorizeMutation();
         return taskService.moveTask(taskId, request);
     }
 }
