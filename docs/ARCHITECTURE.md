@@ -93,8 +93,8 @@ Modules publish and subscribe to typed events. This table is the contract; treat
 | Event | Published by | Consumed by | Payload (conceptual) |
 |---|---|---|---|
 | `workspace.membership_check_requested` | Board (synchronous request) | Auth | correlation id, actor id, workspace id; Auth records exactly one membership decision before publication returns; never handle asynchronously |
-| `task.created` | Board | AI service, Notification | task id, project id, description |
-| `task.status_changed` | Board, Git & CI | Notification, AI service | task id, old status, new status, cause (manual / git) |
+| `task.created` | Board | AI service, Notification | taskId, projectId (workspace id), boardId, columnId, description, eventId, correlationId, actorId, occurredAt |
+| `task.status_changed` | Board (manual or Git-triggered transition) | Notification, AI service | taskId, boardId, workspaceId, sourceColumnId, destinationColumnId, oldStatus/newStatus (column names), oldStatusCategory/newStatusCategory, cause (manual / git), eventId, correlationId, actorId (nullable for system automation), occurredAt |
 | `git.commit_linked` | Git & CI | Board | task id, commit sha, repo, author |
 | `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo |
 | `ci.failure_detected` | Git & CI | AI service | pipeline id, raw log reference, repo, commit sha |
@@ -102,6 +102,8 @@ Modules publish and subscribe to typed events. This table is the contract; treat
 | `risk.deadline_flagged` | AI service | Notification | task id or sprint id, reason, severity |
 
 **Rule:** per the active workspace instructions, cross-module communication uses typed events extending `DevFlowEvent`; modules never import another module's internals or call its public interfaces directly. A synchronous request/decision event must be handled on the publishing thread, return exactly one decision, and fail closed when no valid response is received. Domain notifications remain ordinary typed events.
+
+**Task event delivery:** Board captures task state as an immutable event snapshot and publishes `task.created` / `task.status_changed` after the database transaction commits. Reordering a task within the same column does not change its status and does not emit `task.status_changed`. Spring's event bus is in-process and synchronous; delivery is not durable across process failure, does not guarantee FIFO across concurrent commits, and has no automatic retry. Use a transactional outbox and idempotent consumers in a separately scoped change before these events trigger side effects that must not be lost.
 
 ## 5. API layer
 

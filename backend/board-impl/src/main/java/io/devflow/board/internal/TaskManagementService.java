@@ -14,6 +14,7 @@ import io.devflow.board.internal.entity.TaskEntity;
 import io.devflow.board.internal.repository.BoardRepository;
 import io.devflow.board.internal.repository.ColumnRepository;
 import io.devflow.board.internal.repository.TaskRepository;
+import io.devflow.common.event.TaskStatusChangedEvent;
 import io.devflow.common.security.AuthenticatedActor;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -46,6 +47,7 @@ public class TaskManagementService {
     private final AuthenticatedActorProvider actorProvider;
     private final WorkspaceMembershipPermissionService permissionService;
     private final BoardAuditService auditService;
+    private final TaskEventPublisher taskEventPublisher;
     private final int maxTasksPerColumn;
 
     public TaskManagementService(
@@ -55,6 +57,7 @@ public class TaskManagementService {
             AuthenticatedActorProvider actorProvider,
             WorkspaceMembershipPermissionService permissionService,
             BoardAuditService auditService,
+            TaskEventPublisher taskEventPublisher,
             @Value("${devflow.board.tasks.max-per-column:1000}") int maxTasksPerColumn) {
         if (maxTasksPerColumn < 1) {
             throw new IllegalArgumentException("Maximum tasks per column must be positive");
@@ -65,6 +68,7 @@ public class TaskManagementService {
         this.actorProvider = actorProvider;
         this.permissionService = permissionService;
         this.auditService = auditService;
+        this.taskEventPublisher = taskEventPublisher;
         this.maxTasksPerColumn = maxTasksPerColumn;
     }
 
@@ -114,6 +118,8 @@ public class TaskManagementService {
             changedFields.add("dueDate");
         }
         auditService.record(actorId, "CREATE", "TASK", task.getId(), board.getWorkspaceId(), changedFields);
+        taskEventPublisher.publishCreated(
+                task.getId(), board.getId(), board.getWorkspaceId(), column.getId(), task.getDescription(), actorId);
         return toResponse(task, board);
     }
 
@@ -226,6 +232,7 @@ public class TaskManagementService {
             throw BoardApiException.badRequest("INVALID_MOVE", "columnId and position are required.");
         }
         UUID sourceColumnId = task.getColumn().getId();
+        ColumnEntity sourceColumn = task.getColumn();
         ColumnEntity destination = columnRepository.findByIdAndBoard_Id(request.columnId(), boardId)
                 .orElseThrow(BoardApiException::notFound);
         UUID destinationColumnId = destination.getId();
@@ -265,6 +272,20 @@ public class TaskManagementService {
                 auditService.recordTaskMove(
                         actorId, taskId, board.getWorkspaceId(), sourceColumnId, destinationColumnId);
             }
+        }
+        if (!sameColumn) {
+            taskEventPublisher.publishStatusChanged(
+                    taskId,
+                    board.getId(),
+                    board.getWorkspaceId(),
+                    sourceColumnId,
+                    destinationColumnId,
+                    sourceColumn.getName(),
+                    destination.getName(),
+                    sourceColumn.getStatusCategory().name(),
+                    destination.getStatusCategory().name(),
+                    TaskStatusChangedEvent.StatusChangeCause.MANUAL,
+                    actorId);
         }
         return new TaskMoveResponse(toResponse(task, board), sourceColumnId, destinationColumnId);
     }
