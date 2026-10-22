@@ -7,7 +7,6 @@ import { useDroppable } from '@dnd-kit/react';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
 import { getBoard, listBoards, listColumns, listTasks, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
-import { useTurnstileToken } from '../hooks/useTurnstileToken';
 const TaskDetailModal = lazy(() => import('../components/board/TaskDetailModal').then((module) => ({ default: module.TaskDetailModal })));
 import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskListItem, type TaskPageResponse, type TaskPriority, type WorkspaceSummary } from '../types/board';
 
@@ -78,7 +77,6 @@ export default function BoardPage() {
   const { boardId } = useParams();
   const navigate = useNavigate();
   const { user, request, signOut } = useAuth();
-  const turnstile = useTurnstileToken();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [boards, setBoards] = useState<BoardSummary[]>([]);
@@ -266,11 +264,10 @@ export default function BoardPage() {
     setPreviewColumns(null);
     setBoard((current) => current ? { ...current, columns: optimistic } : current);
     setPending(true);
-    setNotice('Đang xác minh và lưu vị trí…');
+    setNotice('Đang lưu vị trí…');
     let committed = false;
     try {
-      const token = await turnstile.getToken();
-      await moveTask(request, taskId, position.columnId, position.index, token);
+      await moveTask(request, taskId, position.columnId, position.index);
       committed = true;
       setNotice('Đã lưu vị trí. Đang đồng bộ board…');
       await refreshColumns([previous.columnId, position.columnId], generation);
@@ -504,8 +501,6 @@ export default function BoardPage() {
             <span>{notice}</span>
             {syncBlocked && <button className="font-semibold underline" onClick={() => boardId && void loadBoard(boardId)}>Tải lại board</button>}
           </div>}
-          {!turnstile.enabled && !board.archived && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Thiếu cấu hình Turnstile. Board vẫn xem được, thao tác kéo thẻ sẽ bị khóa.</p>}
-          {turnstile.error && <p className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{turnstile.error}</p>}
           {board.columns.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">Board này chưa có cột nào.</div>}
 
           <DragDropProvider<DragData> onDragStart={handleDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
@@ -518,7 +513,7 @@ export default function BoardPage() {
                 index={columnIndex}
                 activeFilters={filtersActive}
                 canReorder={!board.archived && !pending && !syncBlocked}
-                canMoveCards={!board.archived && !pending && !syncBlocked && !filtersActive && turnstile.enabled && turnstile.ready && column.complete}
+                canMoveCards={!board.archived && !pending && !syncBlocked && !filtersActive && column.complete}
                 onMoveTask={moveTaskFromMenu}
                 onOpenTask={setSelectedTaskId}
                 onRetry={() => void loadColumn(column.id, generationRef.current)}
@@ -528,7 +523,7 @@ export default function BoardPage() {
           </DragDropProvider>
           <p className="sr-only" aria-live="assertive">{activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}</p>
           {selectedTaskId && <Suspense fallback={<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="status">Đang mở chi tiết task…</div>}><TaskDetailModal key={`${board.id}:${selectedTaskId}`} taskId={selectedTaskId}
-            canEdit={!board.archived && !pending && !syncBlocked && turnstile.enabled}
+            canEdit={!board.archived && !pending && !syncBlocked}
             onClose={() => setSelectedTaskId(null)} onSaved={handleTaskSaved} /></Suspense>}
         </>}
       </div>

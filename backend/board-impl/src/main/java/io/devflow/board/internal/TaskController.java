@@ -14,7 +14,6 @@ import java.net.URI;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,10 +48,8 @@ public class TaskController {
     @PostMapping("/columns/{columnId}/tasks")
     public ResponseEntity<TaskResponse> createTask(
             @PathVariable("columnId") UUID columnId,
-            @Valid @RequestBody CreateTaskRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody CreateTaskRequest request) {
+        mutationGuard.authorizeMutation();
         TaskResponse task = taskService.createTask(columnId, request);
         return ResponseEntity.created(URI.create("/api/v1/tasks/" + task.id())).body(task);
     }
@@ -75,11 +72,9 @@ public class TaskController {
     public ResponseEntity<TaskResponse> replaceTask(
             @PathVariable("taskId") UUID taskId,
             @Valid @RequestBody UpdateTaskRequest request,
-            @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
         long expectedVersion = parseVersion(taskId, ifMatch);
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+        mutationGuard.authorizeMutation();
         TaskResponse task = taskService.replaceTask(taskId, request, expectedVersion);
         return ResponseEntity.ok().eTag(taskEtag(task)).body(task);
     }
@@ -93,10 +88,8 @@ public class TaskController {
 
     @PostMapping("/tasks/{taskId}/comments")
     public ResponseEntity<TaskCommentResponse> createComment(@PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody CreateTaskCommentRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody CreateTaskCommentRequest request) {
+        mutationGuard.authorizeMutation();
         TaskCommentResponse comment = commentService.create(taskId, request);
         return ResponseEntity.created(URI.create("/api/v1/tasks/" + taskId + "/comments/" + comment.id()))
                 .body(comment);
@@ -104,10 +97,8 @@ public class TaskController {
 
     @DeleteMapping("/tasks/{taskId}")
     public ResponseEntity<Void> deleteTask(
-            @PathVariable("taskId") UUID taskId,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @PathVariable("taskId") UUID taskId) {
+        mutationGuard.authorizeMutation();
         taskService.deleteTask(taskId);
         return ResponseEntity.noContent().build();
     }
@@ -115,10 +106,8 @@ public class TaskController {
     @PatchMapping("/tasks/{taskId}/move")
     public TaskMoveResponse moveTask(
             @PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody MoveTaskRequest request,
-            @RequestHeader(name = "X-Turnstile-Token", required = false) String turnstileToken,
-            HttpServletRequest servletRequest) {
-        mutationGuard.authorizeMutation(turnstileToken, servletRequest.getRemoteAddr());
+            @Valid @RequestBody MoveTaskRequest request) {
+        mutationGuard.authorizeMutation();
         return taskService.moveTask(taskId, request);
     }
 
