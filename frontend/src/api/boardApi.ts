@@ -28,12 +28,9 @@ export function listTasks(request: ApiRequest, columnId: string, page: number) {
   return request<TaskPageResponse>(`/api/v1/columns/${columnId}/tasks?page=${page}&size=100`);
 }
 
-export function moveTask(request: ApiRequest, taskId: string, columnId: string, position: number, token: string) {
-  const headers: Record<string, string> = {};
-  if (token) headers['X-Turnstile-Token'] = token;
+export function moveTask(request: ApiRequest, taskId: string, columnId: string, position: number) {
   return request(`/api/v1/tasks/${taskId}/move`, {
     method: 'PATCH',
-    headers,
     body: JSON.stringify({ columnId, position }),
   });
 }
