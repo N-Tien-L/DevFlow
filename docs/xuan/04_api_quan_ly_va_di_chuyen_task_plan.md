@@ -226,6 +226,8 @@ Tái sử dụng quota Board actor mặc định 60 mutation/60 giây trên mộ
 
 **Gate bot protection:** AGENTS yêu cầu Turnstile với mutation form nhạy cảm; PRODUCT_SPEC/ARCHITECTURE nêu public mutations. Khi triển khai, xác định rõ route/form Task nhạy cảm (đặc biệt thay nội dung/assignee và delete), token/header contract với frontend và verifier owner. Nếu áp dụng verifier do Auth sở hữu, đi qua typed event common; không dùng Auth internal. Không biến drag/reorder thành CAPTCHA lặp vô nghĩa mà chưa chốt policy. Route đã xác định cần challenge phải verify server-side, single-use, fail closed trước lock; có connect/read timeout, xử lý lỗi mạng hữu hạn, không log token. Không đánh dấu NFR này hoàn tất chỉ vì endpoint có JWT/rate limit. Phần mapping policy chưa chốt được giữ ở checklist G3, không tự miễn yêu cầu AGENTS.
 
+> **Quyết định (2026-10-22, Tiến — owner auth):** không áp dụng Turnstile cho task mutation. Các route này đã yêu cầu JWT, kiểm tra membership workspace và rate limit theo actor; Turnstile chỉ dùng cho form công khai chưa đăng nhập (`/register`, `/login`, `/resend-verification`, T-004B) theo ARCHITECTURE §9.2. Header `X-Turnstile-Token` và lời gọi Siteverify đã được gỡ khỏi `TaskMutationRequestGuard`.
+
 ### 3.8. Observability, public contract và bàn giao event
 
 - Mở rộng metrics patterns cho `/api/v1/tasks/**`, giữ `/columns/**`; timer/counter gắn route template, method, status, không gắn task UUID/actor UUID làm label gây cardinality cao.

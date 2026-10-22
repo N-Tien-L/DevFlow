@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createTaskComment, getTaskDetail, listTaskComments, listWorkspaceMembers, updateTaskDetail } from '../../api/boardApi';
 import { useAuth } from '../../auth/AuthProvider';
-import { useTurnstileToken } from '../../hooks/useTurnstileToken';
 import { ApiError, type TaskComment, type TaskCommentPage, type TaskDetail, type TaskPriority, type WorkspaceMember } from '../../types/board';
 
 type Draft = { title: string; description: string; priority: TaskPriority; assigneeId: string; dueLocal: string };
@@ -61,7 +60,6 @@ interface TaskDetailModalProps {
 
 export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, commentsRefreshVersion = 0, remoteDeleted = false, onClose, onSaved }: TaskDetailModalProps) {
   const { request } = useAuth();
-  const turnstile = useTurnstileToken();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const commentsListRef = useRef<HTMLUListElement>(null);
@@ -303,11 +301,10 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
     savingRef.current = true;
     setSaving(true); setError(null); setNotice(null); setRemoteTask(null);
     try {
-      const token = await turnstile.getToken();
       const result = await updateTaskDetail(request, task, {
         title, description: draft.description || null, priority: draft.priority,
         assigneeId: draft.assigneeId || null, dueDate,
-      }, token);
+      });
       setTask(result); setDraft(draftFrom(result)); setNotice('Đã lưu thay đổi.'); onSaved(result);
     } catch (reason) {
       const message = errorText(reason);
@@ -355,8 +352,7 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
     sendingCommentRef.current = true;
     setSendingComment(true); setCommentsError(null); setCommentNotice(null);
     try {
-      const token = await turnstile.getToken();
-      const saved = await createTaskComment(request, taskId, content, token);
+      const saved = await createTaskComment(request, taskId, content);
       if (!remoteDeleted && !remoteUnavailable) setComments((current) => [...current.filter((comment) => comment.id !== saved.id), saved].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
       setCommentDraft(''); setCommentNotice('Đã gửi bình luận.');
     } catch (reason) {
@@ -443,7 +439,7 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
               {commentPage + 1 < commentTotalPages && <button type="button" disabled={commentsLoading} onClick={() => void loadMoreComments()} className="mt-3 text-xs font-semibold text-indigo-700 underline">Tải bình luận cũ hơn</button>}
               {commentNotice && <p className="mt-3 text-xs text-indigo-700" role="status">{commentNotice}</p>}
               <label className="mt-4 block"><span className="mb-1.5 block text-xs font-semibold">Viết bình luận</span><textarea ref={commentInputRef} rows={3} maxLength={5000} disabled={isArchived || sendingComment} value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} placeholder="Nhập nội dung…" className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100" /></label>
-            <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-400">{[...commentDraft].length}/5.000</span><button type="button" onClick={() => void sendComment()} disabled={isArchived || sendingComment || !commentDraft.trim() || [...commentDraft.trim()].length > 5000 || !turnstile.enabled || !turnstile.ready} className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{sendingComment ? 'Đang gửi…' : 'Gửi bình luận'}</button></div>
+            <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-400">{[...commentDraft].length}/5.000</span><button type="button" onClick={() => void sendComment()} disabled={isArchived || sendingComment || !commentDraft.trim() || [...commentDraft.trim()].length > 5000} className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{sendingComment ? 'Đang gửi…' : 'Gửi bình luận'}</button></div>
             </div>
           </section>
 
@@ -458,11 +454,9 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
 
         {error && <div className="mx-5 mb-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-800 sm:mx-7" role="alert">{error}{remoteTask && <div className="mt-2 flex flex-wrap items-center gap-3"><span>Phiên bản mới nhất đã sẵn sàng.</span><button type="button" onClick={mergeRemote} className="font-semibold underline">Nạp bản mới và giữ phần đang sửa</button></div>}</div>}
         {notice && <p className="mx-5 mb-3 text-sm text-emerald-700 sm:mx-7" role="status">{notice}</p>}
-        {turnstile.error && <p className="mx-5 mb-3 text-sm text-rose-700 sm:mx-7" role="alert">{turnstile.error}</p>}
-        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:px-7"><span className="text-xs text-slate-500">{hasUnsaved ? 'Có bản nháp chưa lưu' : isArchived ? 'Chỉ xem' : 'Đã lưu'}</span><div className="flex gap-2"><button type="button" onClick={requestClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Đóng</button><button disabled={isArchived || !dirty || saving || !turnstile.enabled || !turnstile.ready} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Đang lưu…' : 'Lưu thay đổi'}</button></div></footer>
+        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:px-7"><span className="text-xs text-slate-500">{hasUnsaved ? 'Có bản nháp chưa lưu' : isArchived ? 'Chỉ xem' : 'Đã lưu'}</span><div className="flex gap-2"><button type="button" onClick={requestClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Đóng</button><button disabled={isArchived || !dirty || saving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Đang lưu…' : 'Lưu thay đổi'}</button></div></footer>
       </form>}
     </div>
-    <div ref={turnstile.hostRef} className="fixed bottom-3 left-3 z-[1000]" />
 
     {confirmClose && <div className="fixed inset-0 z-[1001] grid place-items-center bg-slate-950/45 p-4" role="presentation"><section role="alertdialog" aria-modal="true" aria-labelledby="discard-title" className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl"><h3 id="discard-title" className="font-bold">Bỏ nội dung chưa lưu?</h3><p className="mt-2 text-sm text-slate-600">Thay đổi task hoặc bình luận đang viết sẽ bị mất.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setConfirmClose(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">Tiếp tục sửa</button><button type="button" onClick={() => { setConfirmClose(false); setDraft(task ? draftFrom(task) : null); setCommentDraft(''); dialogRef.current?.close(); onClose(); }} className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white">Bỏ thay đổi</button></div></section></div>}
   </dialog>;

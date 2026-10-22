@@ -7,7 +7,6 @@ import { useDroppable } from '@dnd-kit/react';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
 import { getBoard, listBoards, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
-import { useTurnstileToken } from '../hooks/useTurnstileToken';
 import { useBoardSync, type BoardConnectionStatus } from '../hooks/useBoardSync';
 import { emptyBoardSyncScopes, fetchBoardSnapshot, fetchEveryTaskPage, hasBoardSyncWork, mapWithConcurrency, MAX_PAGES_PER_COLUMN, mergeBoardSyncScopes, type BoardSyncScopes } from '../board/boardSyncCoordinator';
 import type { BoardMutationMessage } from '../realtime/boardMutation';
@@ -51,7 +50,6 @@ export default function BoardPage() {
   const { boardId } = useParams();
   const navigate = useNavigate();
   const { user, ready: authReady, request, signOut, getValidAccessToken, sessionGeneration } = useAuth();
-  const turnstile = useTurnstileToken();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [boards, setBoards] = useState<BoardSummary[]>([]);
@@ -597,11 +595,10 @@ export default function BoardPage() {
     setPreviewColumns(null);
     setBoard((current) => current ? { ...current, columns: optimistic } : current);
     setPending(true);
-    setNotice('Đang xác minh và lưu vị trí…');
+    setNotice('Đang lưu vị trí…');
     let committed = false;
     try {
-      const token = await turnstile.getToken();
-      await moveTask(request, taskId, position.columnId, position.index, token);
+      await moveTask(request, taskId, position.columnId, position.index);
       committed = true;
       if (generation === generationRef.current) scheduleBoardSync({ full: false, refreshColumns: new Set([previous.columnId, position.columnId]), refreshTaskDetail: false, refreshComments: false });
       if (generation === generationRef.current) setNotice('Đã lưu vị trí. Đang đồng bộ board…');
@@ -843,8 +840,6 @@ export default function BoardPage() {
             <span>{connectionStatus === 'connected' && !syncBlocked ? 'Đồng bộ realtime đang hoạt động' : connectionStatus === 'offline' ? 'Mất mạng · board chỉ đọc' : connectionStatus === 'error' ? 'Realtime chưa kết nối' : connectionStatus === 'reconnecting' ? 'Đang kết nối lại · dữ liệu cần đối soát' : connectionStatus === 'connecting' ? 'Đang kết nối đồng bộ board…' : 'Chưa kết nối đồng bộ board'}</span>
             {connectionStatus === 'connected' && !syncBlocked && <span className="text-xs">Dữ liệu đã đối soát</span>}
           </div>
-          {!turnstile.enabled && !board.archived && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Thiếu cấu hình Turnstile. Board vẫn xem được, thao tác kéo thẻ sẽ bị khóa.</p>}
-          {turnstile.error && <p className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{turnstile.error}</p>}
           {board.columns.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">Board này chưa có cột nào.</div>}
 
           <DragDropProvider<DragData> onDragStart={handleDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
@@ -857,7 +852,7 @@ export default function BoardPage() {
                 index={columnIndex}
                 activeFilters={filtersActive}
                 canReorder={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
-                canMoveCards={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && !filtersActive && turnstile.enabled && turnstile.ready && column.complete}
+                canMoveCards={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && !filtersActive && column.complete}
                 onMoveTask={moveTaskFromMenu}
                 onOpenTask={(taskId) => { setSelectedTaskDeleted(false); setSelectedTaskId(taskId); }}
                 onRetry={() => void loadColumn(column.id, generationRef.current)}
@@ -867,7 +862,7 @@ export default function BoardPage() {
           </DragDropProvider>
           <p className="sr-only" aria-live="assertive">{activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}</p>
           {selectedTaskId && <Suspense fallback={<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="status">Đang mở chi tiết task…</div>}><TaskDetailModal key={`${board.id}:${selectedTaskId}`} taskId={selectedTaskId}
-            canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && turnstile.enabled}
+            canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
             detailRefreshVersion={taskDetailRefreshVersion}
             commentsRefreshVersion={commentsRefreshVersion}
             remoteDeleted={selectedTaskDeleted}
