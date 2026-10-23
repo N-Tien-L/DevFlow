@@ -230,6 +230,28 @@ Association table managing workspace memberships and assigned roles.
 
 ---
 
+#### Table `workspace_invitations` *(V8 tentative, T-007)*
+Single-use, expiring invitations to join a workspace. Only the SHA-256 digest of the token is stored; the raw token exists solely in the emailed link.
+
+| Column Name | Data Type | Attributes | Description & Constraints |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Invitation ID |
+| `workspace_id` | `UUID` | FK, NOT NULL | References `workspaces(id)` ON DELETE CASCADE |
+| `email` | `VARCHAR(254)` | NOT NULL | Invitee email, lower case (`ck_workspace_invitations_email_lower`) |
+| `role` | `VARCHAR(16)` | NOT NULL, DEFAULT `'MEMBER'` | Role granted on accept: `ADMIN`, `MEMBER` (`ck_workspace_invitations_role`; `OWNER` is never invited) |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | Hex SHA-256 of the 256-bit raw token (`uq_workspace_invitations_token_hash`) |
+| `status` | `VARCHAR(16)` | NOT NULL, DEFAULT `'PENDING'` | `PENDING`, `ACCEPTED`, `REVOKED` (`ck_workspace_invitations_status`); expiry is derived from `expires_at` |
+| `invited_by` | `UUID` | FK, NULL | References `users(id)` ON DELETE SET NULL |
+| `expires_at` | `TIMESTAMPTZ` | NOT NULL | Expiry (default TTL 7 days) |
+| `accepted_at` / `accepted_by` | `TIMESTAMPTZ` / `UUID` | NULL | Set on accept; `accepted_at` is non-null exactly when `status = 'ACCEPTED'` |
+| `revoked_at` | `TIMESTAMPTZ` | NULL | Set on revoke; non-null exactly when `status = 'REVOKED'` |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Audit timestamps |
+
+- **Indexes:** `uq_workspace_invitations_open` partial UNIQUE on `(workspace_id, email) WHERE status = 'PENDING'` (one open invitation per email; also serves the pending listing); `idx_workspace_invitations_expires_at` on `(expires_at)`.
+- **Retention:** the nightly auth cleanup job deletes invitations expired or revoked more than 7 days ago.
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 #### Table `boards`
@@ -615,6 +637,7 @@ Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated
    - Tables: 5 Git/CI module tables.
    - Requirement: `git_commits.task_id` and `pull_requests.task_id` MUST be declared as `UUID NULL`.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` adds `users.status`, `users.email_verified_at` and `verification_tokens`.
+   - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` (number tentative, assigned at merge) adds `workspace_invitations`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
    - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.

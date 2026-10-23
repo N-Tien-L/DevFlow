@@ -233,6 +233,28 @@ Bảng liên kết quản lý thành viên và quyền hạn trong workspace.
 
 ---
 
+#### Bảng `workspace_invitations` *(V8 tạm, T-007)*
+Lời mời tham gia workspace, dùng một lần và có hạn. Chỉ lưu SHA-256 của token; token gốc chỉ nằm trong link gửi qua email.
+
+| Tên cột | Kiểu dữ liệu | Thuộc tính | Mô tả & Ràng buộc |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | ID lời mời |
+| `workspace_id` | `UUID` | FK, NOT NULL | Tham chiếu `workspaces(id)` ON DELETE CASCADE |
+| `email` | `VARCHAR(254)` | NOT NULL | Email người được mời, chữ thường (`ck_workspace_invitations_email_lower`) |
+| `role` | `VARCHAR(16)` | NOT NULL, DEFAULT `'MEMBER'` | Vai trò khi chấp nhận: `ADMIN`, `MEMBER` (không bao giờ mời `OWNER`) |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | SHA-256 dạng hex của token ngẫu nhiên 256-bit |
+| `status` | `VARCHAR(16)` | NOT NULL, DEFAULT `'PENDING'` | `PENDING`, `ACCEPTED`, `REVOKED`; hết hạn suy ra từ `expires_at` |
+| `invited_by` | `UUID` | FK, NULL | Tham chiếu `users(id)` ON DELETE SET NULL |
+| `expires_at` | `TIMESTAMPTZ` | NOT NULL | Thời điểm hết hạn (mặc định 7 ngày) |
+| `accepted_at` / `accepted_by` | `TIMESTAMPTZ` / `UUID` | NULL | Ghi khi chấp nhận |
+| `revoked_at` | `TIMESTAMPTZ` | NULL | Ghi khi thu hồi |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Thời gian tạo / cập nhật |
+
+- **Chỉ mục:** `uq_workspace_invitations_open` UNIQUE một phần trên `(workspace_id, email) WHERE status = 'PENDING'` (mỗi email chỉ một lời mời đang mở); `idx_workspace_invitations_expires_at` trên `(expires_at)`.
+- **Lưu giữ:** job dọn dẹp hằng đêm của auth xoá lời mời đã hết hạn hoặc bị thu hồi quá 7 ngày.
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 Quản lý vòng đời công việc, bảng Kanban, các cột trạng thái, bình luận và nhãn phân loại.
@@ -633,6 +655,7 @@ V3–V5 đã được triển khai cho board audit, task audit và task version.
    - Bảng triển khai: 5 bảng phân hệ Git & CI.
    - Lưu ý: Cột `task_id` trong `git_commits` và `pull_requests` khai báo `UUID NULL` thuần túy.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` bổ sung `users.status`, `users.email_verified_at` và bảng `verification_tokens`.
+   - Lời mời workspace (T-007): `V8__auth_workspace_invitations.sql` (số tạm, cấp lại khi merge) bổ sung bảng `workspace_invitations`.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
    - File: chọn version chưa được sử dụng (V8+) khi triển khai; không tái sử dụng V4–V7.
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.
