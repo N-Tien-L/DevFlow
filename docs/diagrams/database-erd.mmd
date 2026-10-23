@@ -112,7 +112,8 @@ erDiagram
         varchar provider "50 [GITHUB, GITLAB]"
         varchar remote_repo_id "100, NOT NULL"
         varchar name "255, NOT NULL"
-        varchar webhook_secret "255, NOT NULL"
+        varchar repository_url "2048, NOT NULL"
+        varchar webhook_secret_ref "255, NOT NULL; external key reference"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -120,13 +121,14 @@ erDiagram
     git_commits {
         uuid id PK "gen_random_uuid()"
         uuid repository_id FK "repositories.id (Hard FK)"
-        varchar sha UK "64, NOT NULL"
-        text message "NOT NULL"
-        varchar author_name "255, NOT NULL"
-        varchar author_email "255, NOT NULL"
+        varchar sha "40/64 lowercase hex; UNIQUE(repository_id,sha)"
+        text message "NOT NULL; <=65536 bytes"
+        varchar author_name "255, NULL"
+        varchar author_email "255, NULL"
         uuid task_id "Soft Ref -> tasks"
         timestamptz committed_at "NOT NULL"
         timestamptz created_at
+        timestamptz updated_at
     }
 
     pull_requests {
@@ -139,6 +141,7 @@ erDiagram
         varchar status "50 [OPEN, MERGED, CLOSED]"
         uuid task_id "Soft Ref -> tasks"
         varchar pr_url "512, NOT NULL"
+        timestamptz provider_updated_at
         timestamptz created_at
         timestamptz updated_at
     }
@@ -147,24 +150,32 @@ erDiagram
         uuid id PK "gen_random_uuid()"
         uuid repository_id FK "repositories.id (Hard FK)"
         varchar pipeline_id "100, NOT NULL"
+        int run_attempt "positive; DEFAULT 1; UNIQUE(repository_id,pipeline_id,run_attempt)"
         varchar commit_sha "64, NOT NULL"
         varchar branch "255, NOT NULL"
-        varchar status "50 [PENDING, RUNNING, SUCCESS, FAILED]"
+        varchar status "50; normalized status incl. canceled/skipped/unknown"
+        varchar provider_status "50, NULL"
+        varchar provider_conclusion "50, NULL"
         timestamptz started_at
         timestamptz finished_at
+        timestamptz provider_updated_at
         timestamptz created_at
+        timestamptz updated_at
     }
 
     ci_failures {
         uuid id PK "gen_random_uuid()"
         uuid pipeline_id FK "ci_pipelines.id (Hard FK)"
+        varchar failure_key "200, NOT NULL; UNIQUE(pipeline_id,failure_key)"
         varchar stage_name "100, NOT NULL"
         varchar job_name "100, NOT NULL"
-        text error_summary "NULL"
-        text raw_log_snippet "NULL"
-        text ai_summary "NULL"
+        text error_summary "NULL; <=8192 bytes"
+        text raw_log_snippet "NULL; <=16384 bytes; redacted before writing"
+        varchar raw_log_reference "2048, NULL"
+        text ai_summary "NULL; <=16384 bytes; GitCI-owned projection"
         uuid related_task_id "Soft Ref -> tasks"
         timestamptz created_at
+        timestamptz updated_at
     }
 
     repositories ||--o{ git_commits : "receives"

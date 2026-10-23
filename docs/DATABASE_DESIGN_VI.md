@@ -317,6 +317,8 @@ Bảng trung gian thiết lập quan hệ Nhiều - Nhiều (N:M) giữa Task v�
 
 ### 3.3. Module 3: Git & CI Integration (`gitci`)
 
+**Schema đã triển khai theo T-020:** [V6__gitci_schema.sql](../backend/app/src/main/resources/db/migration/V6__gitci_schema.sql). V3–V5 đã dùng cho Board; tên V3 Git/CI trong kế hoạch cũ không còn là version triển khai. Cả năm bảng có UUID PK và `created_at`/`updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`. Writer cập nhật `updated_at`, không có trigger. Tên/định danh bắt buộc không được chỉ chứa dấu cách; SHA lowercase hex dài 40/64, không toàn số 0. UUID workspace/task là tham chiếu mềm, không chứng minh quyền truy cập.
+
 Lưu trữ thông tin tích hợp kho mã nguồn VCS, nhật ký commit, yêu cầu kéo (Pull Request), và lịch sử kiểm thử tự động (CI Pipelines).
 
 #### Bảng `repositories`
@@ -327,13 +329,14 @@ Kho mã nguồn từ GitHub hoặc GitLab được tích hợp vào hệ thống
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính repository |
 | `workspace_id`| `UUID` | NOT NULL | **Soft Reference** trỏ tới `workspaces.id` (Module Auth) |
 | `provider` | `VARCHAR(50)` | NOT NULL | Nhà cung cấp VCS: `GITHUB`, `GITLAB` |
-| `remote_repo_id`| `VARCHAR(100)`| NOT NULL | ID hoặc full path phía máy chủ từ xa (ví dụ: `owner/repo`) |
+| `remote_repo_id`| `VARCHAR(100)`| NOT NULL | ID ổn định phía provider, không dùng tên/slug có thể đổi |
 | `name` | `VARCHAR(255)` | NOT NULL | Tên đại diện hiển thị |
-| `webhook_secret`| `VARCHAR(255)`| NOT NULL | Khóa bảo mật đối soát chữ ký số HMAC của webhook payload |
+| `repository_url` | `VARCHAR(2048)` | NOT NULL | URL chuẩn của kho; ingestion kiểm host và không cho nhúng credential |
+| `webhook_secret_ref`| `VARCHAR(255)`| NOT NULL | Tham chiếu opaque tới key trong cấu hình/secret manager, không lưu key HMAC plaintext |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm kết nối repo |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật |
 
-- **Chỉ mục:** `idx_repositories_workspace` trên `(workspace_id)`.
+- **Unique:** `uq_repositories_workspace_provider_remote(workspace_id, provider, remote_repo_id)`, prefix hỗ trợ truy vấn workspace nên không tạo index đơn trùng. Một remote repo được đăng ký ở hai workspace là hợp lệ; webhook routing phải xác thực đúng integration.
 
 ---
 
@@ -344,16 +347,18 @@ Nhật ký các commit được đồng bộ từ Webhook.
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính bản ghi commit |
 | `repository_id`| `UUID` | FK, NOT NULL | Khóa ngoại nội bộ `repositories(id)` ON DELETE CASCADE |
-| `sha` | `VARCHAR(64)` | UK, NOT NULL | Mã băm commit SHA-1/SHA-256 (`uq_git_commits_sha`) |
-| `message` | `TEXT` | NOT NULL | Thông điệp commit đầy đủ |
-| `author_name` | `VARCHAR(255)` | NOT NULL | Tên tác giả commit |
-| `author_email`| `VARCHAR(255)` | NOT NULL | Email của tác giả commit |
+| `sha` | `VARCHAR(64)` | NOT NULL | Unique theo repository, không unique toàn hệ thống |
+| `message` | `TEXT` | NOT NULL | Cho phép rỗng; tối đa 65.536 byte UTF-8 |
+| `author_name` | `VARCHAR(255)` | NULL | Cho phép thiếu/ẩn danh; không rỗng nếu được cung cấp |
+| `author_email`| `VARCHAR(255)` | NULL | Metadata Git chưa xác thực; không rỗng nếu được cung cấp |
 | `task_id` | `UUID` | NULL | **Soft Reference** trỏ tới `tasks.id` (Module Board) |
 | `committed_at`| `TIMESTAMPTZ` | NOT NULL | Thời điểm commit được tạo trên máy tính lập trình viên |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm hệ thống nhận webhook |
 
+`updated_at` theo quy ước chung. `uq_git_commits_repo_sha UNIQUE(repository_id, sha)` cho phép cùng commit xuất hiện ở nhiều fork/workspace.
+
 - **Chỉ mục:**
-  - `idx_git_commits_repo` trên `(repository_id)`.
+  - Tra cứu repository dùng prefix của unique repo + SHA.
   - `idx_git_commits_task_id` trên `(task_id)` (truy vấn danh sách commit liên quan tới 1 task).
 
 ---
@@ -365,13 +370,14 @@ Theo dõi các yêu cầu kéo mã nguồn (PR) trên Git.
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính bản ghi PR |
 | `repository_id`| `UUID` | FK, NOT NULL | Khóa ngoại nội bộ `repositories(id)` ON DELETE CASCADE |
-| `pr_number` | `INT` | NOT NULL | Số định danh PR trên GitHub/GitLab (ví dụ: `#42`) |
+| `pr_number` | `INT` | NOT NULL, CHECK > 0 | Số định danh PR trên GitHub/GitLab (ví dụ: `#42`) |
 | `title` | `VARCHAR(255)` | NOT NULL | Tiêu đề PR |
 | `source_branch`| `VARCHAR(255)` | NOT NULL | Nhánh nguồn (ví dụ: `feature/T-002-entities`) |
 | `target_branch`| `VARCHAR(255)` | NOT NULL | Nhánh đích (ví dụ: `main`, `develop`) |
 | `status` | `VARCHAR(50)` | NOT NULL | Trạng thái: `OPEN`, `MERGED`, `CLOSED` |
 | `task_id` | `UUID` | NULL | **Soft Reference** trỏ tới `tasks.id` (Module Board) |
 | `pr_url` | `VARCHAR(512)` | NOT NULL | Đường dẫn web trực tiếp tới PR |
+| `provider_updated_at` | `TIMESTAMPTZ` | NULL | Thời điểm phiên bản nguồn để ingestion chống cập nhật cũ |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm mở PR |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật trạng thái PR |
 
@@ -390,16 +396,21 @@ Lịch sử các lần chạy kiểm thử và build tự động của CI/CD.
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính định danh đợt chạy pipeline |
 | `repository_id`| `UUID` | FK, NOT NULL | Khóa ngoại nội bộ `repositories(id)` ON DELETE CASCADE |
 | `pipeline_id` | `VARCHAR(100)` | NOT NULL | ID đợt chạy phía máy chủ CI (ví dụ GitHub Run ID) |
+| `run_attempt` | `INT` | NOT NULL, DEFAULT 1, CHECK > 0 | Một hàng cho một attempt, unique cùng repository và external run ID |
 | `commit_sha` | `VARCHAR(64)` | NOT NULL | Mã commit được đem đi build |
 | `branch` | `VARCHAR(255)` | NOT NULL | Nhánh git được kích hoạt build |
-| `status` | `VARCHAR(50)` | NOT NULL | Trạng thái: `PENDING`, `RUNNING`, `SUCCESS`, `FAILED` |
+| `status` | `VARCHAR(50)` | NOT NULL | `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `CANCELLED`, `SKIPPED`, `TIMED_OUT`, `ACTION_REQUIRED`, `NEUTRAL`, `STALE`, `UNKNOWN` |
+| `provider_status`, `provider_conclusion` | Mỗi cột `VARCHAR(50)` | NULL | Giá trị trạng thái/kết luận gốc của provider |
 | `started_at` | `TIMESTAMPTZ` | NULL | Thời điểm bắt đầu chạy kiểm thử |
 | `finished_at` | `TIMESTAMPTZ` | NULL | Thời điểm kết thúc chạy kiểm thử |
+| `provider_updated_at` | `TIMESTAMPTZ` | NULL | Thời điểm phiên bản nguồn |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm ghi nhận bản ghi |
 
 - **Chỉ mục:**
   - `idx_ci_pipelines_repo_status` trên `(repository_id, status)`.
-  - `idx_ci_pipelines_commit_sha` trên `(commit_sha)`.
+  - `idx_ci_pipelines_repo_commit` trên `(repository_id, commit_sha)`.
+
+`updated_at` theo quy ước chung. `uq_ci_pipelines_repo_run_attempt UNIQUE(repository_id, pipeline_id, run_attempt)` giữ lịch sử chạy lại. Khi đủ hai mốc thời gian thì finished_at >= started_at. Không FK từ commit_sha tới commit row vì webhook CI có thể đến trước push; lookup SHA luôn kèm repository.
 
 ---
 
@@ -410,17 +421,21 @@ Chi tiết các lỗi gãy build của pipeline cần AI phân tích và khắc 
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính định danh bản ghi lỗi |
 | `pipeline_id` | `UUID` | FK, NOT NULL | Khóa ngoại nội bộ `ci_pipelines(id)` ON DELETE CASCADE |
+| `failure_key` | `VARCHAR(200)` | NOT NULL | Key ổn định theo attempt, ví dụ `job:<provider-job-id>` hoặc `run`, không lấy tên hiển thị làm key |
 | `stage_name` | `VARCHAR(100)` | NOT NULL | Tên công đoạn bị lỗi (ví dụ: `unit-test`, `lint`) |
 | `job_name` | `VARCHAR(100)` | NOT NULL | Tên công việc cụ thể bị gãy |
-| `error_summary`| `TEXT` | NULL | Tóm tắt thông báo lỗi trích xuất từ log |
-| `raw_log_snippet`| `TEXT` | NULL | Đoạn log thô chứa stack trace gây lỗi |
-| `ai_summary` | `TEXT` | NULL | Kết quả phân tích nguyên nhân gốc rễ do AI sinh ra |
+| `error_summary`| `TEXT` | NULL | Tối đa 8.192 byte |
+| `raw_log_snippet`| `TEXT` | NULL | Tối đa 16.384 byte; ingestion che secret trước khi ghi |
+| `raw_log_reference` | `VARCHAR(2048)` | NULL | Tham chiếu log opaque, không lưu signed URL hết hạn dài hạn |
+| `ai_summary` | `TEXT` | NULL | Tối đa 16.384 byte; projection do GitCI cập nhật qua event, AI không UPDATE bảng chéo module |
 | `related_task_id`| `UUID` | NULL | **Soft Reference** trỏ tới `tasks.id` (Module Board) |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm ghi nhận |
 
 - **Chỉ mục:**
-  - `idx_ci_failures_pipeline` trên `(pipeline_id)`.
+  - `uq_ci_failures_pipeline_key UNIQUE(pipeline_id, failure_key)` đồng thời hỗ trợ lookup theo pipeline.
   - `idx_ci_failures_related_task` trên `(related_task_id)`.
+
+`updated_at` theo quy ước chung. Unique chỉ chống hàng trùng, không bảo đảm side effect/event chỉ chạy một lần. Xác thực webhook, tenant routing, stale updates, redaction, retention blob và cleanup khi xóa user/workspace được bàn giao ticket tích hợp; không suy ra các cơ chế này đã có từ schema. Không cascade xuyên Auth/Board.
 
 ---
 
@@ -497,9 +512,9 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
 | `tasks` | `assignee_id` | `users` (Auth) | **Soft UUID** | Khi User bị xóa khỏi Workspace, Auth bắn event `user.removed_from_workspace`. Board Listener nhận event và gỡ gán task (`assignee_id = NULL`). |
 | `task_comments`| `author_id` | `users` (Auth) | **Soft UUID** | Hiển thị thông tin người bình luận thông qua `AuthApi.findUserSummary(authorId)`. |
 | `repositories`| `workspace_id` | `workspaces` (Auth) | **Soft UUID** | Kiểm tra quyền `ADMIN` của user trong workspace trước khi cấp phép cấu hình webhook. |
-| `git_commits` | `task_id` | `tasks` (Board) | **Soft UUID** | GitCI Module bóc tách mã task từ commit message (`Refs #T-101`), gọi `BoardApi.taskExists(taskId)` hoặc bắn sự kiện `git.commit_linked`. |
+| `git_commits` | `task_id` | `tasks` (Board) | **Soft UUID** | T-022 phân giải task trong phạm vi repo/workspace qua typed event theo AGENTS hiện hành; T-023 phát `git.commit_linked`. Không gọi trực tiếp API/bảng nội bộ Board. |
 | `pull_requests`| `task_id` | `tasks` (Board) | **Soft UUID** | Khi PR được merge, GitCI phát sự kiện `git.pr_merged`. Board lắng nghe và tự động dời thẻ sang cột có `status_category = 'DONE'`. |
-| `ci_failures` | `related_task_id`| `tasks` (Board) | **Soft UUID** | AI Service phân tích stack trace, đối chiếu commit sha ra task id tương ứng và gán vào trường này. |
+| `ci_failures` | `related_task_id`| `tasks` (Board) | **Soft UUID** | GitCI kiểm tra và lưu liên kết/projection qua typed event; AI không ghi trực tiếp bảng của GitCI. |
 | `ai_conversations`| `user_id` / `workspace_id` | `users` / `workspaces` (Auth) | **Soft UUID** | Xác thực phiên làm việc thông qua Bearer JWT Token ở Security Filter Chain trước khi vào AI Module. |
 | `notifications`| `recipient_id`| `users` (Auth) | **Soft UUID** | Notification Service lắng nghe các sự kiện (ví dụ `board.task_assigned`, `ci.failure_detected`) để tạo bản ghi thông báo tương ứng. |
 | `notifications`| `reference_id`| `tasks` / `ci_pipelines` | **Soft UUID** | Frontend dùng trường này để deep-link trực tiếp đến màn hình chi tiết công việc hoặc chi tiết pipeline gãy. |
@@ -522,7 +537,8 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
 - `users(email)`: Định danh đăng nhập tài khoản.
 - `workspaces(slug)`: URL routing không gian làm việc.
 - `workspace_members(workspace_id, user_id)`: Ngăn chặn thêm trùng thành viên vào một nhóm.
-- `git_commits(sha)`: Ngăn chặn xử lý trùng lặp webhook commit.
+- `repositories(workspace_id, provider, remote_repo_id)`: Định danh integration theo workspace.
+- `git_commits(repository_id, sha)`: Chống commit row trùng trong repo, không bảo đảm xử lý webhook exactly-once.
 - `pull_requests(repository_id, pr_number)`: Định danh duy nhất PR theo từng kho mã nguồn.
 
 ### 5.2. Nhóm chỉ mục khóa ngoại nội bộ & phân cấp cha - con (Parent-Child Indexes)
@@ -541,6 +557,8 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
 
 ## 6. Lộ Trình Triển Khai CSDL Với Flyway (Migration Roadmap)
 
+V3–V5 đã được triển khai cho board audit, task audit và task version. Git/CI dùng V6; AI/Notification phải chọn version còn trống tiếp theo khi triển khai.
+
 Để đảm bảo việc triển khai không làm gián đoạn hệ thống và tuân thủ lộ trình 5 giai đoạn tại [docs/IMPLEMENTATION_PLAN_VI.md](file:///docs/IMPLEMENTATION_PLAN_VI.md):
 
 ```
@@ -558,14 +576,14 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Phase 3 (M3): V3__gitci_schema.sql (Git & CI Integration)   │
+│  Phase 3 (M3): V6__gitci_schema.sql (Git & CI Integration)   │
 │  - repositories, git_commits, pull_requests, ci_pipelines,  │
 │    ci_failures                                              │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Phase 4 (M4): V4__ai_and_notification_schema.sql           │
+│  Phase 4 (M4): version còn trống cho AI/Notification          │
 │  - ai_conversations, ai_messages, notifications             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -579,11 +597,11 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
    - Bảng triển khai: 6 bảng phân hệ Board.
    - Lưu ý: Cột `assignee_id` trong `tasks` khai báo `UUID NULL` thuần túy, tuyệt đối không thêm `REFERENCES users(id)`.
 3. **Giai đoạn 3 (Milestone M3 — Sprint 4):**
-   - File: `V3__gitci_schema.sql`
+   - File: `V6__gitci_schema.sql` (tên V3 trên ticket gốc là lịch sử; không sửa lại V3–V5).
    - Bảng triển khai: 5 bảng phân hệ Git & CI.
    - Lưu ý: Cột `task_id` trong `git_commits` và `pull_requests` khai báo `UUID NULL` thuần túy.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
-   - File: `V4__ai_and_notification_schema.sql`
+   - File: chọn version chưa được sử dụng khi triển khai; không tái sử dụng V4.
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.
 
 ---
