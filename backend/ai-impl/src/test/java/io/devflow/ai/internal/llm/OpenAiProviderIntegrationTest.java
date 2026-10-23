@@ -139,7 +139,8 @@ class OpenAiProviderIntegrationTest {
 
     @Test
     void rateLimitIsTreatedAsTransient() {
-        PROVIDER.respond(429, "{}", 0);
+        PROVIDER.respond(429, "{\"error\":{\"message\":\"Rate limit reached\",\"type\":\"requests\","
+                + "\"param\":null,\"code\":\"rate_limit_exceeded\"}}", 0);
 
         assertThatThrownBy(() -> gateway.complete(AiFeature.PROJECT_QA, null, "question"))
                 .isInstanceOf(AiProviderUnavailableException.class);
@@ -169,6 +170,46 @@ class OpenAiProviderIntegrationTest {
         // arrive. Only that ordering is asserted, so slow CI runners cannot make this flaky.
         assertThat(elapsedMs).isLessThan(SLOW_PROVIDER_DELAY_MS);
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(PROVIDER.requests()).hasSize(3));
+    }
+
+    @Test
+    void providerStallingMidBodyIsRetriedThenReturns503() throws Exception {
+        PROVIDER.respondThenHang(OpenAiStubServer.SUCCESS_BODY, 40, SLOW_PROVIDER_DELAY_MS);
+
+        long started = System.nanoTime();
+        mockMvc.perform(post("/test/ai/complete").contentType(MediaType.TEXT_PLAIN).content("question"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("AI_PROVIDER_UNAVAILABLE"));
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+        assertThat(elapsedMs).isLessThan(SLOW_PROVIDER_DELAY_MS);
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(PROVIDER.requests()).hasSize(3));
+    }
+
+    @Test
+    void malformedProviderJsonIsNotRetried() throws Exception {
+        PROVIDER.respond(200, "{\"id\":\"chatcmpl-test\",\"choices\":[{\"index\":0,", 0);
+
+        mockMvc.perform(post("/test/ai/complete").contentType(MediaType.TEXT_PLAIN).content("question"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("AI_PROVIDER_UNAVAILABLE"));
+
+        assertThat(PROVIDER.requests()).hasSize(1);
+    }
+
+    @Test
+    void quotaExhaustionIsNotRetriedAndDoesNotOpenCircuit(CapturedOutput output) {
+        PROVIDER.respond(429, "{\"error\":{\"message\":\"QUOTA-BODY-CANARY\",\"type\":\"insufficient_quota\","
+                + "\"param\":null,\"code\":\"insufficient_quota\"}}", 0);
+
+        for (int i = 0; i < 5; i++) {
+            assertThatThrownBy(() -> gateway.complete(AiFeature.PROJECT_QA, null, "question"))
+                    .isInstanceOf(AiProviderUnavailableException.class);
+        }
+
+        assertThat(PROVIDER.requests()).hasSize(5);
+        assertThat(resilience.circuitBreaker().getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(output).contains("reason=insufficient_quota").doesNotContain("QUOTA-BODY-CANARY");
     }
 
     @Test

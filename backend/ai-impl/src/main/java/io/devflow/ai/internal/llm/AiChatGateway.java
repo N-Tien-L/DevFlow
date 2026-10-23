@@ -1,5 +1,6 @@
 package io.devflow.ai.internal.llm;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import io.devflow.ai.internal.config.AiProperties;
 import io.devflow.ai.internal.exception.AiPromptRejectedException;
 import io.devflow.ai.internal.exception.AiProviderUnavailableException;
@@ -7,6 +8,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.retry.Retry;
 import io.micrometer.core.instrument.Timer;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
@@ -15,7 +17,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
+import org.springframework.http.converter.HttpMessageConversionException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.ResourceAccessException;
@@ -32,6 +36,7 @@ public class AiChatGateway {
 
     static final String PROMPT_EMPTY = "AI_PROMPT_EMPTY";
     static final String PROMPT_TOO_LARGE = "AI_PROMPT_TOO_LARGE";
+    private static final int MAX_CAUSE_DEPTH = 10;
 
     private static final Logger log = LoggerFactory.getLogger(AiChatGateway.class);
 
@@ -78,9 +83,10 @@ public class AiChatGateway {
                     feature.tag(), providerInfo.provider());
             throw unavailable(open);
         } catch (RuntimeException failure) {
-            log.error("AI provider call failed feature={} provider={} model={} exceptionType={} httpStatus={}",
+            log.error("AI provider call failed feature={} provider={} model={} exceptionType={} httpStatus={} "
+                            + "reason={} transient={}",
                     feature.tag(), providerInfo.provider(), providerInfo.model(),
-                    failure.getClass().getSimpleName(), httpStatus(failure));
+                    failure.getClass().getSimpleName(), httpStatus(failure), reason(failure), isTransient(failure));
             throw unavailable(failure);
         } finally {
             metrics.request(feature, result, sample);
@@ -122,14 +128,28 @@ public class AiChatGateway {
     }
 
     /**
-     * Retry predicate: provider 408/429/5xx, timeouts and connection failures. A read timeout usually
-     * arrives as {@link ResourceAccessException}, but {@code JdkClientHttpRequestFactory} enforces it by
-     * cancelling the response future and, depending on timing, the raw {@link CancellationException}
-     * escapes unwrapped (seen on CI).
+     * Retry predicate: provider 408/429 (except quota)/5xx, timeouts and connection failures, wherever they
+     * sit in the cause chain. Transport failures arrive in several shapes: {@link ResourceAccessException}
+     * before the response; a {@code RestClientException} wrapping the {@link IOException} when the provider
+     * stalls or drops mid-body; or a bare {@link CancellationException}, because
+     * {@code JdkClientHttpRequestFactory} enforces its timeout by cancelling the response future.
+     * A response that arrived but does not parse is not retried: the same request would likely fail again.
      */
     static boolean isTransient(Throwable failure) {
-        return failure instanceof TransientAiException || failure instanceof ResourceAccessException
-                || failure instanceof CancellationException;
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            // Checked first: Jackson parse errors are IOExceptions too.
+            if (current instanceof HttpMessageConversionException || current instanceof JsonProcessingException
+                    || current instanceof NonTransientAiException) {
+                return false;
+            }
+            if (current instanceof TransientAiException || current instanceof ResourceAccessException
+                    || current instanceof CancellationException || current instanceof IOException) {
+                return true;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return false;
     }
 
     private static Object httpStatus(Throwable failure) {
@@ -138,6 +158,14 @@ public class AiChatGateway {
         }
         if (failure instanceof ProviderResponseErrorHandler.NonTransientProviderException rejected) {
             return rejected.status();
+        }
+        return "n/a";
+    }
+
+    private static String reason(Throwable failure) {
+        if (failure instanceof ProviderResponseErrorHandler.NonTransientProviderException rejected
+                && rejected.reason() != null) {
+            return rejected.reason();
         }
         return "n/a";
     }

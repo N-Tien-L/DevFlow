@@ -33,6 +33,7 @@ final class OpenAiStubServer {
     private volatile int status = 200;
     private volatile String body = SUCCESS_BODY;
     private volatile long delayMs;
+    private volatile int bytesBeforeDelay = -1;
 
     OpenAiStubServer() {
         try {
@@ -53,6 +54,13 @@ final class OpenAiStubServer {
         this.status = status;
         this.body = body;
         this.delayMs = delayMs;
+        this.bytesBeforeDelay = -1;
+    }
+
+    /** Sends headers and the first {@code bytesBeforeHang} body bytes, then stalls for {@code hangMs}. */
+    void respondThenHang(String body, int bytesBeforeHang, long hangMs) {
+        respond(200, body, hangMs);
+        this.bytesBeforeDelay = bytesBeforeHang;
     }
 
     void reset() {
@@ -75,14 +83,22 @@ final class OpenAiStubServer {
         requests.add(new RecordedRequest(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
                 exchange.getRequestHeaders().getFirst("Authorization"), requestBody));
         try {
-            if (delayMs > 0) {
+            byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+            int head = bytesBeforeDelay;
+            if (head < 0 && delayMs > 0) {
                 Thread.sleep(delayMs);
             }
-            byte[] payload = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(status, payload.length);
             try (OutputStream out = exchange.getResponseBody()) {
-                out.write(payload);
+                if (head >= 0) {
+                    out.write(payload, 0, head);
+                    out.flush();
+                    Thread.sleep(delayMs);
+                    out.write(payload, head, payload.length - head);
+                } else {
+                    out.write(payload);
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
