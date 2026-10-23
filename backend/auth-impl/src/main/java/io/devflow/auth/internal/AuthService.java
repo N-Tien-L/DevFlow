@@ -6,6 +6,8 @@ import io.devflow.auth.api.LoginRequest;
 import io.devflow.auth.api.RefreshTokenRequest;
 import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.WorkspaceSummary;
+import io.devflow.auth.api.WorkspaceMemberPageResponse;
+import io.devflow.auth.api.WorkspaceMemberSummary;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.WorkspaceEntity;
 import io.devflow.auth.internal.entity.WorkspaceMemberEntity;
@@ -23,6 +25,9 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -139,6 +144,24 @@ public class AuthService implements AuthApi {
             }
         }
         return result;
+    }
+
+    public WorkspaceMemberPageResponse getWorkspaceMembers(UUID actorId, UUID workspaceId, String query,
+            int page, int size) {
+        if (page < 0 || size < 1 || size > 100 || (query != null && query.codePointCount(0, query.length()) > 100))
+            throw new io.devflow.auth.internal.exception.InvalidWorkspaceMemberQueryException();
+        if (!workspaceMemberRepository.existsByWorkspaceIdAndUserId(workspaceId, actorId)) {
+            throw new ResourceNotFoundException("Workspace not found.");
+        }
+        String normalizedQuery = StringUtils.hasText(query) ? query.trim() : "";
+        Page<WorkspaceMemberEntity> result = workspaceMemberRepository
+                .findAllByWorkspace_IdAndUser_FullNameContainingIgnoreCaseOrderByUser_FullNameAscUser_IdAsc(
+                        workspaceId, normalizedQuery, PageRequest.of(page, size));
+        return new WorkspaceMemberPageResponse(
+                result.getContent().stream().map(member -> new WorkspaceMemberSummary(
+                        member.getUser().getId(), member.getUser().getFullName(), member.getUser().getAvatarUrl()))
+                        .toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
     // --- Inter-Module Contract (AuthApi) ---

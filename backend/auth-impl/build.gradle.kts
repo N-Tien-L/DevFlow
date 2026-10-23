@@ -16,6 +16,8 @@ dependencies {
     implementation("io.micrometer:micrometer-core")
     implementation("com.github.ben-manes.caffeine:caffeine")
     implementation("com.bucket4j:bucket4j-core:8.10.1")
+    implementation("org.springframework:spring-messaging")
+    implementation("org.springframework:spring-websocket")
     implementation("io.jsonwebtoken:jjwt-api:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")

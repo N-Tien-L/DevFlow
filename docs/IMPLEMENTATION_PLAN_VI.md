@@ -111,7 +111,7 @@ gantt
 - **Mục tiêu:** Kết nối trực tiếp hoạt động lập trình thực tế (commits, PRs, pipeline fails) với trạng thái Kanban Board mà không cần thao tác tay.
 - **Thời lượng dự kiến:** 2 tuần (Sprint 3)
 - **Nghiệp vụ chi tiết:**
-  1. **Database Migration:** Script `V4__gitci_schema.sql` tạo các bảng: `repositories`, `git_commits`, `pull_requests`, `ci_pipelines`, `ci_failures`.
+  1. **Database Migration:** Script `V6__gitci_schema.sql` tạo các bảng: `repositories`, `git_commits`, `pull_requests`, `ci_pipelines`, `ci_failures`. Tên V3 trên ticket gốc là lịch sử; V3–V5 đã dùng cho Board và không được sửa lại.
   2. **Git & CI Backend (`gitci-impl`):**
      - Endpoint Webhook chung: `POST /api/v1/gitci/webhook/github` và `POST /api/v1/gitci/webhook/gitlab`.
      - Xác thực chữ ký webhook (HMAC SHA-256 Secret) để đảm bảo an toàn.
@@ -231,7 +231,7 @@ Dưới đây là danh sách các thẻ mẫu sẵn sàng chuyển thành ticket
 - `T-018`: Tích hợp Frontend WebSocket Client đồng bộ chuyển động thẻ real-time
 
 ### Phase 3 Tickets
-- `T-020`: Thiết lập Flyway Migration cho Git & CI Schema (`V4__gitci_schema.sql`)
+- `T-020`: Thiết lập Flyway Migration cho Git & CI Schema (`V6__gitci_schema.sql`; tên V3 trên ticket gốc là lịch sử)
 - `T-021`: Xây dựng Webhook Ingestion Controller & HMAC SHA-256 Signature Validator
 - `T-022`: Xây dựng Bộ Parser tách Task ID từ Git Commits & Branch Names
 - `T-023`: Hiện thực phát Domain Events (`git.commit_linked`, `git.pr_opened`, `git.pr_merged`)

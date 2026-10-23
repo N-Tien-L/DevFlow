@@ -30,3 +30,7 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## Board configuration
+
+The board uses the authenticated `/api/v1` endpoints. Task mutations are protected by the JWT session, workspace membership checks and per-user rate limiting, so no Turnstile key is needed for the board. Turnstile is reserved for the public auth forms (register, login, resend verification).
