@@ -120,6 +120,18 @@ devflow:
       verify-email: { capacity: 10, period: 1m }
       resend-verification: { capacity: 5, period: 1h }
       resend-verification-per-email: { capacity: 3, period: 1h }
+      # Authenticated workspace endpoints (T-007) are limited per user id rather than per IP.
+      workspace-create: { capacity: 5, period: 1h }
+      workspace-invite: { capacity: 20, period: 1h }
+      invitation-accept: { capacity: 10, period: 1m }
+      workspace-invitation-manage: { capacity: 60, period: 1m }
+  # Workspace quotas and invitation lifetime (T-007). Expired/revoked invitations are purged by the
+  # nightly verification cleanup job once older than invitation-retention.
+  workspace:
+    max-owned-per-user: ${WORKSPACE_MAX_OWNED_PER_USER:10}
+    invitation-ttl: 7d
+    max-pending-invitations: 100
+    invitation-retention: 7d
 
 # Resilience for outbound calls (ARCHITECTURE.md Section 9.2).
 resilience4j:
@@ -132,9 +144,22 @@ resilience4j:
         exponential-backoff-multiplier: 2
         retry-exceptions:
           - org.springframework.mail.MailException
+      invitationEmail:
+        max-attempts: 3
+        wait-duration: 2s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.mail.MailException
   circuitbreaker:
     instances:
       verificationEmail:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 2
+      invitationEmail:
         sliding-window-size: 10
         minimum-number-of-calls: 5
         failure-rate-threshold: 50

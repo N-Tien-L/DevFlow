@@ -55,7 +55,8 @@ public class SecurityConfig {
                         // Module health checks
                         .requestMatchers("/api/v1/*/health").permitAll()
                         // Specific protected endpoints within auth module (for T-004)
-                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/workspaces/**", "/api/v1/auth/workspaces").authenticated()
+                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/workspaces/**", "/api/v1/auth/workspaces",
+                                "/api/v1/auth/invitations/**").authenticated()
                         // Public auth endpoints (registration, login, refresh, etc.)
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         // WebSocket and MCP entry points
