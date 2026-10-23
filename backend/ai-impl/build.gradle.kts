@@ -26,6 +26,7 @@ dependencies {
     implementation("io.micrometer:micrometer-core")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.awaitility:awaitility")
     // Resilience4j's Boot auto-config references actuator auto-config once spring-boot-actuator is present.
     testImplementation("org.springframework.boot:spring-boot-starter-actuator")
 }

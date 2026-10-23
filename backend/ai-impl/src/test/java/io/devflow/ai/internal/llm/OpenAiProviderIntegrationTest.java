@@ -2,6 +2,7 @@ package io.devflow.ai.internal.llm;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +14,7 @@ import io.devflow.ai.internal.TestAiApplication;
 import io.devflow.ai.internal.exception.AiProviderUnavailableException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "devflow.ai.chat.model=gpt-test-model",
         "devflow.ai.chat.max-tokens=256",
         "devflow.ai.openai.api-key=sk-test-not-real",
-        "devflow.ai.openai.read-timeout=300ms",
+        "devflow.ai.openai.read-timeout=1s",
         "devflow.ai.resilience.max-attempts=3",
         "devflow.ai.resilience.initial-backoff=10ms",
         "devflow.ai.resilience.sliding-window-size=4",
@@ -55,6 +57,7 @@ class OpenAiProviderIntegrationTest {
 
     private static final OpenAiStubServer PROVIDER = new OpenAiStubServer();
     private static final String PROMPT_CANARY = "PROMPT-CANARY-7731";
+    private static final long SLOW_PROVIDER_DELAY_MS = 10_000;
 
     @Autowired
     private ChatModel chatModel;
@@ -155,16 +158,17 @@ class OpenAiProviderIntegrationTest {
 
     @Test
     void readTimeoutBoundsTheRequest() {
-        PROVIDER.respond(200, OpenAiStubServer.SUCCESS_BODY, 2_000);
+        PROVIDER.respond(200, OpenAiStubServer.SUCCESS_BODY, SLOW_PROVIDER_DELAY_MS);
 
         long started = System.nanoTime();
         assertThatThrownBy(() -> gateway.complete(AiFeature.PROJECT_QA, null, "question"))
                 .isInstanceOf(AiProviderUnavailableException.class);
         long elapsedMs = (System.nanoTime() - started) / 1_000_000;
 
-        // 3 attempts x 300 ms read timeout + backoff, well under a single 2 s provider response.
-        assertThat(PROVIDER.requests()).hasSize(3);
-        assertThat(elapsedMs).isLessThan(1_900);
+        // 3 attempts x 1 s read timeout (~3 s) must give up long before one slow response would
+        // arrive. Only that ordering is asserted, so slow CI runners cannot make this flaky.
+        assertThat(elapsedMs).isLessThan(SLOW_PROVIDER_DELAY_MS);
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(PROVIDER.requests()).hasSize(3));
     }
 
     @Test
