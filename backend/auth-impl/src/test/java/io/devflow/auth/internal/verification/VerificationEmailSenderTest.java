@@ -10,19 +10,28 @@ import static org.mockito.ArgumentMatchers.any;
 import io.devflow.auth.internal.support.AuthMetrics;
 import jakarta.mail.Multipart;
 import jakarta.mail.Part;
+import jakarta.mail.SendFailedException;
 import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.UUID;
+import org.eclipse.angus.mail.smtp.SMTPAddressFailedException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
+@ExtendWith(OutputCaptureExtension.class)
 @DisplayName("VerificationEmailSender Unit Tests")
 class VerificationEmailSenderTest {
 
@@ -81,6 +90,24 @@ class VerificationEmailSenderTest {
         sender(null).send(event("Alex"));
 
         verify(mailSender, never()).send(any(MimeMessage.class));
+        verify(metrics).verificationEmail("failed");
+    }
+
+    @Test
+    @DisplayName("A rejected recipient is logged by exception type and SMTP code, never by address")
+    void fallbackLogNeverContainsRecipientAddress(CapturedOutput output) throws Exception {
+        VerificationEmailRequestedEvent event = event("Alex");
+        SMTPAddressFailedException rejected = new SMTPAddressFailedException(
+                new InternetAddress("user@devflow.io"), "RCPT TO", 550,
+                "5.1.1 <user@devflow.io>: Recipient address rejected");
+        MailSendException failure = new MailSendException(
+                Map.of(new Object(), new SendFailedException("Invalid Addresses", rejected)));
+
+        sender(mailSender).sendFallback(event, failure);
+
+        assertThat(output).doesNotContain("user@devflow.io")
+                .contains("SMTPAddressFailedException(smtp=550)")
+                .contains(event.userId().toString());
         verify(metrics).verificationEmail("failed");
     }
 

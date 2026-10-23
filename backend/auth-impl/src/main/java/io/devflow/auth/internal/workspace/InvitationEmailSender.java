@@ -83,7 +83,7 @@ public class InvitationEmailSender {
             // Malformed message (e.g. bad sender address config): not transient, so do not retry.
             metrics.workspaceInvitationEmail("failed");
             log.error("Could not build invitation email for invitation {}: {}",
-                    event.invitationId(), e.getMessage());
+                    event.invitationId(), LogMasking.describeFailure(e));
             return;
         }
 
@@ -96,7 +96,7 @@ public class InvitationEmailSender {
     void sendFallback(InvitationEmailRequestedEvent event, Throwable cause) {
         metrics.workspaceInvitationEmail("failed");
         log.error("Invitation email delivery failed for invitation {} after retries: {}",
-                event.invitationId(), cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                event.invitationId(), LogMasking.describeFailure(cause));
     }
 
     String buildAcceptUrl(String rawToken) {

@@ -11,19 +11,28 @@ import io.devflow.auth.internal.support.AuthMetrics;
 import io.devflow.auth.internal.verification.VerificationProperties;
 import jakarta.mail.Multipart;
 import jakarta.mail.Part;
+import jakarta.mail.SendFailedException;
 import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.UUID;
+import org.eclipse.angus.mail.smtp.SMTPAddressFailedException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
+@ExtendWith(OutputCaptureExtension.class)
 @DisplayName("InvitationEmailSender Unit Tests")
 class InvitationEmailSenderTest {
 
@@ -86,6 +95,39 @@ class InvitationEmailSenderTest {
 
         verify(mailSender, never()).send(any(MimeMessage.class));
         verify(metrics).workspaceInvitationEmail("failed");
+    }
+
+    @Test
+    @DisplayName("A rejected recipient is logged by exception type and SMTP code, never by address")
+    void fallbackLogNeverContainsRecipientAddress(CapturedOutput output) throws Exception {
+        InvitationEmailRequestedEvent event = event("Alex", "Team");
+        SMTPAddressFailedException rejected = new SMTPAddressFailedException(
+                new InternetAddress("invitee@devflow.io"), "RCPT TO", 550,
+                "5.1.1 <invitee@devflow.io>: Recipient address rejected");
+        MailSendException failure = new MailSendException(
+                Map.of(new Object(), new SendFailedException("Invalid Addresses", rejected)));
+        assertThat(failure.getMessage()).contains("invitee@devflow.io");
+
+        sender(mailSender).sendFallback(event, failure);
+
+        assertThat(output).doesNotContain("invitee@devflow.io")
+                .contains("SMTPAddressFailedException(smtp=550)")
+                .contains(event.invitationId().toString());
+        verify(metrics).workspaceInvitationEmail("failed");
+    }
+
+    @Test
+    @DisplayName("An unbuildable message is logged without the address that broke it")
+    void buildFailureLogNeverContainsRecipientAddress(CapturedOutput output) {
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
+        InvitationEmailRequestedEvent event = new InvitationEmailRequestedEvent(UUID.randomUUID(),
+                "invitee@devflow.io>", "Alex", "Team", "MEMBER", "inv_tok-123", NOW.plus(Duration.ofDays(7)));
+
+        sender(mailSender).send(event);
+
+        verify(mailSender, never()).send(any(MimeMessage.class));
+        verify(metrics).workspaceInvitationEmail("failed");
+        assertThat(output).doesNotContain("invitee@devflow.io").contains("AddressException");
     }
 
     @Test

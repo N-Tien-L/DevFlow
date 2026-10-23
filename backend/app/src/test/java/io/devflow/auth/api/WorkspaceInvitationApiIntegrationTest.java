@@ -31,6 +31,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -426,7 +432,122 @@ class WorkspaceInvitationApiIntegrationTest {
                 fresh)).isEqualTo(1);
     }
 
+    // --- Concurrency & membership edge cases ---
+
+    @Test
+    void concurrentCreatesCannotOvershootTheOwnershipQuota() throws Exception {
+        TestUser user = activeUser("racer");
+
+        List<Integer> statuses = concurrently(List.of(
+                () -> statusOf(createWorkspaceRequest(user, Map.of("name", "Race 1"))),
+                () -> statusOf(createWorkspaceRequest(user, Map.of("name", "Race 2"))),
+                () -> statusOf(createWorkspaceRequest(user, Map.of("name", "Race 3"))),
+                () -> statusOf(createWorkspaceRequest(user, Map.of("name", "Race 4"))),
+                () -> statusOf(createWorkspaceRequest(user, Map.of("name", "Race 5")))));
+
+        assertThat(statuses).containsOnly(201, 409);
+        assertThat(statuses).filteredOn(s -> s == 201).hasSize(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM workspaces WHERE owner_id = ?", Long.class, user.id()))
+                .isEqualTo(3);
+    }
+
+    @Test
+    void concurrentAcceptsOfOneTokenSucceedExactlyOnce() throws Exception {
+        TestUser invitee = activeUser("double-click");
+        invite(owner, workspaceId, Map.of("email", invitee.email())).andExpect(status().isCreated());
+        String token = lastInvitationEmail().rawToken();
+
+        List<Integer> statuses = concurrently(List.of(
+                () -> statusOf(accept(invitee, token)),
+                () -> statusOf(accept(invitee, token))));
+
+        assertThat(statuses).containsExactlyInAnyOrder(200, 400);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND user_id = ?", Long.class,
+                workspaceId, invitee.id())).isEqualTo(1);
+    }
+
+    @Test
+    void acceptRacingRevokeHasExactlyOneWinner() throws Exception {
+        for (int round = 0; round < 5; round++) {
+            TestUser invitee = activeUser("contested-" + round);
+            invite(owner, workspaceId, Map.of("email", invitee.email())).andExpect(status().isCreated());
+            InvitationEmailRequestedEvent invitation = lastInvitationEmail();
+
+            List<Integer> statuses = concurrently(List.of(
+                    () -> statusOf(accept(invitee, invitation.rawToken())),
+                    () -> statusOf(mockMvc.perform(delete("/api/v1/auth/workspaces/{id}/invitations/{inv}",
+                                    workspaceId, invitation.invitationId())
+                            .header(HttpHeaders.AUTHORIZATION, bearer(owner))))));
+
+            long members = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND user_id = ?", Long.class,
+                    workspaceId, invitee.id());
+            String finalStatus = jdbc.queryForObject("SELECT status FROM workspace_invitations WHERE id = ?",
+                    String.class, invitation.invitationId());
+            if (statuses.get(0) == 200) {
+                assertThat(statuses.get(1)).isEqualTo(404);
+                assertThat(finalStatus).isEqualTo("ACCEPTED");
+                assertThat(members).isEqualTo(1);
+            } else {
+                assertThat(statuses).containsExactly(400, 204);
+                assertThat(finalStatus).isEqualTo("REVOKED");
+                assertThat(members).isZero();
+            }
+        }
+    }
+
+    @Test
+    void acceptingWhileAlreadyAMemberKeepsTheCurrentRole() throws Exception {
+        TestUser admin = activeUser("existing-admin");
+        addMember(workspaceId, admin, "ADMIN");
+        invite(owner, workspaceId, Map.of("email", admin.email(), "role", "MEMBER")).andExpect(status().isCreated());
+        InvitationEmailRequestedEvent invitation = lastInvitationEmail();
+
+        accept(admin, invitation.rawToken())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("ADMIN"));
+
+        assertThat(jdbc.queryForObject(
+                "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?", String.class,
+                workspaceId, admin.id())).isEqualTo("ADMIN");
+        assertThat(jdbc.queryForObject("SELECT status FROM workspace_invitations WHERE id = ?", String.class,
+                invitation.invitationId())).isEqualTo("ACCEPTED");
+    }
+
     // --- Helpers ---
+
+    /**
+     * Runs the calls on separate threads released at the same instant; returns results in call order.
+     */
+    private static List<Integer> concurrently(List<Callable<Integer>> calls) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(calls.size());
+        CountDownLatch ready = new CountDownLatch(calls.size());
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (Callable<Integer> call : calls) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return call.call();
+                }));
+            }
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            List<Integer> results = new ArrayList<>();
+            for (Future<Integer> future : futures) {
+                results.add(future.get(30, TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static int statusOf(ResultActions result) {
+        return result.andReturn().getResponse().getStatus();
+    }
 
     private record TestUser(UUID id, String email) {}
 
