@@ -75,8 +75,8 @@ gantt
      - Configure `SecurityFilterChain`: `/api/v1/auth/**` and public endpoints permitted; `/api/v1/**` requires authenticated JWT.
      - Implement `AuthApi` contract (`findUser(UUID)`, `isWorkspaceMember(UUID, UUID)`).
   3. **Frontend Client & UI (`frontend/`):**
-     - Axios/Fetch API client with Bearer Token interceptor and auto 401 handling.
-     - State management: `useAuthStore` (persisting token, user profile, and active workspace).
+     - Fetch-based `AuthProvider` (`src/auth/AuthProvider.tsx`): Bearer token on every request, single-flight refresh on 401, session in `sessionStorage`, sign-out on refresh failure. No Axios.
+     - Shared RFC 7807 helper exposing `code` / `errors` / `Retry-After` for the auth pages.
      - UI: Polished [LoginPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/LoginPage.tsx) and `RegisterPage.tsx` with validation and dark-mode aesthetic.
 - **Verification Commands:**
   - Backend: `./gradlew :auth-impl:test :app:test`
@@ -146,27 +146,30 @@ gantt
 - **Duration:** 2 weeks
 - **Technical Scope:**
   1. **Spring AI Configuration (`ai-impl`):**
-     - Configure `ChatClient` with OpenAI (GPT-4o-mini) or compatible provider; provide offline deterministic mock fallback.
+     - Configure `ChatClient` with OpenAI (model from `AI_MODEL_CHAT`, default GPT-4o-mini) or a compatible provider; register a deterministic fallback `ChatModel` when no key is configured so CI and offline demos work.
+     - Timeouts, Resilience4j retry + circuit breaker, `max-tokens` limits and request/latency/token metrics on every LLM call.
      - Structured prompt templates for Project Q&A, CI Failure Triage, and Task Decomposition.
   2. **Core AI Capabilities:**
-     - **CI Failure Summarization (`summarizeCiFailure`):** Consumes `CiFailureDetectedEvent`, extracts stack traces and root causes, generates a 3-bullet concise remediation summary, and publishes `CiFailureSummarizedEvent`.
-     - **Task Breakdown (`proposeTaskBreakdown`):** Takes high-level feature requirements and breaks them into 3–5 atomic subtasks.
-     - **Natural Language Q&A (`answerProjectQuery`):** Answers status queries by querying `BoardApi`.
+     - **CI Failure Summarization (`summarizeCiFailure`):** Consumes `CiFailureDetectedEvent` asynchronously, fetches the log via `GitCiApi`, **redacts secrets and truncates** it before calling the LLM, generates a 3-bullet remediation summary (idempotent per pipeline), and publishes `CiFailureSummarizedEvent`.
+     - **Task Breakdown (`proposeTaskBreakdown`):** Structured output (`TaskBreakdownProposal`) with 3–5 validated subtasks; a proposal only, never auto-created.
+     - **Natural Language Q&A (`answerProjectQuery(userId, projectId, question)`):** Checks workspace membership first, then answers only from `BoardApi` data (grounded; task content is treated as data, not instructions).
      - **Deadline Risk Detection (`risk.deadline_flagged`):** Scans approaching due dates and flags slipping tasks.
   3. **Chat Gateway (`ChatGatewayController`):**
-     - Two-way STOMP chat on destination `/app/chat` -> `/topic/chat`.
+     - Per-user streaming STOMP chat: the client sends to `/app/chat` and replies reach only the caller on `/user/queue/chat` (never a shared `/topic`), with membership checks and per-user rate limits.
      - Actionable cards: AI suggested subtasks include a "Create Cards" button to batch-insert tasks.
   4. **MCP Server (`ai-impl`):**
+     - Authenticated with personal access tokens (T-038); every tool is scoped to the caller's workspaces.
+     - Transport: Spring AI 1.0.0 WebMVC SSE (`/sse` + `/mcp/message`).
      - Expose tools via `@Tool`:
        - `queryProject(projectId, question)`
        - `lookupCiFailure(pipelineId)`
-       - `getMyTasks(username)`
+       - `getMyTasks()` (caller resolved from the token)
      - Verified integration with Cursor and Claude Code.
   5. **Frontend Chat Panel (`frontend/src/components/ChatPanel.tsx`):**
      - Markdown rendering, code snippets, copy buttons, and interactive task creation cards.
 - **Verification Commands:**
   - Send failing CI log; verify AI summary attaches to corresponding task card.
-  - Connect Cursor/Claude Code to `/mcp/` endpoint; execute `queryProject` successfully.
+  - Connect Cursor/Claude Code to the `/sse` endpoint with a personal access token; execute `queryProject` successfully.
 
 ---
 
@@ -175,8 +178,8 @@ gantt
 - **Duration:** 1.5 weeks
 - **Technical Scope:**
   1. **Notification Module (`notification-impl`):**
-     - Listen to domain events: `TaskCreatedEvent`, `TaskStatusChangedEvent`, `CiFailureSummarizedEvent`, `RiskDeadlineFlaggedEvent`.
-     - In-app notification store + real-time delivery via WebSocket `/topic/notifications/{userId}`.
+     - Listen to domain events: `TaskCreatedEvent`, `TaskStatusChangedEvent`, `GitPrOpenedEvent`, `GitPrMergedEvent`, `CiFailureSummarizedEvent`, `RiskDeadlineFlaggedEvent` (deduplicated by `eventId`; the actor is not notified).
+     - In-app notification store + real-time delivery to the recipient only on `/user/queue/notifications` (a guessable `/topic/notifications/{userId}` would leak notifications).
      - Frontend notification bell dropdown and unread counter badge.
   2. **Observability & Health:**
      - Spring Actuator metrics exported at `/actuator/prometheus`.
@@ -215,8 +218,11 @@ All work must be tracked with tickets using the format `T-XXX` and mapped to Git
 - `T-004`: Implement Core Auth REST Endpoints (`/login`, `/me`, `/workspaces`, `AuthApi`, RFC 7807 ProblemDetail, Rate Limiting)
 - `T-004A`: Implement Registration Workflow & Email Verification (`verification_tokens` table, Async Email Service, `/register`, `/verify-email`, `/resend-verification`)
 - `T-004B`: Implement Registration Anti-Abuse & Bot Protection (Cloudflare Turnstile verification, disposable email filter, DNS MX check)
-- `T-005`: Implement Frontend Axios Client, JWT Interceptors & Auth Context Store
-- `T-006`: Build Responsive LoginPage, RegisterPage, EmailVerificationPage & Workspace Selection UI
+- `T-005`: Harden Frontend AuthProvider (Session Expiry UX, Shared ProblemDetail Parser, Return-To Redirect)
+- `T-006`: Build Responsive LoginPage, RegisterPage (Turnstile), EmailVerificationPage & Workspace Selection UI
+- `T-007`: Implement Workspace Creation & Member Invitation (`POST /workspaces`, `/workspaces/{id}/invitations`)
+- `T-008`: Implement Forgot Password & Password Reset Flow (email token, Turnstile, session revocation)
+- `T-009`: Implement Account Deletion (GDPR right to erasure) with cross-module cleanup via `user.account_deleted`
 
 ### Phase 2: Core Kanban Board
 - `T-010`: Setup Flyway Migration for Board Schema (`V2__board_schema.sql`)
@@ -239,20 +245,23 @@ All work must be tracked with tickets using the format `T-XXX` and mapped to Git
 - `T-026`: Render Git Badges, Commit Links, and CI Status Indicators on Frontend Task Cards
 
 ### Phase 4: AI Engine & In-Editor MCP Server
-- `T-030`: Configure Spring AI Starter & ChatClient Provider (OpenAI with Mock Fallback)
-- `T-031`: Implement CI Failure Log Summarizer Service and Publish `CiFailureSummarizedEvent`
-- `T-032`: Implement Automated Task Breakdown Service (`proposeTaskBreakdown`)
-- `T-033`: Implement Conversational Project Q&A Service (`answerProjectQuery`)
-- `T-034`: Implement Real-Time ChatGatewayController over STOMP WebSocket
-- `T-035`: Configure Spring AI MCP Server WebMVC Adapter Exposing `@Tool` Functions
-- `T-036`: Build Frontend ChatPanel with Streaming Responses & 1-Click Card Creation
+- `T-030`: Configure Spring AI ChatClient (OpenAI + Deterministic Fallback ChatModel) with Resilience & Metrics
+- `T-031`: Implement CI Failure Log Summarizer and Publish `CiFailureSummarizedEvent`
+- `T-032`: Implement AI Task Breakdown Proposal (`proposeTaskBreakdown`)
+- `T-033`: Implement Grounded Project Q&A (`answerProjectQuery`) with Membership Checks
+- `T-034`: Implement Per-User Streaming ChatGatewayController over STOMP
+- `T-035`: Configure Authenticated Spring AI MCP Server Exposing `@Tool` Functions
+- `T-036`: Build Frontend ChatPanel with Streaming Responses & 1-Click Task Creation
+- `T-037`: Implement Deadline Risk Detection and Publish `risk.deadline_flagged`
+- `T-038`: Implement Personal Access Tokens for MCP Clients
 
 ### Phase 5: Hardening, Observability & Cloud Deployment
-- `T-040`: Implement Notification Service & Frontend In-App Notification Dropdown
+- `T-040A`: Implement Notification Service (Event Consumers, Persistence, Per-User Realtime Delivery)
+- `T-040B`: Build Frontend NotificationBell & In-App Notification Dropdown
 - `T-041`: Author Multi-Module Integration Test Suite Validating In-Process Event Bus
 - `T-042`: Build Provisioned Grafana Dashboard for JVM, DB Pool, and HTTP Metrics
-- `T-043`: Setup Multi-Stage Dockerfile and Deploy Backend & PostgreSQL to PaaS (Render/Railway)
-- `T-044`: Deploy Frontend to Cloudflare Pages with Custom Reverse Proxy & SSL
+- `T-043`: Deploy Backend & PostgreSQL to PaaS (Render/Railway) with Production Configuration
+- `T-044`: Deploy Frontend to Cloudflare Pages with Custom Domain, API Routing & SSL
 - `T-045`: Compile Course Final Defense Deliverables (Demo Video, Architecture Slides, DoD Report)
 
 ---

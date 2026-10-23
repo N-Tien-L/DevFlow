@@ -67,7 +67,7 @@ gantt
        - `GET /api/v1/workspaces` & `POST /api/v1/workspaces` (danh sách và tạo workspace)
      - Triển khai `AuthApi` trong `auth-impl` cho các module khác tra cứu user/workspace.
   3. **Frontend Integration:**
-     - Thiết lập HTTP Client (Axios instance) với Bearer Token interceptor và xử lý 401 tự động logout.
+     - `AuthProvider` dựa trên fetch (`src/auth/AuthProvider.tsx`): tự gắn Bearer token, refresh single-flight khi 401, lưu phiên trong `sessionStorage`, đăng xuất khi refresh thất bại. Không dùng Axios.
      - Xây dựng trang [LoginPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/LoginPage.tsx) và `RegisterPage.tsx` với giao diện thẩm mỹ cao, validation form.
      - Quản lý trạng thái Auth (Context hoặc Zustand store) lưu giữ User profile & current workspace.
 - **Tiêu chí nghiệm thu (DoD):**
@@ -141,22 +141,25 @@ gantt
 - **Thời lượng dự kiến:** 2 tuần (Sprint 4)
 - **Nghiệp vụ chi tiết:**
   1. **Tích hợp Spring AI (`ai-impl`):**
-     - Cấu hình provider linh hoạt (OpenAI GPT-4o-mini hoặc OpenAI-compatible model, fallback mock khi không có API Key).
+     - Cấu hình provider linh hoạt (model đọc từ `AI_MODEL_CHAT`, mặc định GPT-4o-mini, hoặc OpenAI-compatible); khi không có API key thì dùng `ChatModel` dự phòng cho kết quả cố định để CI và demo offline chạy được.
+     - Mọi lời gọi LLM có timeout, Resilience4j retry + circuit breaker, giới hạn `max-tokens` và metric request/latency/token.
      - Kỹ thuật xây dựng Prompt (Prompt Engineering):
        - Context-aware System Prompt: Đưa thông tin danh sách task, tiến độ board vào prompt để trả lời chính xác.
   2. **Nghiệp vụ AI Cốt lõi:**
-     - **Tóm tắt lỗi CI/CD (`summarizeCiFailure`):** Lắng nghe `CiFailureDetectedEvent`, phân tích nguyên nhân gốc (root cause) từ raw log (Stacktrace, NullPointerException, thiếu biến môi trường...), sinh tóm tắt ngắn gọn và phát `CiFailureSummarizedEvent`.
+     - **Tóm tắt lỗi CI/CD (`summarizeCiFailure`):** Lắng nghe `CiFailureDetectedEvent` bất đồng bộ, lấy log qua `GitCiApi`, **che secret và cắt ngắn log** trước khi gửi LLM (idempotent theo pipeline), phân tích nguyên nhân gốc (root cause) từ raw log (Stacktrace, NullPointerException, thiếu biến môi trường...), sinh tóm tắt ngắn gọn và phát `CiFailureSummarizedEvent`.
      - **Phân rã công việc (`proposeTaskBreakdown`):** Nhận văn bản mô tả tính năng/bug → bóc tách thành danh sách 3–5 subtasks kèm ước lượng sơ bộ.
-     - **Hỏi đáp dự án (`answerProjectQuery`):** Trả lời các câu hỏi tự nhiên về trạng thái dự án ("Ai đang làm module auth?", "Còn bao nhiêu task chưa xong?").
+     - **Hỏi đáp dự án (`answerProjectQuery(userId, projectId, question)`):** Kiểm tra membership trước, chỉ trả lời từ dữ liệu `BoardApi` (nội dung task là dữ liệu, không phải lệnh). Trả lời các câu hỏi tự nhiên về trạng thái dự án ("Ai đang làm module auth?", "Còn bao nhiêu task chưa xong?").
      - **Cảnh báo trễ hạn (`risk.deadline_flagged`):** Phân tích các task gần due date mà chưa vào `In Review`/`Done` để phát cảnh báo.
   3. **Chat WebSocket Gateway (`ChatGatewayController`):**
-     - Luồng chat hai chiều: Web client gửi câu hỏi tới `/app/chat` → nhận câu trả lời dạng stream/text tại `/topic/chat`.
+     - Luồng chat theo từng user: client gửi tới `/app/chat`, câu trả lời stream **chỉ tới người hỏi** qua `/user/queue/chat` (không dùng `/topic` chung), có kiểm tra membership và rate limit theo user.
      - Cho phép user bấm "Xác nhận tạo các task này" ngay trên kết quả AI phân rã để tự động add vào Board.
   4. **MCP Server Integration (Model Context Protocol):**
+     - Bắt buộc xác thực bằng personal access token (T-038); mọi tool chỉ trả dữ liệu thuộc workspace của user đó.
+     - Transport: Spring AI 1.0.0 WebMVC SSE (`/sse` + `/mcp/message`).
      - Khai báo MCP Tools qua `@Tool`:
        - `queryProject(projectId, question)`: Tra cứu tiến độ dự án từ IDE.
        - `lookupCiFailure(pipelineId)`: Xem phân tích nguyên nhân lỗi CI/CD ngay trong file code.
-       - `getMyTasks(username)`: Cho developer biết họ cần làm gì tiếp theo.
+       - `getMyTasks()` (user lấy từ token): Cho developer biết họ cần làm gì tiếp theo.
   5. **Frontend AI Chat UI:**
      - Hoàn thiện [ChatPanel.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/components/ChatPanel.tsx) ở góc phải: Giao diện chat hiện đại, hỗ trợ render Markdown, code snippet, và các Action Card (nút "Tạo Task" từ gợi ý của AI).
 - **Tiêu chí nghiệm thu (DoD):**
@@ -171,9 +174,9 @@ gantt
 - **Thời lượng dự kiến:** 1.5 tuần (Sprint 5)
 - **Nghiệp vụ chi tiết:**
   1. **Notification Module (`notification-impl`):**
-     - Xử lý các sự kiện `TaskCreatedEvent`, `TaskStatusChangedEvent`, `CiFailureSummarizedEvent`, `RiskDeadlineFlaggedEvent`.
+     - Xử lý các sự kiện `TaskCreatedEvent`, `TaskStatusChangedEvent`, `GitPrOpenedEvent`, `GitPrMergedEvent`, `CiFailureSummarizedEvent`, `RiskDeadlineFlaggedEvent` (chống trùng theo `eventId`, không gửi cho chính actor).
      - Lưu trữ thông báo trong bảng `notifications`.
-     - Đẩy thông báo real-time qua WebSocket `/topic/notifications/{userId}` hoặc SSE.
+     - Đẩy thông báo real-time chỉ tới người nhận qua `/user/queue/notifications` (không dùng `/topic/notifications/{userId}` vì userId đoán được).
      - Frontend Notification Center: Dropdown chuông thông báo, badge đếm tin chưa đọc, đánh dấu đã đọc.
   2. **Kiểm thử Toàn diện & Rà soát Kiến trúc:**
      - Chạy `./gradlew :verifyModuleBoundaries` bảo đảm không có vi phạm ranh giới module.
@@ -216,8 +219,11 @@ Dưới đây là danh sách các thẻ mẫu sẵn sàng chuyển thành ticket
 - `T-004`: Hiện thực Core Auth REST API (`/login`, `/me`, `/workspaces`, `AuthApi`, RFC 7807 ProblemDetail, Rate Limiting)
 - `T-004A`: Hiện thực Quy trình Đăng ký & Xác thực Email (`verification_tokens`, Async Email Service, `/register`, `/verify-email`, `/resend-verification`)
 - `T-004B`: Hiện thực Chống lạm dụng Đăng ký & Bảo vệ Bot (Cloudflare Turnstile, lọc disposable email, kiểm tra DNS MX)
-- `T-005`: Xây dựng Axios Client, Auth Interceptor & Auth Context trên Frontend
-- `T-006`: Thiết kế giao diện Đăng ký, Đăng nhập, Xác thực Email & Chọn Workspace
+- `T-005`: Hoàn thiện AuthProvider phía Frontend (UX hết phiên, helper ProblemDetail dùng chung, quay lại trang cũ sau đăng nhập)
+- `T-006`: Thiết kế giao diện Đăng ký (Turnstile), Đăng nhập, Xác thực Email & Chọn Workspace
+- `T-007`: Hiện thực Tạo Workspace & Mời thành viên (`POST /workspaces`, `/workspaces/{id}/invitations`)
+- `T-008`: Hiện thực Quên mật khẩu & Đặt lại mật khẩu (token qua email, Turnstile, thu hồi phiên)
+- `T-009`: Hiện thực Xoá tài khoản (GDPR right to erasure) và dọn dữ liệu liên module qua `user.account_deleted`
 
 ### Phase 2 Tickets
 - `T-010`: Thiết lập Flyway Migration cho Board Schema (`V2__board_schema.sql`)
@@ -240,20 +246,23 @@ Dưới đây là danh sách các thẻ mẫu sẵn sàng chuyển thành ticket
 - `T-026`: Hiển thị Git & CI Status Badges trên Card giao diện Frontend
 
 ### Phase 4 Tickets
-- `T-030`: Tích hợp Spring AI Starter & Cấu hình ChatClient (OpenAI / Fallback Mock)
+- `T-030`: Tích hợp Spring AI ChatClient (OpenAI + ChatModel dự phòng) kèm Resilience & Metrics
 - `T-031`: Xây dựng Service tóm tắt log CI/CD & phát `CiFailureSummarizedEvent`
 - `T-032`: Xây dựng Service phân rã Task từ văn bản mô tả (`proposeTaskBreakdown`)
-- `T-033`: Xây dựng Service hỏi đáp dự án theo ngôn ngữ tự nhiên (`answerProjectQuery`)
-- `T-034`: Hiện thực STOMP ChatGatewayController cho giao tiếp chat thời gian thực
-- `T-035`: Thiết lập Spring AI MCP Server WebMVC adapter với các `@Tool` functions
+- `T-033`: Xây dựng Service hỏi đáp dự án có kiểm tra membership (`answerProjectQuery`)
+- `T-034`: Hiện thực ChatGatewayController streaming theo từng user qua STOMP
+- `T-035`: Thiết lập Spring AI MCP Server có xác thực với các `@Tool` functions
 - `T-036`: Hoàn thiện ChatPanel UI trên Frontend hỗ trợ Markdown & 1-Click Task Creation
+- `T-037`: Phát hiện task có nguy cơ trễ hạn & phát `risk.deadline_flagged`
+- `T-038`: Hiện thực Personal Access Token cho MCP client
 
 ### Phase 5 Tickets
-- `T-040`: Hiện thực Notification Service & In-app Notification Dropdown
+- `T-040A`: Hiện thực Notification Service (lắng nghe event, lưu trữ, gửi realtime theo từng user)
+- `T-040B`: Xây dựng NotificationBell & dropdown thông báo trên Frontend
 - `T-041`: Viết bộ Integration Tests kiểm thử liên module qua Event Bus
 - `T-042`: Hoàn thiện Dashboard Grafana giám sát hiệu năng hệ thống
-- `T-043`: Cấu hình Docker Production Multi-stage & Deploy lên PaaS (Render / Railway)
-- `T-044`: Deploy Frontend lên Cloudflare Pages & Cấu hình Reverse Proxy / Domain
+- `T-043`: Deploy Backend & PostgreSQL lên PaaS (Render / Railway) với cấu hình production
+- `T-044`: Deploy Frontend lên Cloudflare Pages với Custom Domain, định tuyến API & SSL
 - `T-045`: Soạn thảo Báo cáo Nghiệm thu Kỹ thuật & Video Demo Dự án
 
 ---
