@@ -8,6 +8,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.retry.Retry;
 import io.micrometer.core.instrument.Timer;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -120,9 +121,15 @@ public class AiChatGateway {
         return new AiProviderUnavailableException(retryAfter, cause);
     }
 
-    /** Retry predicate: provider 408/429/5xx, timeouts and connection failures. */
+    /**
+     * Retry predicate: provider 408/429/5xx, timeouts and connection failures. A read timeout usually
+     * arrives as {@link ResourceAccessException}, but {@code JdkClientHttpRequestFactory} enforces it by
+     * cancelling the response future and, depending on timing, the raw {@link CancellationException}
+     * escapes unwrapped (seen on CI).
+     */
     static boolean isTransient(Throwable failure) {
-        return failure instanceof TransientAiException || failure instanceof ResourceAccessException;
+        return failure instanceof TransientAiException || failure instanceof ResourceAccessException
+                || failure instanceof CancellationException;
     }
 
     private static Object httpStatus(Throwable failure) {
