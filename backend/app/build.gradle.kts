@@ -26,6 +26,8 @@ dependencies {
 
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Lets API tests stub the auth module's JavaMailSender (jakarta.mail types are not exported by auth-impl).
+    testImplementation("org.springframework.boot:spring-boot-starter-mail")
     testImplementation("com.h2database:h2")
     testImplementation(platform("org.testcontainers:testcontainers-bom:1.21.4"))
     testImplementation("org.testcontainers:junit-jupiter")
