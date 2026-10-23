@@ -44,7 +44,7 @@ jobs:
           retention-days: 7
 
   frontend:
-    name: Frontend (lint + build)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -61,4 +61,5 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build

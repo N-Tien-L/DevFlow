@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
+import { authErrorMessage } from '../auth/authErrorMessage';
 import { ApiError } from '../types/board';
 
 export default function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, sessionEnd } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -16,7 +17,10 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : 'Đăng nhập thất bại. Vui lòng thử lại.');
+      const fallback = 'Đăng nhập thất bại. Vui lòng thử lại.';
+      setError(reason instanceof ApiError && reason.status === 401 && !reason.problem?.code
+        ? 'Email hoặc mật khẩu không đúng.'
+        : authErrorMessage(reason, fallback));
     } finally {
       setIsLoading(false);
     }
@@ -31,6 +35,12 @@ export default function LoginPage() {
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Chào mừng trở lại</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">Đăng nhập để tiếp tục quản lý board của nhóm.</p>
         </div>
+
+        {sessionEnd === 'expired' && (
+          <p className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
+            Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.
+          </p>
+        )}
 
         <form className="space-y-5" onSubmit={handleSubmit}>
           <label className="block text-sm font-medium text-slate-700">

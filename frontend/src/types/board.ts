@@ -134,9 +134,12 @@ export interface ProblemDetail {
   title?: string;
   status?: number;
   detail?: string;
+  instance?: string;
   code?: string;
   correlationId?: string;
   retryAfterSeconds?: number;
+  /** Field name to server validation message, from Bean Validation or domain field checks. */
+  errors?: Record<string, string>;
 }
 
 export class ApiError extends Error {
