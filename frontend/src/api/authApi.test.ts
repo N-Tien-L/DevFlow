@@ -18,7 +18,20 @@ function sentRequest(fetchMock: ReturnType<typeof mockFetch>) {
   return { path, init: init as RequestInit, body: JSON.parse(String(init?.body)) as Record<string, unknown> };
 }
 
+/** Headers arrive at once, the body never does; like real fetch, aborting the request signal errors the body. */
+function stalledBodyFetch() {
+  return vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  });
+}
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -59,6 +72,38 @@ describe('public auth API', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(new TypeError('Failed to fetch')));
     const reason = await resendVerification('a@b.dev').catch((error: unknown) => error);
     expect((reason as ApiError).status).toBe(0);
+  });
+
+  it('times out when the body stalls after the headers', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', stalledBodyFetch());
+    const outcome = login('a@b.dev', 'pw').catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(9_999);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const reason = await outcome;
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).status).toBe(0);
+  });
+
+  it('honours a caller abort that arrives after the headers', async () => {
+    vi.stubGlobal('fetch', stalledBodyFetch());
+    const controller = new AbortController();
+    const outcome = verifyEmail('tok', controller.signal).catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    expect(await outcome).toMatchObject({ name: 'AbortError' });
+  });
+
+  it('keeps the rate-limit code and Retry-After when the 429 body is empty', async () => {
+    mockFetch(new Response('', { status: 429, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '60' } }));
+    const reason = await resendVerification('a@b.dev').catch((error: unknown) => error);
+    expect((reason as ApiError).status).toBe(429);
+    expect(problemCode(reason)).toBe(AuthErrorCode.RateLimitExceeded);
+    expect((reason as ApiError).problem?.retryAfterSeconds).toBe(60);
   });
 
   it('rethrows a caller abort instead of reporting a network error', async () => {

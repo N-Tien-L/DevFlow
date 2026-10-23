@@ -144,6 +144,22 @@ describe('readJsonResponse', () => {
     expect(retryAfterSeconds(reason)).toBe(30);
   });
 
+  it('falls back to status and headers when a JSON error body is empty or broken', async () => {
+    const empty = await failureOf(new Response('', { status: 429, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '60' } }));
+    expect((empty as ApiError).status).toBe(429);
+    expect(problemCode(empty)).toBe(AuthErrorCode.RateLimitExceeded);
+    expect(retryAfterSeconds(empty)).toBe(60);
+
+    const broken = await failureOf(new Response('{"status":', { status: 503, headers: { 'Content-Type': 'application/json', 'Retry-After': '30' } }));
+    expect((broken as ApiError).problem).toMatchObject({ status: 503, retryAfterSeconds: 30 });
+  });
+
+  it('still reports an unreadable success body as a format error', async () => {
+    const reason = await failureOf(new Response('{', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    expect((reason as ApiError).status).toBe(200);
+    expect((reason as ApiError).problem).toBeUndefined();
+  });
+
   it('marks uncertain failures when asked', async () => {
     const reason = await readJsonResponse(problemResponse(500, { status: 500 }), true).catch((error: unknown) => error);
     expect((reason as ApiError).uncertain).toBe(true);

@@ -99,6 +99,11 @@ export async function readJsonResponse<T>(response: Response, uncertain = false)
     try {
       body = await response.json();
     } catch {
+      if (!response.ok) {
+        // Empty or broken error body: keep what the status and headers still say (code for 429, Retry-After).
+        const problem = parseProblemDetail(undefined, response.status, response.headers);
+        throw new ApiError(`Yêu cầu thất bại (${response.status}).`, response.status, problem, uncertain);
+      }
       throw new ApiError('Không đọc được phản hồi từ máy chủ.', response.status, undefined, uncertain);
     }
   }

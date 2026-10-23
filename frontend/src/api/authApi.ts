@@ -10,29 +10,40 @@ function normaliseEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function cancelled(signal: AbortSignal) {
+  return signal.reason ?? new DOMException('Request was cancelled.', 'AbortError');
+}
+
 async function postPublic<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) throw new DOMException('Request was cancelled.', 'AbortError');
+  if (signal?.aborted) throw cancelled(signal);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
   const onCallerAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', onCallerAbort, { once: true });
-  let response: Response;
+  // The timer and caller signal stay armed until the body is read: a server that sends headers and then
+  // stalls must still time out, or login/refresh (and the single-flight refresh promise) would hang.
   try {
-    response = await fetch(path, {
+    const response = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, application/problem+json' },
       body: JSON.stringify(body),
       credentials: 'same-origin',
       signal: controller.signal,
     });
+    return await readJsonResponse<T>(response);
   } catch (reason) {
-    if (signal?.aborted) throw reason;
+    if (timedOut) throw new ApiError('Máy chủ phản hồi quá lâu. Vui lòng thử lại.', 0);
+    if (signal?.aborted) throw cancelled(signal);
+    if (reason instanceof ApiError) throw reason;
     throw new ApiError('Không kết nối được máy chủ. Vui lòng kiểm tra mạng rồi thử lại.', 0);
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', onCallerAbort);
   }
-  return readJsonResponse<T>(response);
 }
 
 export function register(request: RegisterRequest, signal?: AbortSignal) {
