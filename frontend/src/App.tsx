@@ -1,15 +1,28 @@
-import { useEffect } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
+import { loginPathWithReturnTo, returnToFromSearch } from './auth/returnTo';
 import ChatPanel from './components/ChatPanel';
 import BoardPage from './pages/BoardPage';
 import LoginPage from './pages/LoginPage';
 
 function ProtectedBoard() {
-  const { user, ready } = useAuth();
+  const { user, ready, sessionEnd } = useAuth();
+  const location = useLocation();
   if (!ready) return <CenteredMessage message="Đang kiểm tra phiên đăng nhập…" />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // An explicit sign-out starts fresh; an expired session or a deep link comes back to where the user was.
+    const returnTo = sessionEnd === 'signedOut' ? null : `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={loginPathWithReturnTo(returnTo)} replace />;
+  }
   return <BoardPage />;
+}
+
+function LoginRoute() {
+  const { user, ready } = useAuth();
+  const location = useLocation();
+  if (!ready) return <CenteredMessage message="Đang mở DevFlow…" />;
+  if (user) return <Navigate to={returnToFromSearch(location.search)} replace />;
+  return <LoginPage />;
 }
 
 function CenteredMessage({ message }: { message: string }) {
@@ -17,17 +30,12 @@ function CenteredMessage({ message }: { message: string }) {
 }
 
 function AuthenticatedApp() {
-  const { user, ready } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (ready && user && window.location.pathname === '/login') navigate('/boards', { replace: true });
-  }, [navigate, ready, user]);
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Routes>
-        <Route path="/login" element={ready && !user ? <LoginPage /> : <CenteredMessage message="Đang mở DevFlow…" />} />
+        <Route path="/login" element={<LoginRoute />} />
         <Route path="/boards" element={<ProtectedBoard />} />
         <Route path="/boards/:boardId" element={<ProtectedBoard />} />
         <Route path="*" element={<Navigate to="/boards" replace />} />
