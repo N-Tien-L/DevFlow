@@ -1,4 +1,4 @@
-export const DEFAULT_AFTER_LOGIN = '/boards';
+export const DEFAULT_AFTER_LOGIN = '/workspaces';
 const LOGIN_PATH = '/login';
 const MAX_RETURN_TO_LENGTH = 2048;
 // Sentinel origin used only to resolve the candidate; never navigated to.
