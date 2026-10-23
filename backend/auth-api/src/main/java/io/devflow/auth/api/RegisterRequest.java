@@ -24,8 +24,16 @@ public record RegisterRequest(
 
         @NotBlank(message = "Full name is required")
         @Size(max = 255, message = "Full name must not exceed 255 characters")
-        String fullName
+        String fullName,
+
+        // Cloudflare Turnstile response token from the registration form; required when bot protection is on.
+        @Size(max = 2048, message = "Security check token is too long")
+        String turnstileToken
 ) {
+
+    public RegisterRequest(String email, String password, String fullName) {
+        this(email, password, fullName, null);
+    }
 
     @Override
     public String toString() {

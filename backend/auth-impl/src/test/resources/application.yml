@@ -18,4 +18,8 @@ devflow:
     access-token-expiration-ms: 3600000
     refresh-token-expiration-ms: 604800000
     issuer: devflow
+  registration:
+    email-domain:
+      # Tests must not depend on live DNS; EmailDomainValidatorTest covers the MX logic with a stub.
+      mx-check-enabled: false
 
