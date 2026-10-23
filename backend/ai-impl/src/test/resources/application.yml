@@ -1,0 +1,21 @@
+# ai-impl slice tests: no database, no real LLM provider.
+spring:
+  ai:
+    model:
+      # The AI module builds its own ChatModel (AiChatClientConfig); keep every starter client off.
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+    mcp:
+      server:
+        name: devflow-test
+        version: 0.0.1-SNAPSHOT
+
+devflow:
+  ai:
+    chat:
+      model: none

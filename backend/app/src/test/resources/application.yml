@@ -22,6 +22,10 @@ spring:
         version: 0.0.1-SNAPSHOT
 
 devflow:
+  # Tests never call a real provider: force the deterministic fallback ChatModel.
+  ai:
+    chat:
+      model: none
   jwt:
     secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
     access-token-expiration-ms: 3600000
