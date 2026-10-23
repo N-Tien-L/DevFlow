@@ -1,0 +1,144 @@
+T-020 PostgreSQL evidence
+time=2026-10-15T08:57:07.728549500Z
+image=postgres:17-alpine imageId=sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+java=17.0.19 os=Windows 11 cores=12 maxJvmHeapBytes=536870912
+hostMemoryBytes=25439191040
+PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+shared_buffers=128MB max_connections=100
+dataset: repositories=50 commits=50000 PR=5000 attempts=10000 failures=10000; warm cache; pool=20
+
+PLAN commit-key
+Index Scan using uq_git_commits_repo_sha on git_commits  (cost=0.41..8.43 rows=1 width=16) (actual time=0.119..0.120 rows=1 loops=1)
+  Index Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND ((sha)::text = '0000000000000000000000000000000000000001'::text))
+  Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=107
+Planning Time: 1.063 ms
+Execution Time: 0.161 ms
+
+PLAN pr-key
+Index Scan using uq_pr_repo_number on pull_requests  (cost=0.28..8.30 rows=1 width=16) (actual time=0.039..0.040 rows=1 loops=1)
+  Index Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND (pr_number = 1))
+  Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=124
+Planning Time: 1.964 ms
+Execution Time: 0.118 ms
+
+PLAN run-key
+Index Scan using uq_ci_pipelines_repo_run_attempt on ci_pipelines  (cost=0.29..8.31 rows=1 width=16) (actual time=0.067..0.069 rows=1 loops=1)
+  Index Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND ((pipeline_id)::text = '1'::text) AND (run_attempt = 1))
+  Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=141
+Planning Time: 2.139 ms
+Execution Time: 0.147 ms
+
+PLAN task-commits
+Limit  (cost=6.62..171.84 rows=25 width=16) (actual time=0.168..2.685 rows=25 loops=1)
+  Buffers: shared hit=28
+  ->  Hash Join  (cost=6.62..171.84 rows=25 width=16) (actual time=0.166..2.677 rows=25 loops=1)
+        Hash Cond: (c.repository_id = r.id)
+        Buffers: shared hit=28
+        ->  Bitmap Heap Scan on git_commits c  (cost=4.68..169.76 rows=50 width=32) (actual time=0.081..1.884 rows=25 loops=1)
+              Recheck Cond: (task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+              Heap Blocks: exact=25
+              Buffers: shared hit=27
+              ->  Bitmap Index Scan on idx_git_commits_task_id  (cost=0.00..4.67 rows=50 width=0) (actual time=0.064..0.064 rows=50 loops=1)
+                    Index Cond: (task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+                    Buffers: shared hit=2
+        ->  Hash  (cost=1.62..1.62 rows=25 width=16) (actual time=0.042..0.043 rows=25 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 10kB
+              Buffers: shared hit=1
+              ->  Seq Scan on repositories r  (cost=0.00..1.62 rows=25 width=16) (actual time=0.017..0.024 rows=25 loops=1)
+                    Filter: (workspace_id = '10000000-0000-0000-0000-000000000001'::uuid)
+                    Rows Removed by Filter: 25
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=260 read=1
+Planning Time: 3.781 ms
+Execution Time: 2.913 ms
+
+PLAN task-pr
+Limit  (cost=6.26..23.23 rows=2 width=16) (actual time=0.050..0.070 rows=5 loops=1)
+  Buffers: shared hit=8
+  ->  Hash Join  (cost=6.26..23.23 rows=2 width=16) (actual time=0.049..0.069 rows=5 loops=1)
+        Hash Cond: (p.repository_id = r.id)
+        Buffers: shared hit=8
+        ->  Bitmap Heap Scan on pull_requests p  (cost=4.32..21.28 rows=5 width=32) (actual time=0.022..0.040 rows=5 loops=1)
+              Recheck Cond: (task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+              Heap Blocks: exact=5
+              Buffers: shared hit=7
+              ->  Bitmap Index Scan on idx_pull_requests_task_id  (cost=0.00..4.32 rows=5 width=0) (actual time=0.018..0.018 rows=5 loops=1)
+                    Index Cond: (task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+                    Buffers: shared hit=2
+        ->  Hash  (cost=1.62..1.62 rows=25 width=16) (actual time=0.014..0.014 rows=25 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 10kB
+              Buffers: shared hit=1
+              ->  Seq Scan on repositories r  (cost=0.00..1.62 rows=25 width=16) (actual time=0.006..0.008 rows=25 loops=1)
+                    Filter: (workspace_id = '10000000-0000-0000-0000-000000000001'::uuid)
+                    Rows Removed by Filter: 25
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=319
+Planning Time: 1.784 ms
+Execution Time: 0.154 ms
+
+PLAN task-failures
+Limit  (cost=4.79..121.72 rows=5 width=16) (actual time=0.048..0.224 rows=10 loops=1)
+  Buffers: shared hit=62
+  ->  Nested Loop  (cost=4.79..121.72 rows=5 width=16) (actual time=0.047..0.221 rows=10 loops=1)
+        Buffers: shared hit=62
+        ->  Nested Loop  (cost=4.65..120.11 rows=10 width=32) (actual time=0.041..0.203 rows=10 loops=1)
+              Buffers: shared hit=42
+              ->  Bitmap Heap Scan on ci_failures f  (cost=4.36..37.08 rows=10 width=32) (actual time=0.021..0.074 rows=10 loops=1)
+                    Recheck Cond: (related_task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+                    Heap Blocks: exact=10
+                    Buffers: shared hit=12
+                    ->  Bitmap Index Scan on idx_ci_failures_related_task  (cost=0.00..4.36 rows=10 width=0) (actual time=0.016..0.017 rows=10 loops=1)
+                          Index Cond: (related_task_id = 'cc5daf26-edcf-4540-ef43-06619d42ee4c'::uuid)
+                          Buffers: shared hit=2
+              ->  Index Scan using ci_pipelines_pkey on ci_pipelines p  (cost=0.29..8.30 rows=1 width=32) (actual time=0.012..0.012 rows=1 loops=10)
+                    Index Cond: (id = f.pipeline_id)
+                    Buffers: shared hit=30
+        ->  Index Scan using repositories_pkey on repositories r  (cost=0.14..0.16 rows=1 width=16) (actual time=0.001..0.001 rows=1 loops=10)
+              Index Cond: (id = p.repository_id)
+              Filter: (workspace_id = '10000000-0000-0000-0000-000000000001'::uuid)
+              Buffers: shared hit=20
+Planning:
+  Buffers: shared hit=380
+Planning Time: 2.934 ms
+Execution Time: 0.323 ms
+
+PLAN repo-status
+Limit  (cost=5.31..46.96 rows=25 width=16) (actual time=0.080..0.159 rows=25 loops=1)
+  Buffers: shared hit=25
+  ->  Bitmap Heap Scan on ci_pipelines  (cost=5.31..171.89 rows=100 width=16) (actual time=0.078..0.153 rows=25 loops=1)
+        Recheck Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND ((status)::text = 'FAILED'::text))
+        Heap Blocks: exact=23
+        Buffers: shared hit=25
+        ->  Bitmap Index Scan on idx_ci_pipelines_repo_status  (cost=0.00..5.29 rows=100 width=0) (actual time=0.043..0.043 rows=100 loops=1)
+              Index Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND ((status)::text = 'FAILED'::text))
+              Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=133
+Planning Time: 1.977 ms
+Execution Time: 0.245 ms
+
+PLAN repo-commit
+Index Scan using idx_ci_pipelines_repo_commit on ci_pipelines  (cost=0.41..8.43 rows=1 width=16) (actual time=0.028..0.028 rows=1 loops=1)
+  Index Cond: ((repository_id = '7c92cf1e-ee8d-99cc-85f8-355a3d6e4b86'::uuid) AND ((commit_sha)::text = '0000000000000000000000000000000000000001'::text))
+  Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=133
+Planning Time: 0.670 ms
+Execution Time: 0.053 ms
+
+DB_ONLY samples=320 p50_ms=2.6793 p95_ms=34.6611 candidate_budget_100ms=PASS (includes pool checkout, excludes pool startup; host-dependent, not API SLA)
+V5_TO_V6 legacyTasks=5000 duration_ms=405.8776 candidate_budget_60000ms=PASS
+CASCADE repositoryWith1000Commits duration_ms=47.4092
+size_bytes repositories=81920
+size_bytes git_commits=19144704
+size_bytes pull_requests=1638400
+size_bytes ci_pipelines=4063232
+size_bytes ci_failures=2588672

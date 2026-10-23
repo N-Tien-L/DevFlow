@@ -78,6 +78,11 @@ logging:
     root: info
 
 devflow:
+  websocket:
+    # Explicit browser origins are required in production. Comma-separated origins are supported.
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    board:
+      send-timeout-ms: ${WEBSOCKET_BOARD_SEND_TIMEOUT_MS:100}
   jwt:
     secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
     access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:3600000}

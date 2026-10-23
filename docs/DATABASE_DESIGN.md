@@ -334,6 +334,8 @@ Many-to-many link between tasks and tags.
 
 ### 3.3. Module 3: Git & CI Integration (`gitci`)
 
+**Implemented schema contract (T-020):** [V6__gitci_schema.sql](../backend/app/src/main/resources/db/migration/V6__gitci_schema.sql). V3-V5 are Board migrations; the former V3 Git/CI allocation is obsolete. All five tables have UUID primary keys and `created_at`/`updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`. Writers must update `updated_at`; there is no update trigger. Required names/identifiers are nonblank. SHA values are canonical lowercase 40/64 hex characters, excluding all-zero sentinels. Workspace/task references remain soft UUIDs, not authorization checks.
+
 #### Table `repositories`
 VCS repositories linked to a workspace.
 
@@ -342,13 +344,14 @@ VCS repositories linked to a workspace.
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Repository identifier |
 | `workspace_id`| `UUID` | NOT NULL | **Soft Reference** pointing to `workspaces.id` (Auth) |
 | `provider` | `VARCHAR(50)` | NOT NULL | VCS Provider: `GITHUB`, `GITLAB` |
-| `remote_repo_id`| `VARCHAR(100)`| NOT NULL | Remote repository identifier or slug |
+| `remote_repo_id`| `VARCHAR(100)`| NOT NULL | Stable opaque provider ID; not a mutable name/slug |
 | `name` | `VARCHAR(255)` | NOT NULL | Display repository name |
-| `webhook_secret`| `VARCHAR(255)`| NOT NULL | Secret key for verifying HMAC webhook signatures |
+| `repository_url` | `VARCHAR(2048)` | NOT NULL | Canonical provider URL; ingestion validates host and rejects embedded credentials |
+| `webhook_secret_ref`| `VARCHAR(255)`| NOT NULL | Opaque reference to deployment-managed key material, never the plaintext HMAC key |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Last updated timestamp |
 
-- **Indexes:** `idx_repositories_workspace` on `(workspace_id)`.
+- **Unique:** `uq_repositories_workspace_provider_remote(workspace_id, provider, remote_repo_id)`. Its prefix supports workspace lookup; no redundant single-column index. The same remote repository can be registered in multiple workspaces; webhook routing must select and authenticate the correct integration.
 
 ---
 
@@ -359,16 +362,18 @@ Commit records synced via webhook deliveries.
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Commit record identifier |
 | `repository_id`| `UUID` | FK, NOT NULL | Internal FK referencing `repositories(id)` ON DELETE CASCADE |
-| `sha` | `VARCHAR(64)` | UK, NOT NULL | Unique commit SHA hash (`uq_git_commits_sha`) |
-| `message` | `TEXT` | NOT NULL | Commit message payload |
-| `author_name` | `VARCHAR(255)` | NOT NULL | Author full name |
-| `author_email`| `VARCHAR(255)` | NOT NULL | Author email address |
+| `sha` | `VARCHAR(64)` | NOT NULL | Unique within repository, never globally |
+| `message` | `TEXT` | NOT NULL | Empty allowed; at most 65,536 UTF-8 bytes |
+| `author_name` | `VARCHAR(255)` | NULL | Missing/anonymized author allowed; nonblank when supplied |
+| `author_email`| `VARCHAR(255)` | NULL | Unverified Git metadata; nonblank when supplied |
 | `task_id` | `UUID` | NULL | **Soft Reference** pointing to `tasks.id` (Board) |
 | `committed_at`| `TIMESTAMPTZ` | NOT NULL | Timestamp recorded on developer machine |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Ingestion timestamp |
 
+`updated_at` has the common audit definition above. `uq_git_commits_repo_sha UNIQUE(repository_id, sha)` permits shared commits across forks/workspaces.
+
 - **Indexes:**
-  - `idx_git_commits_repo` on `(repository_id)`.
+  - Repository lookup uses the composite unique index prefix.
   - `idx_git_commits_task_id` on `(task_id)`.
 
 ---
@@ -380,13 +385,14 @@ Pull request status and review tracking.
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Pull request identifier |
 | `repository_id`| `UUID` | FK, NOT NULL | Internal FK referencing `repositories(id)` ON DELETE CASCADE |
-| `pr_number` | `INT` | NOT NULL | Remote PR number (e.g. `#12`) |
+| `pr_number` | `INT` | NOT NULL, CHECK > 0 | Remote PR number (e.g. `#12`) |
 | `title` | `VARCHAR(255)` | NOT NULL | PR title |
 | `source_branch`| `VARCHAR(255)` | NOT NULL | Head branch name (e.g. `feature/T-002`) |
 | `target_branch`| `VARCHAR(255)` | NOT NULL | Base branch name (e.g. `main`) |
 | `status` | `VARCHAR(50)` | NOT NULL | Status: `OPEN`, `MERGED`, `CLOSED` |
 | `task_id` | `UUID` | NULL | **Soft Reference** pointing to `tasks.id` (Board) |
 | `pr_url` | `VARCHAR(512)` | NOT NULL | Direct web link to PR |
+| `provider_updated_at` | `TIMESTAMPTZ` | NULL | Source version time for future stale-event handling |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Last status update timestamp |
 
@@ -405,16 +411,21 @@ Continuous integration test suite executions.
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Pipeline run identifier |
 | `repository_id`| `UUID` | FK, NOT NULL | Internal FK referencing `repositories(id)` ON DELETE CASCADE |
 | `pipeline_id` | `VARCHAR(100)` | NOT NULL | External CI runner ID (GitHub Actions Run ID) |
+| `run_attempt` | `INT` | NOT NULL, DEFAULT 1, CHECK > 0 | One row per run attempt; unique with repository and external run ID |
 | `commit_sha` | `VARCHAR(64)` | NOT NULL | Target commit hash |
 | `branch` | `VARCHAR(255)` | NOT NULL | Git branch trigger |
-| `status` | `VARCHAR(50)` | NOT NULL | Status: `PENDING`, `RUNNING`, `SUCCESS`, `FAILED` |
+| `status` | `VARCHAR(50)` | NOT NULL | `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `CANCELLED`, `SKIPPED`, `TIMED_OUT`, `ACTION_REQUIRED`, `NEUTRAL`, `STALE`, `UNKNOWN` |
+| `provider_status`, `provider_conclusion` | `VARCHAR(50)` each | NULL | Preserve original provider state independently of normalized status |
 | `started_at` | `TIMESTAMPTZ` | NULL | Execution start timestamp |
 | `finished_at` | `TIMESTAMPTZ` | NULL | Execution completion timestamp |
+| `provider_updated_at` | `TIMESTAMPTZ` | NULL | Source version time |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Ingestion timestamp |
 
 - **Indexes:**
   - `idx_ci_pipelines_repo_status` on `(repository_id, status)`.
-  - `idx_ci_pipelines_commit_sha` on `(commit_sha)`.
+  - `idx_ci_pipelines_repo_commit` on `(repository_id, commit_sha)`.
+
+`updated_at` uses the common audit definition. `uq_ci_pipelines_repo_run_attempt UNIQUE(repository_id, pipeline_id, run_attempt)` preserves reruns. `finished_at >= started_at` when both exist. `commit_sha` has no FK: CI may arrive before the commit webhook. Its lookup must include the repository.
 
 ---
 
@@ -425,17 +436,21 @@ Detailed breakdown of failed test stages and jobs for AI root-cause analysis.
 |---|---|---|---|
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Failure record identifier |
 | `pipeline_id` | `UUID` | FK, NOT NULL | Internal FK referencing `ci_pipelines(id)` ON DELETE CASCADE |
+| `failure_key` | `VARCHAR(200)` | NOT NULL | Stable per-attempt key, e.g. `job:<provider-job-id>` or `run`; not a display name |
 | `stage_name` | `VARCHAR(100)` | NOT NULL | Failed stage name (e.g. `unit-test`) |
 | `job_name` | `VARCHAR(100)` | NOT NULL | Specific failing job name |
-| `error_summary`| `TEXT` | NULL | Extracted error line summary |
-| `raw_log_snippet`| `TEXT` | NULL | Raw terminal stack trace snippet |
-| `ai_summary` | `TEXT` | NULL | AI-generated root cause explanation and fix suggestion |
+| `error_summary`| `TEXT` | NULL | At most 8,192 bytes |
+| `raw_log_snippet`| `TEXT` | NULL | At most 16,384 bytes; ingestion must redact secrets before writing |
+| `raw_log_reference` | `VARCHAR(2048)` | NULL | Opaque log storage reference, not a persisted expiring signed URL |
+| `ai_summary` | `TEXT` | NULL | At most 16,384 bytes; GitCI-owned projection populated through domain events, not cross-module SQL |
 | `related_task_id`| `UUID` | NULL | **Soft Reference** pointing to `tasks.id` (Board) |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Ingestion timestamp |
 
 - **Indexes:**
-  - `idx_ci_failures_pipeline` on `(pipeline_id)`.
+  - `uq_ci_failures_pipeline_key UNIQUE(pipeline_id, failure_key)` also supports pipeline lookup.
   - `idx_ci_failures_related_task` on `(related_task_id)`.
+
+`updated_at` uses the common audit definition. Unique keys prevent duplicate rows, not duplicate business events. API permissions, webhook authentication/routing, stale updates, idempotent side effects, redaction, object-log retention and cross-module cleanup belong to later integration tickets. No FK cascades from Auth/Board; consumers must validate workspace scope before using soft references.
 
 ---
 
@@ -507,10 +522,10 @@ Golden Rule: **Zero direct SQL JOINs across module boundaries in Spring Data rep
 | `tasks` | `assignee_id` | `users` (Auth) | **Soft UUID** | Task response assembly invokes `AuthApi.findUserSummary(assigneeId)` to enrich profile data without reading `users`. |
 | `tasks` | `assignee_id` | `users` (Auth) | **Soft UUID** | When a user leaves a workspace, Auth fires `user.removed_from_workspace`. Board listener clears assignment (`assignee_id = NULL`). |
 | `task_comments`| `author_id` | `users` (Auth) | **Soft UUID** | Comment author presentation resolved via `AuthApi.findUserSummary(authorId)`. |
-| `repositories`| `workspace_id` | `workspaces` (Auth) | **Soft UUID** | Admin permission verified via `AuthApi.isWorkspaceAdmin` prior to webhook setup. |
-| `git_commits` | `task_id` | `tasks` (Board) | **Soft UUID** | Commit parser detects ticket pattern (`Refs #T-101`), validates via `BoardApi.taskExists(taskId)` or fires `git.commit_linked`. |
+| `repositories`| `workspace_id` | `workspaces` (Auth) | **Soft UUID** | A typed request/decision event must validate integration administrator permissions under the active AGENTS contract; not implemented by the schema. |
+| `git_commits` | `task_id` | `tasks` (Board) | **Soft UUID** | T-022 resolves a ticket in repository/workspace scope through a typed event contract; T-023 publishes `git.commit_linked`. No direct Board table/API call under active AGENTS. |
 | `pull_requests`| `task_id` | `tasks` (Board) | **Soft UUID** | On merge, GitCI fires `git.pr_merged`. Board listens and automatically transitions task to `status_category = 'DONE'`. |
-| `ci_failures` | `related_task_id`| `tasks` (Board) | **Soft UUID** | AI service parses stack traces, resolves commit author/task, and associates the task ID. |
+| `ci_failures` | `related_task_id`| `tasks` (Board) | **Soft UUID** | GitCI validates and persists links/projections through typed events; AI never writes GitCI-owned tables directly. |
 | `ai_conversations`| `user_id` / `workspace_id` | `users` / `workspaces` (Auth) | **Soft UUID** | Authenticated via Bearer JWT at the HTTP security gateway layer before reaching AI controllers. |
 | `notifications`| `recipient_id`| `users` (Auth) | **Soft UUID** | Notification listener consumes domain events (`board.task_assigned`, `ci.failure_detected`) and writes alerts. |
 | `notifications`| `reference_id`| `tasks` / `ci_pipelines` | **Soft UUID** | Web client uses this UUID to deep-link directly to task modal or CI run inspection view. |
@@ -525,8 +540,11 @@ To ensure sub-100ms response times without physical relational joins across boun
 - `users(email)`: Rapid authentication lookup.
 - `workspaces(slug)`: Clean workspace URL routing.
 - `workspace_members(workspace_id, user_id)`: Prevents duplicate membership records.
-- `git_commits(sha)`: Prevents duplicate webhook event ingestion.
+- `repositories(workspace_id, provider, remote_repo_id)`: Workspace-scoped integration identity.
+- `git_commits(repository_id, sha)`: Repository-scoped commit identity; does not guarantee exactly-once webhook processing.
 - `pull_requests(repository_id, pr_number)`: Repository-scoped PR uniqueness.
+- `ci_pipelines(repository_id, pipeline_id, run_attempt)`: Run-attempt identity.
+- `ci_failures(pipeline_id, failure_key)`: Per-attempt failure identity and parent lookup.
 
 ### 5.2. Internal Parent-Child Hierarchy Indexes
 - `columns(board_id, position)`: Loads ordered Kanban columns in a single index scan.
@@ -560,12 +578,10 @@ Phase 2 (M2): V2__board_schema.sql (Kanban Core)
   └── task_tag_mappings
         │
         ▼
-V7__auth_email_verification.sql (T-004A, Auth hardening; runs after Board V3-V5 and Git/CI V6)
-  ├── users.status, users.email_verified_at
-  └── verification_tokens
+V3-V5: Board audit, task audit and optimistic task version (already allocated)
         │
         ▼
-Phase 3 (M3): V4__gitci_schema.sql (Git & CI Integration)
+Phase 3 (M3): V6__gitci_schema.sql (Git & CI Integration)
   ├── repositories
   ├── git_commits
   ├── pull_requests
@@ -573,7 +589,12 @@ Phase 3 (M3): V4__gitci_schema.sql (Git & CI Integration)
   └── ci_failures
         │
         ▼
-Phase 4 (M4): V5__ai_and_notification_schema.sql
+V7__auth_email_verification.sql (T-004A, Auth hardening; runs after Board V3-V5 and Git/CI V6)
+  ├── users.status, users.email_verified_at
+  └── verification_tokens
+        │
+        ▼
+Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated)
   ├── ai_conversations
   ├── ai_messages
   └── notifications
@@ -590,11 +611,12 @@ Phase 4 (M4): V5__ai_and_notification_schema.sql
    - Tables: 6 Board module tables.
    - Requirement: `tasks.assignee_id` MUST be declared as `UUID NULL` without `REFERENCES users(id)`.
 3. **Phase 3 (Milestone M3 — Sprint 4):**
-   - Script: `V4__gitci_schema.sql`
+   - Script: `V6__gitci_schema.sql` (historical T-020 title says V3; V3-V5 must remain immutable).
    - Tables: 5 Git/CI module tables.
    - Requirement: `git_commits.task_id` and `pull_requests.task_id` MUST be declared as `UUID NULL`.
+   - Auth hardening (T-004A): `V7__auth_email_verification.sql` adds `users.status`, `users.email_verified_at` and `verification_tokens`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
-   - Script: `V5__ai_and_notification_schema.sql`
+   - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.
 
 ---

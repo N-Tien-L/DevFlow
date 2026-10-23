@@ -1,6 +1,7 @@
 package io.devflow.auth.internal.security;
 
 import io.devflow.auth.internal.entity.UserEntity;
+import io.devflow.common.security.AuthenticatedActor;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -14,7 +15,7 @@ import java.util.UUID;
  * Custom Spring Security {@link UserDetails} implementation representing
  * the authenticated user in DevFlow.
  */
-public class UserPrincipal implements UserDetails {
+public class UserPrincipal implements UserDetails, AuthenticatedActor {
 
     private final UUID id;
     private final String email;
@@ -41,6 +42,11 @@ public class UserPrincipal implements UserDetails {
     }
 
     public UUID getId() {
+        return id;
+    }
+
+    @Override
+    public UUID userId() {
         return id;
     }
 

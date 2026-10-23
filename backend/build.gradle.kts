@@ -23,6 +23,12 @@ subprojects {
         }
     }
 
+    // Spring 6.1+ resolves unnamed @PathVariable/@RequestParam arguments only from -parameters
+    // metadata. The Boot plugin adds it for :app alone, so every module needs it explicitly.
+    tasks.withType<JavaCompile> {
+        options.compilerArgs.add("-parameters")
+    }
+
     dependencies {
         "testImplementation"(platform("org.springframework.boot:spring-boot-dependencies:3.4.5"))
         "testImplementation"("org.junit.jupiter:junit-jupiter")
@@ -31,6 +37,12 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+
+        // Keep Docker Desktop context overrides available to Testcontainers in the test JVM,
+        // even when a user-level .testcontainers.properties forces another strategy.
+        providers.environmentVariable("DOCKER_HOST").orNull?.let { systemProperty("docker.host", it) }
+        providers.environmentVariable("TESTCONTAINERS_DOCKER_CLIENT_STRATEGY").orNull
+            ?.let { systemProperty("docker.client.strategy", it) }
     }
 }
 
