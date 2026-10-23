@@ -1,0 +1,13 @@
+Hi,
+
+{{inviterName}} invited you to join the workspace "{{workspaceName}}" on DevFlow as a {{role}}.
+
+Accept the invitation:
+
+{{acceptUrl}}
+
+This invitation expires in {{expiresInDays}} days and can be used once. Sign in (or create an account) with this email address to accept it.
+
+If you were not expecting this invitation, you can ignore this email.
+
+-- DevFlow

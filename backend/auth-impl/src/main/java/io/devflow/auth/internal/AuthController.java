@@ -26,12 +26,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
  * REST API controller for user registration, authentication, token refresh,
  * user profile retrieval, and workspace membership queries.
+ * Workspace creation and invitations live in {@link WorkspaceController}.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -118,18 +118,5 @@ public class AuthController {
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "20") int size) {
         return ResponseEntity.ok(authService.getWorkspaceMembers(principal.getId(), workspaceId, q, page, size));
-    }
-
-    // Stubs for future workspace creation/invitation endpoints
-    @PostMapping("/workspaces")
-    public ResponseEntity<Map<String, String>> createWorkspace() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
-                .body(Map.of("todo", "createWorkspace — not implemented yet", "spec", "PRODUCT_SPEC.md Section 5.1"));
-    }
-
-    @PostMapping("/workspaces/invitations")
-    public ResponseEntity<Map<String, String>> inviteMember() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
-                .body(Map.of("todo", "inviteMember — not implemented yet", "spec", "PRODUCT_SPEC.md Section 5.1"));
     }
 }

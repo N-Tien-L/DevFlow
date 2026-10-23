@@ -14,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -90,6 +91,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ProblemDetail> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Request parameter '" + ex.getName() + "' has an invalid value");
+        problem.setTitle("Bad Request");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
     @ExceptionHandler(AccountNotVerifiedException.class)
     public ResponseEntity<ProblemDetail> handleAccountNotVerified(
             AccountNotVerifiedException ex, HttpServletRequest request) {
@@ -127,6 +141,71 @@ public class GlobalExceptionHandler {
         problem.setProperty("timestamp", Instant.now().toString());
 
         return ResponseEntity.status(HttpStatus.GONE).body(problem);
+    }
+
+    @ExceptionHandler(WorkspaceConflictException.class)
+    public ResponseEntity<ProblemDetail> handleWorkspaceConflict(
+            WorkspaceConflictException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Conflict");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", ex.getCode());
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(WorkspacePermissionDeniedException.class)
+    public ResponseEntity<ProblemDetail> handleWorkspacePermissionDenied(
+            WorkspacePermissionDeniedException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Forbidden");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "WORKSPACE_PERMISSION_DENIED");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(InvalidInvitationException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidInvitation(
+            InvalidInvitationException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Bad Request");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "INVITATION_INVALID");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(InvitationExpiredException.class)
+    public ResponseEntity<ProblemDetail> handleInvitationExpired(
+            InvitationExpiredException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.GONE, ex.getMessage());
+        problem.setTitle("Gone");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "INVITATION_EXPIRED");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.GONE).body(problem);
+    }
+
+    @ExceptionHandler(InvitationEmailMismatchException.class)
+    public ResponseEntity<ProblemDetail> handleInvitationEmailMismatch(
+            InvitationEmailMismatchException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Forbidden");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "INVITATION_EMAIL_MISMATCH");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
     @ExceptionHandler(BotChallengeFailedException.class)

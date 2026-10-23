@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You have been invited to a DevFlow workspace</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f1f5f9;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;padding:32px;">
+          <tr>
+            <td style="font-size:20px;font-weight:700;padding-bottom:16px;">DevFlow</td>
+          </tr>
+          <tr>
+            <td style="font-size:15px;line-height:1.6;padding-bottom:24px;">
+              Hi,<br><br>
+              <strong>{{inviterName}}</strong> invited you to join the workspace
+              <strong>{{workspaceName}}</strong> on DevFlow as a {{role}}.
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding-bottom:24px;">
+              <a href="{{acceptUrl}}" style="display:inline-block;background-color:#4f46e5;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 28px;border-radius:8px;">Accept invitation</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;line-height:1.6;color:#475569;">
+              This invitation expires in {{expiresInDays}} days and can be used once. Sign in (or create an
+              account) with this email address to accept it.
+              If the button does not work, copy this address into your browser:<br>
+              <span style="word-break:break-all;color:#4f46e5;">{{acceptUrl}}</span><br><br>
+              If you were not expecting this invitation, you can ignore this email.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

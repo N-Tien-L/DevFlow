@@ -79,7 +79,8 @@ public class VerificationEmailSender {
         } catch (MessagingException e) {
             // Malformed message (e.g. bad sender address config): not transient, so do not retry.
             metrics.verificationEmail("failed");
-            log.error("Could not build verification email for user {}: {}", event.userId(), e.getMessage());
+            log.error("Could not build verification email for user {}: {}",
+                    event.userId(), LogMasking.describeFailure(e));
             return;
         }
 
@@ -91,7 +92,7 @@ public class VerificationEmailSender {
     void sendFallback(VerificationEmailRequestedEvent event, Throwable cause) {
         metrics.verificationEmail("failed");
         log.error("Verification email delivery failed for user {} after retries: {}",
-                event.userId(), cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                event.userId(), LogMasking.describeFailure(cause));
     }
 
     String buildVerificationUrl(String rawToken) {

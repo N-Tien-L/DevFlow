@@ -51,6 +51,31 @@ public class AuthMetrics {
         registry.counter("devflow.auth.anti_abuse", "check", check, "result", result).increment();
     }
 
+    /** {@code result}: success | limit_reached */
+    public void workspaceCreated(String result) {
+        registry.counter("devflow.auth.workspace_created", "result", result).increment();
+    }
+
+    /** {@code result}: created | already_pending | limit_reached | forbidden */
+    public void workspaceInvitation(String result) {
+        registry.counter("devflow.auth.workspace_invitation", "result", result).increment();
+    }
+
+    /** {@code result}: success | already_member | invalid | expired | email_mismatch */
+    public void workspaceInvitationAccept(String result) {
+        registry.counter("devflow.auth.workspace_invitation_accept", "result", result).increment();
+    }
+
+    /** {@code result}: success | not_found */
+    public void workspaceInvitationRevoke(String result) {
+        registry.counter("devflow.auth.workspace_invitation_revoke", "result", result).increment();
+    }
+
+    /** {@code result}: sent | failed | rejected */
+    public void workspaceInvitationEmail(String result) {
+        registry.counter("devflow.auth.workspace_invitation_email", "result", result).increment();
+    }
+
     public void purged(String kind, int count) {
         registry.counter("devflow.auth.purged", "kind", kind).increment(count);
     }
