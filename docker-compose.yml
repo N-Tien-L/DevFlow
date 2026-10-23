@@ -23,16 +23,28 @@ services:
       SPRING_DATASOURCE_PASSWORD: devflow
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_MODEL_CHAT: ${AI_MODEL_CHAT:-none}
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 15s
       timeout: 5s
       retries: 5
+
+  # Local SMTP sink for transactional email (T-004A). Inbox UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
   frontend:
     build: ./frontend

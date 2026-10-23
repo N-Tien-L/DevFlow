@@ -2,9 +2,13 @@ package io.devflow.auth.internal;
 
 import io.devflow.auth.api.AuthResponse;
 import io.devflow.auth.api.LoginRequest;
+import io.devflow.auth.api.MessageResponse;
 import io.devflow.auth.api.RefreshTokenRequest;
 import io.devflow.auth.api.RegisterRequest;
+import io.devflow.auth.api.RegisterResponse;
+import io.devflow.auth.api.ResendVerificationRequest;
 import io.devflow.auth.api.UserSummary;
+import io.devflow.auth.api.VerifyEmailRequest;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.api.WorkspaceMemberPageResponse;
 import io.devflow.auth.internal.security.UserPrincipal;
@@ -33,18 +37,38 @@ import java.util.UUID;
 public class AuthController {
 
     private final AuthService authService;
+    private final RegistrationService registrationService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, RegistrationService registrationService) {
         this.authService = authService;
+        this.registrationService = registrationService;
     }
 
     /**
-     * Registers a new user account.
+     * Registers a new account in {@code PENDING_VERIFICATION} state and emails a verification link.
+     * No tokens are issued until the email is verified.
      */
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        AuthResponse response = authService.register(request);
+    public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
+        RegisterResponse response = registrationService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * Confirms the token from the verification email and activates the account.
+     */
+    @PostMapping("/verify-email")
+    public ResponseEntity<MessageResponse> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        return ResponseEntity.ok(registrationService.verifyEmail(request));
+    }
+
+    /**
+     * Re-sends the verification email. Always answers 202 to avoid disclosing which emails are registered.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<MessageResponse> resendVerification(
+            @Valid @RequestBody ResendVerificationRequest request) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(registrationService.resendVerification(request));
     }
 
     /**

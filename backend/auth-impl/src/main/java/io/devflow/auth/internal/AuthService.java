@@ -4,7 +4,6 @@ import io.devflow.auth.api.AuthApi;
 import io.devflow.auth.api.AuthResponse;
 import io.devflow.auth.api.LoginRequest;
 import io.devflow.auth.api.RefreshTokenRequest;
-import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.api.WorkspaceMemberPageResponse;
@@ -12,7 +11,7 @@ import io.devflow.auth.api.WorkspaceMemberSummary;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.WorkspaceEntity;
 import io.devflow.auth.internal.entity.WorkspaceMemberEntity;
-import io.devflow.auth.internal.exception.EmailAlreadyExistsException;
+import io.devflow.auth.internal.exception.AccountNotVerifiedException;
 import io.devflow.auth.internal.exception.InvalidTokenException;
 import io.devflow.auth.internal.exception.ResourceNotFoundException;
 import io.devflow.auth.internal.repository.UserRepository;
@@ -20,6 +19,8 @@ import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
 import io.devflow.auth.internal.security.JwtProperties;
 import io.devflow.auth.internal.security.JwtTokenProvider;
+import io.devflow.auth.internal.support.AuthMetrics;
+import io.devflow.auth.internal.support.InputSanitizer;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class AuthService implements AuthApi {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
+    private final AuthMetrics metrics;
 
     public AuthService(
             UserRepository userRepository,
@@ -55,42 +57,34 @@ public class AuthService implements AuthApi {
             WorkspaceMemberRepository workspaceMemberRepository,
             PasswordEncoder passwordEncoder,
             JwtTokenProvider jwtTokenProvider,
-            JwtProperties jwtProperties) {
+            JwtProperties jwtProperties,
+            AuthMetrics metrics) {
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.jwtProperties = jwtProperties;
-    }
-
-    /**
-     * Registers a new user account with hashed password and generates initial JWT tokens.
-     */
-    @Transactional
-    public AuthResponse register(RegisterRequest request) {
-        String email = request.email().toLowerCase().trim();
-        if (userRepository.existsByEmail(email)) {
-            throw new EmailAlreadyExistsException(email);
-        }
-
-        String passwordHash = passwordEncoder.encode(request.password());
-        UserEntity user = new UserEntity(email, passwordHash, request.fullName().trim());
-        user = userRepository.save(user);
-
-        return createAuthResponse(user);
+        this.metrics = metrics;
     }
 
     /**
      * Authenticates user credentials via email and password, returning JWT access and refresh tokens.
+     * The password is checked before the account status so that the verification state of an email
+     * is only disclosed to someone who knows its password.
      */
     public AuthResponse login(LoginRequest request) {
-        String email = request.email().toLowerCase().trim();
+        String email = InputSanitizer.normalizeEmail(request.email());
         UserEntity user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BadCredentialsException("Invalid email or password");
+        }
+
+        if (!user.isActive()) {
+            metrics.loginBlocked("unverified");
+            throw new AccountNotVerifiedException();
         }
 
         return createAuthResponse(user);
@@ -113,6 +107,10 @@ public class AuthService implements AuthApi {
         UUID userId = jwtTokenProvider.getUserIdFromToken(token);
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new InvalidTokenException("User associated with token no longer exists"));
+
+        if (!user.isActive()) {
+            throw new AccountNotVerifiedException();
+        }
 
         return createAuthResponse(user);
     }

@@ -5,20 +5,27 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Spring MVC configuration for registering interceptors (e.g. rate limiter).
+ * Spring MVC configuration for registering per-endpoint rate limiting interceptors.
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
-    private final RateLimitingInterceptor rateLimitingInterceptor;
+    private final RateLimiterService rateLimiterService;
 
-    public WebMvcConfig(RateLimitingInterceptor rateLimitingInterceptor) {
-        this.rateLimitingInterceptor = rateLimitingInterceptor;
+    public WebMvcConfig(RateLimiterService rateLimiterService) {
+        this.rateLimiterService = rateLimiterService;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(rateLimitingInterceptor)
-                .addPathPatterns("/api/v1/auth/login");
+        register(registry, RateLimitProperties.LOGIN, "/api/v1/auth/login");
+        register(registry, RateLimitProperties.REGISTER, "/api/v1/auth/register");
+        register(registry, RateLimitProperties.VERIFY_EMAIL, "/api/v1/auth/verify-email");
+        register(registry, RateLimitProperties.RESEND_VERIFICATION, "/api/v1/auth/resend-verification");
+    }
+
+    private void register(InterceptorRegistry registry, String policyName, String path) {
+        registry.addInterceptor(new RateLimitingInterceptor(rateLimiterService, policyName))
+                .addPathPatterns(path);
     }
 }

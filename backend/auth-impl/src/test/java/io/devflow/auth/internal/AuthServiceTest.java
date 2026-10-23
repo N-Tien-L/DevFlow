@@ -3,14 +3,13 @@ package io.devflow.auth.internal;
 import io.devflow.auth.api.AuthResponse;
 import io.devflow.auth.api.LoginRequest;
 import io.devflow.auth.api.RefreshTokenRequest;
-import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.WorkspaceEntity;
 import io.devflow.auth.internal.entity.WorkspaceMemberEntity;
 import io.devflow.auth.internal.entity.WorkspaceRole;
-import io.devflow.auth.internal.exception.EmailAlreadyExistsException;
+import io.devflow.auth.internal.exception.AccountNotVerifiedException;
 import io.devflow.auth.internal.exception.InvalidTokenException;
 import io.devflow.auth.internal.exception.ResourceNotFoundException;
 import io.devflow.auth.internal.repository.UserRepository;
@@ -18,6 +17,7 @@ import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
 import io.devflow.auth.internal.security.JwtProperties;
 import io.devflow.auth.internal.security.JwtTokenProvider;
+import io.devflow.auth.internal.support.AuthMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -29,14 +29,13 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,6 +60,9 @@ class AuthServiceTest {
     @Mock
     private JwtProperties jwtProperties;
 
+    @Mock
+    private AuthMetrics metrics;
+
     private AuthService authService;
 
     private final UUID userId = UUID.randomUUID();
@@ -77,57 +79,21 @@ class AuthServiceTest {
                 workspaceMemberRepository,
                 passwordEncoder,
                 jwtTokenProvider,
-                jwtProperties);
+                jwtProperties,
+                metrics);
     }
 
+    /** New accounts start as PENDING_VERIFICATION. */
     private UserEntity createTestUser() {
         UserEntity user = new UserEntity(email, hashedPassword, fullName);
         ReflectionTestUtils.setField(user, "id", userId);
         return user;
     }
 
-    @Nested
-    @DisplayName("register()")
-    class RegisterTests {
-
-        @Test
-        @DisplayName("Should successfully register a new user and return AuthResponse")
-        void register_success() {
-            RegisterRequest request = new RegisterRequest(email, rawPassword, fullName);
-            UserEntity user = createTestUser();
-
-            when(userRepository.existsByEmail(email)).thenReturn(false);
-            when(passwordEncoder.encode(rawPassword)).thenReturn(hashedPassword);
-            when(userRepository.save(any(UserEntity.class))).thenReturn(user);
-            when(jwtProperties.getAccessTokenExpirationMs()).thenReturn(3600000L);
-            when(jwtTokenProvider.generateAccessToken(eq(userId), eq(email))).thenReturn("mock-access-token");
-            when(jwtTokenProvider.generateRefreshToken(eq(userId), eq(email))).thenReturn("mock-refresh-token");
-
-            AuthResponse response = authService.register(request);
-
-            assertThat(response).isNotNull();
-            assertThat(response.accessToken()).isEqualTo("mock-access-token");
-            assertThat(response.refreshToken()).isEqualTo("mock-refresh-token");
-            assertThat(response.tokenType()).isEqualTo("Bearer");
-            assertThat(response.expiresIn()).isEqualTo(3600L);
-            assertThat(response.user().email()).isEqualTo(email);
-            assertThat(response.user().fullName()).isEqualTo(fullName);
-
-            verify(userRepository).save(any(UserEntity.class));
-        }
-
-        @Test
-        @DisplayName("Should throw EmailAlreadyExistsException when email is already registered")
-        void register_duplicateEmail_throwsException() {
-            RegisterRequest request = new RegisterRequest(email, rawPassword, fullName);
-            when(userRepository.existsByEmail(email)).thenReturn(true);
-
-            assertThatThrownBy(() -> authService.register(request))
-                    .isInstanceOf(EmailAlreadyExistsException.class)
-                    .hasMessageContaining(email);
-
-            verify(userRepository, never()).save(any());
-        }
+    private UserEntity createActiveTestUser() {
+        UserEntity user = createTestUser();
+        user.activate(Instant.now());
+        return user;
     }
 
     @Nested
@@ -138,7 +104,7 @@ class AuthServiceTest {
         @DisplayName("Should authenticate and return AuthResponse on valid credentials")
         void login_success() {
             LoginRequest request = new LoginRequest(email, rawPassword);
-            UserEntity user = createTestUser();
+            UserEntity user = createActiveTestUser();
 
             when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
             when(passwordEncoder.matches(rawPassword, hashedPassword)).thenReturn(true);
@@ -178,6 +144,44 @@ class AuthServiceTest {
                     .isInstanceOf(BadCredentialsException.class)
                     .hasMessage("Invalid email or password");
         }
+
+        @Test
+        @DisplayName("Should throw AccountNotVerifiedException when password matches but email is unverified")
+        void login_unverifiedAccount_throwsAccountNotVerified() {
+            LoginRequest request = new LoginRequest(email, rawPassword);
+            UserEntity user = createTestUser();
+
+            when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches(rawPassword, hashedPassword)).thenReturn(true);
+
+            assertThatThrownBy(() -> authService.login(request))
+                    .isInstanceOf(AccountNotVerifiedException.class);
+            verify(metrics).loginBlocked("unverified");
+            verifyNoInteractions(jwtTokenProvider);
+        }
+
+        @Test
+        @DisplayName("Should not reveal verification state when password is wrong for an unverified account")
+        void login_unverifiedAccountWrongPassword_throwsBadCredentials() {
+            LoginRequest request = new LoginRequest(email, "WrongPassword");
+            UserEntity user = createTestUser();
+
+            when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("WrongPassword", hashedPassword)).thenReturn(false);
+
+            assertThatThrownBy(() -> authService.login(request))
+                    .isInstanceOf(BadCredentialsException.class);
+        }
+
+        @Test
+        @DisplayName("Should normalise email case and whitespace before lookup")
+        void login_normalisesEmail() {
+            LoginRequest request = new LoginRequest("  Developer@DevFlow.IO ", rawPassword);
+            when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> authService.login(request)).isInstanceOf(BadCredentialsException.class);
+            verify(userRepository).findByEmail(email);
+        }
     }
 
     @Nested
@@ -189,7 +193,7 @@ class AuthServiceTest {
         void refreshToken_success() {
             String refreshToken = "valid-refresh-token";
             RefreshTokenRequest request = new RefreshTokenRequest(refreshToken);
-            UserEntity user = createTestUser();
+            UserEntity user = createActiveTestUser();
 
             when(jwtTokenProvider.validateToken(refreshToken)).thenReturn(true);
             when(jwtTokenProvider.getTokenTypeFromToken(refreshToken)).thenReturn("refresh");
@@ -229,6 +233,21 @@ class AuthServiceTest {
             assertThatThrownBy(() -> authService.refreshToken(request))
                     .isInstanceOf(InvalidTokenException.class)
                     .hasMessageContaining("Supplied token is not a refresh token");
+        }
+
+        @Test
+        @DisplayName("Should refuse to refresh tokens for an account that is not active")
+        void refreshToken_unverifiedAccount_throwsAccountNotVerified() {
+            String token = "valid-refresh-token";
+            RefreshTokenRequest request = new RefreshTokenRequest(token);
+
+            when(jwtTokenProvider.validateToken(token)).thenReturn(true);
+            when(jwtTokenProvider.getTokenTypeFromToken(token)).thenReturn("refresh");
+            when(jwtTokenProvider.getUserIdFromToken(token)).thenReturn(userId);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(createTestUser()));
+
+            assertThatThrownBy(() -> authService.refreshToken(request))
+                    .isInstanceOf(AccountNotVerifiedException.class);
         }
     }
 

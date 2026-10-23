@@ -198,6 +198,8 @@ sequenceDiagram
 
 Luồng đăng nhập được bảo vệ bởi bộ đệm giới hạn tần suất (Rate Limiter) và bắt buộc tài khoản phải ở trạng thái `ACTIVE` (đã qua bước xác thực email).
 
+> **Thứ tự kiểm tra (T-004A):** mật khẩu được kiểm tra **trước** trạng thái tài khoản. Nhờ vậy chỉ người biết đúng mật khẩu mới biết được email đó đã xác thực hay chưa; sai mật khẩu luôn trả 401 chung.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -223,17 +225,17 @@ sequenceDiagram
             ExHandler-->>Client: HTTP 401 Unauthorized (RFC 7807 ProblemDetail)
         else Người dùng tồn tại
             Repo-->>Svc: Optional.of(UserEntity)
-            alt Tài khoản chưa kích hoạt email (status == PENDING_VERIFICATION)
-                Svc-->>ExHandler: Ném AccountPendingVerificationException
-                ExHandler-->>Client: HTTP 403 Forbidden ("Email verification required")
-            else Tài khoản đã ACTIVE
-                Svc->>Enc: matches(rawPassword, user.passwordHash)
-                alt Mật khẩu không trùng khớp
-                    Enc-->>Svc: false
-                    Svc-->>ExHandler: Ném BadCredentialsException ("Invalid credentials")
-                    ExHandler-->>Client: HTTP 401 Unauthorized (RFC 7807 ProblemDetail)
-                else Mật khẩu trùng khớp
-                    Enc-->>Svc: true
+            Svc->>Enc: matches(rawPassword, user.passwordHash)
+            alt Mật khẩu không trùng khớp
+                Enc-->>Svc: false
+                Svc-->>ExHandler: Ném BadCredentialsException ("Invalid credentials")
+                ExHandler-->>Client: HTTP 401 Unauthorized (RFC 7807 ProblemDetail)
+            else Mật khẩu trùng khớp
+                Enc-->>Svc: true
+                alt Tài khoản chưa xác thực email (status == PENDING_VERIFICATION)
+                    Svc-->>ExHandler: Ném AccountNotVerifiedException
+                    ExHandler-->>Client: HTTP 403 Forbidden (code: EMAIL_NOT_VERIFIED)
+                else Tài khoản đã ACTIVE
                     Svc->>Prov: generateAccessToken(user.getId(), user.getEmail())
                     Prov-->>Svc: accessTokenString (Hạn dùng 1 giờ)
                     Svc->>Prov: generateRefreshToken(user.getId())
@@ -284,11 +286,13 @@ sequenceDiagram
                 UserRepo-->>RegSvc: true
                 RegSvc-->>Client: HTTP 409 Conflict ("Email already registered")
             else Email mới
-                RegSvc->>UserRepo: save(UserEntity: status = PENDING_VERIFICATION)
-                RegSvc->>TokenRepo: save(VerificationTokenEntity: token, expiresAt = +24h)
-                RegSvc-)Mailer: dispatchVerificationEmailAsync(email, token)
-                RegSvc-->>Ctrl: RegistrationResult.PENDING
-                Ctrl-->>Client: HTTP 201 Created ("Registration successful. Please verify your email.")
+                RegSvc->>UserRepo: saveAndFlush(UserEntity: status = PENDING_VERIFICATION)
+                RegSvc->>TokenRepo: save(VerificationTokenEntity: SHA-256(token), expiresAt = +24h)
+                RegSvc->>RegSvc: publish VerificationEmailRequestedEvent (nội bộ auth)
+                RegSvc-->>Ctrl: RegisterResponse(email, PENDING_VERIFICATION)
+                Ctrl-->>Client: HTTP 201 Created (không trả JWT)
+                Note over RegSvc,Mailer: @TransactionalEventListener(AFTER_COMMIT)<br/>→ pool riêng auth-mail-*
+                RegSvc-)Mailer: send(event) [Retry + CircuitBreaker]
             end
         end
     end
@@ -311,22 +315,35 @@ sequenceDiagram
 
     Client->>Ctrl: POST /api/v1/auth/verify-email { token }
     Ctrl->>RegSvc: verifyEmail(token)
-    RegSvc->>TokenRepo: findByToken(token)
+    RegSvc->>TokenRepo: findByTokenHash(SHA-256(token))
     alt Token không tồn tại hoặc đã bị sử dụng (usedAt != null)
         TokenRepo-->>RegSvc: Optional.empty() hoặc already used
-        RegSvc-->>Client: HTTP 400 Bad Request ("Invalid or expired verification token")
+        RegSvc-->>Client: HTTP 400 Bad Request (code: VERIFICATION_TOKEN_INVALID)
     else Token hợp lệ
-        alt Token đã quá hạn (expiresAt < now)
-            RegSvc-->>Client: HTTP 410 Gone ("Token expired. Please request a new one.")
+        alt Token đã quá hạn (expiresAt <= now)
+            RegSvc-->>Client: HTTP 410 Gone (code: VERIFICATION_TOKEN_EXPIRED)
         else Token còn hạn
-            RegSvc->>UserRepo: findById(token.userId)
-            RegSvc->>UserRepo: update user.status = ACTIVE
-            RegSvc->>TokenRepo: update token.usedAt = now()
-            RegSvc-->>Ctrl: VerificationSuccess
-            Ctrl-->>Client: HTTP 200 OK ("Account activated successfully. You can now login.")
+            RegSvc->>TokenRepo: markUsed: UPDATE ... SET used_at = now WHERE id = ? AND used_at IS NULL
+            alt 0 dòng bị cập nhật (request song song đã dùng token)
+                RegSvc-->>Client: HTTP 400 Bad Request (code: VERIFICATION_TOKEN_INVALID)
+            else 1 dòng
+                RegSvc->>UserRepo: findById(userId) → activate(now): status = ACTIVE, email_verified_at = now
+                RegSvc-->>Ctrl: MessageResponse
+                Ctrl-->>Client: HTTP 200 OK ("Email verified successfully. You can now sign in.")
+            end
         end
     end
 ```
+
+### 6.1. Gửi lại email xác thực (`POST /api/v1/auth/resend-verification` - `T-004A`)
+
+- Giới hạn tần suất 2 lớp: theo IP (interceptor, 5 req/giờ) và theo **địa chỉ email** (3 req/giờ) để chặn việc spam một hộp thư từ nhiều IP.
+- Nếu email thuộc tài khoản `PENDING_VERIFICATION`: vô hiệu mọi token cũ (`used_at = now`), phát token mới và gửi email.
+- **Luôn trả HTTP 202 với cùng một nội dung**, dù email không tồn tại hay đã `ACTIVE`, nên endpoint này không thể dùng để dò email đã đăng ký.
+
+### 6.2. Dọn dữ liệu định kỳ
+
+`VerificationCleanupJob` (cron `devflow.verification.purge-cron`, mặc định 03:00 UTC) xóa token hết hạn hoặc đã dùng quá 7 ngày, và tài khoản `PENDING_VERIFICATION` quá 7 ngày (token bị xóa theo `ON DELETE CASCADE`).
 
 ---
 
@@ -369,10 +386,11 @@ sequenceDiagram
 | **Authentication Filter** | [JwtAuthenticationFilter.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/security/JwtAuthenticationFilter.java) | `T-003` | Bóc tách Bearer token, gọi validator, tạo `UserPrincipal` và nạp vào `SecurityContextHolder`. |
 | **Token Provider** | [JwtTokenProvider.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/security/JwtTokenProvider.java) | `T-003` | Ký token HMAC SHA-256, parse claims, kiểm tra hạn dùng access/refresh token. |
 | **Exception Handler & EntryPoint** | `JwtAuthenticationEntryPoint.java`, `GlobalExceptionHandler.java` | `T-004` | Xử lý lỗi toàn cục và định dạng phản hồi chuẩn RFC 7807 `ProblemDetail`, giấu stack trace. |
-| **Rate Limiter Interceptor** | `RateLimitingInterceptor.java` | `T-004` | Giới hạn tần suất gọi API công khai bằng thuật toán Token Bucket (Bucket4j). |
-| **REST Controller** | [AuthController.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/AuthController.java) | `T-004`, `T-004A` | Endpoints cho Login, Refresh, Me, Workspaces, Register, Verify Email. |
-| **Core Auth Service** | [AuthService.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/AuthService.java) | `T-004` | Xử lý đăng nhập, cấp token JWT, kiểm tra trạng thái active và cài đặt `AuthApi`. |
-| **Registration & Email Service** | `RegistrationService.java`, `EmailSenderService.java` | `T-004A` | Xử lý tạo user `PENDING`, sinh verification token, gửi email xác thực bất đồng bộ và kích hoạt. |
+| **Rate Limiter** | `security/RateLimitingInterceptor.java`, `RateLimiterService.java`, `RateLimitProperties.java` | `T-004`, `T-004A` | Token Bucket (Bucket4j) theo policy có tên (`devflow.rate-limit.policies.*`), bucket lưu trong Caffeine có TTL. IP lấy từ `getRemoteAddr()`; `X-Forwarded-For` chỉ được tin qua `server.forward-headers-strategy` (proxy nội bộ). |
+| **REST Controller** | [AuthController.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/AuthController.java) | `T-004`, `T-004A` | Endpoints cho Login, Refresh, Me, Workspaces, Register, Verify Email, Resend Verification. |
+| **Core Auth Service** | [AuthService.java](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/backend/auth-impl/src/main/java/io/devflow/auth/internal/AuthService.java) | `T-004`, `T-004A` | Xử lý đăng nhập, cấp token JWT, chặn tài khoản chưa `ACTIVE` (login & refresh) và cài đặt `AuthApi`. |
+| **Registration Service** | `RegistrationService.java` | `T-004A` | Tạo user `PENDING_VERIFICATION`, phát token, verify (consume nguyên tử), resend chống dò email. |
+| **Verification Infrastructure** | `verification/VerificationTokenGenerator.java`, `VerificationEmailListener.java`, `VerificationEmailSender.java`, `VerificationCleanupJob.java`, `VerificationProperties.java` | `T-004A` | Token 256-bit + SHA-256; gửi mail sau commit qua pool riêng; SMTP với Resilience4j Retry/CircuitBreaker; template `templates/email/verify-email.{html,txt}`; job dọn dữ liệu hằng đêm. |
 | **Anti-Abuse & Bot Service** | `TurnstileService.java`, `DisposableEmailValidator.java` | `T-004B` | Kiểm tra token Cloudflare Turnstile, lọc disposable email, kiểm tra bản ghi DNS MX. |
 | **JPA Entities & Repositories** | `entity/UserEntity.java`, `VerificationTokenEntity.java`, `WorkspaceEntity.java` | `T-002`, `T-004A` | Quản lý dữ liệu bảng `users` (thêm `status`), `verification_tokens`, `workspaces`, `workspace_members`. |
 
