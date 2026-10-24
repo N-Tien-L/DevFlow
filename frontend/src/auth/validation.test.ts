@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { passwordRules, validateEmail, validateFullName, validateLogin, validateNewPassword, validateRegistration } from './validation';
+import { passwordRules, validateEmail, validateFullName, validateLogin, validateNewPassword, validateRegistration, validateWorkspaceName } from './validation';
 
 describe('validateEmail', () => {
   it('accepts a normal address with surrounding spaces', () => {
@@ -37,6 +37,15 @@ describe('validateFullName', () => {
     expect(validateFullName('  ')).toBeDefined();
     expect(validateFullName('An Lê')).toBeUndefined();
     expect(validateFullName('a'.repeat(256))).toMatch(/255/);
+  });
+});
+
+describe('validateWorkspaceName', () => {
+  it('requires 1-100 characters after trimming', () => {
+    expect(validateWorkspaceName('   ')).toBeDefined();
+    expect(validateWorkspaceName('  DevFlow Team ')).toBeUndefined();
+    expect(validateWorkspaceName(` ${'a'.repeat(100)} `)).toBeUndefined();
+    expect(validateWorkspaceName('a'.repeat(101))).toMatch(/100/);
   });
 });
 

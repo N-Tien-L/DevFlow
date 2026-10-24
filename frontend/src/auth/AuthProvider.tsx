@@ -25,6 +25,8 @@ interface AuthContextValue {
 }
 
 const STORAGE_KEY = 'devflow.session.v1';
+const REQUEST_TIMEOUT_MS = 10_000;
+const UNAUTHORIZED = Symbol('unauthorized');
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function readSession(): Session | null {
@@ -173,43 +175,61 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (!current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
     const generation = sessionGenerationRef.current;
     const method = (init.method ?? 'GET').toUpperCase();
-    const send = (accessToken: string) => {
+    const mutation = method !== 'GET';
+    // One attempt = fetch + body read under the same timeout and caller signal, so a server that sends
+    // headers and then stalls still times out. A 401 body is discarded and reported as UNAUTHORIZED.
+    const attempt = async (accessToken: string): Promise<{ value: T } | typeof UNAUTHORIZED> => {
       const headers = new Headers(init.headers);
       headers.set('Authorization', `Bearer ${accessToken}`);
       if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS);
       const onCallerAbort = () => controller.abort(init.signal?.reason);
       init.signal?.addEventListener('abort', onCallerAbort, { once: true });
       if (init.signal?.aborted) onCallerAbort();
-      return fetch(path, { ...init, headers, signal: controller.signal }).finally(() => {
-        window.clearTimeout(timeout);
-        init.signal?.removeEventListener('abort', onCallerAbort);
-      });
-    };
-    let response: Response;
-    try {
-      response = await send(current.accessToken);
-    } catch {
-      throw new ApiError('Không kết nối được máy chủ. Trạng thái lưu có thể chưa xác định.', 0, undefined, method !== 'GET');
-    }
-    if (response.status === 401) {
-      if (generation !== sessionGenerationRef.current) {
-        throw new ApiError('Phiên đăng nhập đã thay đổi. Hãy tải lại dữ liệu trước khi tiếp tục.', 401, undefined, method !== 'GET');
-      }
-      if (method !== 'GET') {
-        await refreshSession();
-        throw new ApiError('Phiên đăng nhập hết hạn. Hãy kiểm tra board rồi thử lại thao tác.', 401, undefined, true);
-      }
-      current = await refreshSession();
-      if (!current || generation !== sessionGenerationRef.current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
       try {
-        response = await send(current.accessToken);
-      } catch {
-        throw new ApiError('Không kết nối được máy chủ.', 0);
+        let response: Response;
+        try {
+          response = await fetch(path, { ...init, headers, signal: controller.signal });
+        } catch {
+          throw new ApiError(timedOut ? 'Máy chủ phản hồi quá lâu. Trạng thái lưu có thể chưa xác định.' : 'Không kết nối được máy chủ. Trạng thái lưu có thể chưa xác định.', 0, undefined, mutation);
+        }
+        if (response.status === 401) {
+          void response.body?.cancel().catch(() => undefined);
+          return UNAUTHORIZED;
+        }
+        try {
+          return { value: await readJsonResponse<T>(response, mutation && (response.ok || response.status >= 500)) };
+        } catch (reason) {
+          // The server answered, so a mutation may already be applied; the body just never arrived in full.
+          if (timedOut) throw new ApiError('Máy chủ phản hồi quá lâu. Trạng thái lưu có thể chưa xác định.', 0, undefined, mutation);
+          if (init.signal?.aborted) throw new ApiError('Yêu cầu đã bị hủy.', 0, undefined, mutation);
+          throw reason;
+        }
+      } finally {
+        clearTimeout(timeout);
+        init.signal?.removeEventListener('abort', onCallerAbort);
       }
+    };
+
+    const first = await attempt(current.accessToken);
+    if (first !== UNAUTHORIZED) return first.value;
+    if (generation !== sessionGenerationRef.current) {
+      throw new ApiError('Phiên đăng nhập đã thay đổi. Hãy tải lại dữ liệu trước khi tiếp tục.', 401, undefined, mutation);
     }
-    return readJsonResponse<T>(response, method !== 'GET' && (response.ok || response.status >= 500));
+    if (mutation) {
+      await refreshSession();
+      throw new ApiError('Phiên đăng nhập hết hạn. Hãy kiểm tra board rồi thử lại thao tác.', 401, undefined, true);
+    }
+    current = await refreshSession();
+    if (!current || generation !== sessionGenerationRef.current) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+    const retried = await attempt(current.accessToken);
+    if (retried === UNAUTHORIZED) throw new ApiError('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.', 401);
+    return retried.value;
   }, [refreshSession]);
 
   const value = useMemo(() => ({ user: session?.user ?? null, ready, sessionGeneration, sessionEnd, signIn, signOut, getValidAccessToken, request }), [session, ready, sessionGeneration, sessionEnd, signIn, signOut, getValidAccessToken, request]);

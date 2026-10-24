@@ -5,6 +5,7 @@ export const EMAIL_MAX_LENGTH = 254;
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 72;
 export const FULL_NAME_MAX_LENGTH = 255;
+export const WORKSPACE_NAME_MAX_LENGTH = 100;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -48,6 +49,13 @@ export function validateFullName(value: string): string | undefined {
   const name = value.trim();
   if (!name) return 'Vui lòng nhập họ và tên.';
   if (name.length > FULL_NAME_MAX_LENGTH) return `Họ và tên không được dài quá ${FULL_NAME_MAX_LENGTH} ký tự.`;
+  return undefined;
+}
+
+export function validateWorkspaceName(value: string): string | undefined {
+  const name = value.trim();
+  if (!name) return 'Vui lòng nhập tên workspace.';
+  if (name.length > WORKSPACE_NAME_MAX_LENGTH) return `Tên workspace không được dài quá ${WORKSPACE_NAME_MAX_LENGTH} ký tự.`;
   return undefined;
 }
 
