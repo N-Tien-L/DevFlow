@@ -16,6 +16,13 @@ export function listWorkspaces(request: ApiRequest) {
   return request<WorkspaceSummary[]>('/api/v1/auth/workspaces');
 }
 
+export function createWorkspace(request: ApiRequest, name: string) {
+  return request<WorkspaceSummary>('/api/v1/auth/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name: name.trim() }),
+  });
+}
+
 export function listBoards(request: ApiRequest, workspaceId: string, page = 0) {
   return request<BoardPageResponse>(`/api/v1/workspaces/${workspaceId}/boards?page=${page}&size=100&includeArchived=true`);
 }

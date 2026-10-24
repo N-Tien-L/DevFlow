@@ -4,6 +4,11 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
+# Public Turnstile site key is baked into the bundle at build time (not a secret).
+ARG VITE_TURNSTILE_SITE_KEY=
+ARG VITE_TURNSTILE_REQUIRED=false
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
+ENV VITE_TURNSTILE_REQUIRED=$VITE_TURNSTILE_REQUIRED
 RUN npm run build
 
 # -- serve stage --

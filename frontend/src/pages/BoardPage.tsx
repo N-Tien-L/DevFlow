@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
@@ -49,6 +49,8 @@ function errorMessage(reason: unknown) {
 export default function BoardPage() {
   const { boardId } = useParams();
   const navigate = useNavigate();
+  // Chosen on /workspaces; ignored unless it is one of the caller's workspaces.
+  const requestedWorkspaceId = useSearchParams()[0].get('workspace');
   const { user, ready: authReady, request, signOut, getValidAccessToken, sessionGeneration } = useAuth();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
@@ -179,12 +181,13 @@ export default function BoardPage() {
     void listWorkspaces(request).then((result) => {
       if (!active) return;
       setWorkspaces(result);
-      if (!boardId && result[0]) setWorkspaceId(result[0].id);
+      const preferred = result.find((workspace) => workspace.id === requestedWorkspaceId) ?? result[0];
+      if (!boardId && preferred) setWorkspaceId(preferred.id);
     }).catch((reason: unknown) => {
       if (active) setError(errorMessage(reason));
     });
     return () => { active = false; };
-  }, [boardId, request]);
+  }, [boardId, request, requestedWorkspaceId]);
 
   useEffect(() => {
     if (boardId) {

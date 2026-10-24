@@ -40,14 +40,24 @@ async function mount() {
   await settle();
 }
 
-function routeFetch(handlers: Record<string, () => Response | Promise<Response>>) {
-  const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+function routeFetch(handlers: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
+  const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const handler = handlers[String(input)];
     if (!handler) throw new Error(`Unexpected request ${String(input)}`);
-    return handler();
+    return handler(init);
   });
   vi.stubGlobal('fetch', fetchMock);
   return (path: string) => fetchMock.mock.calls.filter(([input]) => String(input) === path).length;
+}
+
+/** Headers arrive at once, the body never does; like real fetch, aborting the request signal errors the body. */
+function stalledBody(init?: RequestInit) {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
 beforeEach(() => {
@@ -55,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await act(async () => root?.unmount());
   root = null;
   sessionStorage.clear();
@@ -121,5 +132,64 @@ describe('AuthProvider', () => {
     expect(auth.user).toBeNull();
     expect(auth.sessionEnd).toBe('expired');
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  describe('request', () => {
+    it('times out when the body stalls after the headers', async () => {
+      routeFetch({ '/api/v1/auth/me': () => json(200, user), '/api/v1/boards/b1': stalledBody });
+      await mount();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+      const outcome = auth.request('/api/v1/boards/b1').catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(9_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toMatchObject({ status: 0, uncertain: false });
+    });
+
+    it('marks a stalled mutation as uncertain', async () => {
+      routeFetch({ '/api/v1/auth/me': () => json(200, user), '/api/v1/tasks/t1/move': stalledBody });
+      await mount();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+      const outcome = auth.request('/api/v1/tasks/t1/move', { method: 'PATCH', body: '{}' }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await outcome).toMatchObject({ status: 0, uncertain: true });
+    });
+
+    it('honours a caller abort that arrives after the headers', async () => {
+      routeFetch({ '/api/v1/auth/me': () => json(200, user), '/api/v1/boards/b1': stalledBody });
+      await mount();
+
+      const controller = new AbortController();
+      const outcome = auth.request('/api/v1/boards/b1', { signal: controller.signal }).catch((error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort();
+      expect(await outcome).toMatchObject({ status: 0 });
+    });
+
+    it('refreshes once on 401 and retries a GET with the new token', async () => {
+      const seen: string[] = [];
+      routeFetch({
+        '/api/v1/auth/me': () => json(200, user),
+        '/api/v1/auth/refresh': () => json(200, { accessToken: 'access-2', refreshToken: 'refresh-2', tokenType: 'Bearer', expiresIn: 900, user }),
+        '/api/v1/boards/b1': (init) => {
+          const token = new Headers(init?.headers).get('Authorization') ?? '';
+          seen.push(token);
+          return token === 'Bearer access-2' ? json(200, { id: 'b1' }) : json(401, { status: 401, code: 'AUTHENTICATION_REQUIRED' });
+        },
+      });
+      await mount();
+
+      let result: unknown;
+      await act(async () => { result = await auth.request('/api/v1/boards/b1'); });
+      expect(result).toEqual({ id: 'b1' });
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toBe('Bearer access-2');
+    });
   });
 });

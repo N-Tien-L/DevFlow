@@ -1,81 +1,119 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { AuthErrorCode, problemCode, retryAfterSeconds } from '../api/problemDetail';
 import { useAuth } from '../auth/AuthProvider';
 import { authErrorMessage } from '../auth/authErrorMessage';
+import { EMAIL_MAX_LENGTH, validateLogin, type FieldErrors } from '../auth/validation';
+import { AuthLayout } from '../components/auth/AuthLayout';
+import { FormAlert, PasswordField, SubmitButton, TextField, linkClass } from '../components/auth/FormControls';
+import { ResendVerification } from '../components/auth/ResendVerification';
+import { useCountdown } from '../hooks/useCountdown';
 import { ApiError } from '../types/board';
+
+type LoginField = 'email' | 'password';
+
+/** Email handed over through router state (register 409, "check your inbox"); never read from storage or the URL. */
+function emailFromState(state: unknown) {
+  return typeof state === 'object' && state !== null && 'email' in state && typeof state.email === 'string' ? state.email : '';
+}
 
 export default function LoginPage() {
   const { signIn, sessionEnd } = useAuth();
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  const [email, setEmail] = useState(() => emailFromState(location.state));
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const wait = useCountdown();
+  const inputs = useRef<Partial<Record<LoginField, HTMLInputElement | null>>>({});
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  const clientErrors: FieldErrors<LoginField> = submitted ? validateLogin({ email, password }) : {};
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsLoading(true);
+    if (busy || wait.active) return;
+    setSubmitted(true);
+    const errors = validateLogin({ email, password });
+    const firstInvalid = (['email', 'password'] as const).find((field) => errors[field]);
+    if (firstInvalid) {
+      inputs.current[firstInvalid]?.focus();
+      return;
+    }
+    setBusy(true);
     setError(null);
+    setUnverifiedEmail(null);
     try {
       await signIn(email, password);
     } catch (reason) {
-      const fallback = 'Đăng nhập thất bại. Vui lòng thử lại.';
-      setError(reason instanceof ApiError && reason.status === 401 && !reason.problem?.code
-        ? 'Email hoặc mật khẩu không đúng.'
-        : authErrorMessage(reason, fallback));
+      const code = problemCode(reason);
+      if (code === AuthErrorCode.EmailNotVerified) {
+        setUnverifiedEmail(email.trim().toLowerCase());
+      } else {
+        if (code === AuthErrorCode.RateLimitExceeded) wait.start(retryAfterSeconds(reason) ?? 30);
+        setError(reason instanceof ApiError && reason.status === 401 && !code
+          ? 'Email hoặc mật khẩu không đúng.'
+          : authErrorMessage(reason, 'Đăng nhập thất bại. Vui lòng thử lại.'));
+      }
     } finally {
-      setIsLoading(false);
+      setBusy(false);
     }
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-100 via-slate-50 to-white px-4 py-12">
-      <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/50 sm:p-10">
-        <div className="mb-8">
-          <div className="mb-5 grid size-12 place-items-center rounded-2xl bg-indigo-600 text-lg font-black text-white">D</div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-600">DevFlow</p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Chào mừng trở lại</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Đăng nhập để tiếp tục quản lý board của nhóm.</p>
+    <AuthLayout
+      title="Chào mừng trở lại"
+      description="Đăng nhập để tiếp tục quản lý board của nhóm."
+      footer={<>Chưa có tài khoản? <Link className={linkClass} to="/register">Tạo tài khoản</Link></>}
+    >
+      {sessionEnd === 'expired' && (
+        <FormAlert tone="warning" className="mb-5">Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.</FormAlert>
+      )}
+
+      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+        <TextField
+          label="Email"
+          type="email"
+          inputMode="email"
+          autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
+          maxLength={EMAIL_MAX_LENGTH}
+          value={email}
+          inputRef={(element) => { inputs.current.email = element; }}
+          error={clientErrors.email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <PasswordField
+          label="Mật khẩu"
+          autoComplete="current-password"
+          value={password}
+          inputRef={(element) => { inputs.current.password = element; }}
+          error={clientErrors.password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+
+        {error && <FormAlert tone="error">{error}</FormAlert>}
+
+        <SubmitButton busy={busy} busyLabel="Đang đăng nhập…" disabled={wait.active}>
+          {wait.active ? `Thử lại sau ${wait.remaining} giây` : 'Đăng nhập'}
+        </SubmitButton>
+      </form>
+
+      {unverifiedEmail && (
+        <div className="mt-6 space-y-3">
+          <FormAlert tone="warning">
+            Email <strong className="break-all font-semibold">{unverifiedEmail}</strong> chưa được xác minh. Hãy mở liên kết trong hộp thư, hoặc gửi lại email xác minh.
+          </FormAlert>
+          <ResendVerification key={unverifiedEmail} email={unverifiedEmail} />
         </div>
+      )}
 
-        {sessionEnd === 'expired' && (
-          <p className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
-            Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.
-          </p>
-        )}
-
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <label className="block text-sm font-medium text-slate-700">
-            Email
-            <input
-              autoComplete="username"
-              className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label className="block text-sm font-medium text-slate-700">
-            Mật khẩu
-            <input
-              autoComplete="current-password"
-              className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error && <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p>}
-          <button
-            className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-200 disabled:cursor-wait disabled:opacity-60"
-            type="submit"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Đang đăng nhập…' : 'Đăng nhập'}
-          </button>
-        </form>
-        <p className="mt-6 text-xs leading-5 text-slate-400">Phiên đăng nhập được lưu trong tab hiện tại và xóa khi đăng xuất.</p>
-      </section>
-    </main>
+      <p className="mt-6 text-xs leading-5 text-slate-500 dark:text-slate-400">Phiên đăng nhập được lưu trong tab hiện tại và xóa khi đăng xuất.</p>
+    </AuthLayout>
   );
 }
