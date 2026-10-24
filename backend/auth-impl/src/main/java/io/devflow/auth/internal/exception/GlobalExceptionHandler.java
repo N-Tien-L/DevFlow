@@ -5,16 +5,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -336,6 +347,52 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
                 .body(problem);
+    }
+
+    /**
+     * Spring MVC's own request errors (unknown route, wrong method or media type, missing parameter, ...) keep the
+     * status the framework assigns instead of falling through to the 500 handler below. The detail is a fixed
+     * text per status: framework messages can echo paths, headers or types. Headers the framework attaches, such
+     * as {@code Allow} on a 405, are kept.
+     */
+    @ExceptionHandler({
+            NoResourceFoundException.class,
+            NoHandlerFoundException.class,
+            HttpRequestMethodNotSupportedException.class,
+            HttpMediaTypeNotSupportedException.class,
+            HttpMediaTypeNotAcceptableException.class,
+            ServletRequestBindingException.class,
+            MissingServletRequestPartException.class,
+            HandlerMethodValidationException.class,
+            ResponseStatusException.class
+    })
+    public ResponseEntity<ProblemDetail> handleFrameworkError(Exception ex, HttpServletRequest request) {
+        ErrorResponse error = (ErrorResponse) ex;
+        HttpStatusCode status = error.getStatusCode();
+        if (status.is5xxServerError()) {
+            log.error("Request [{}] failed: {}", request.getRequestURI(), ex.getClass().getSimpleName(), ex);
+        }
+
+        HttpStatus known = HttpStatus.resolve(status.value());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, frameworkErrorDetail(status));
+        problem.setTitle(known == null ? "Error" : known.getReasonPhrase());
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", known == null ? "REQUEST_FAILED" : known.name());
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(status).headers(error.getHeaders()).body(problem);
+    }
+
+    private static String frameworkErrorDetail(HttpStatusCode status) {
+        return switch (status.value()) {
+            case 404 -> "The requested resource does not exist.";
+            case 405 -> "The request method is not supported for this resource.";
+            case 406 -> "The requested response media type is not supported.";
+            case 415 -> "The request content type is not supported.";
+            default -> status.is4xxClientError()
+                    ? "The request is invalid."
+                    : "An unexpected internal error occurred. Please try again later.";
+        };
     }
 
     @ExceptionHandler(Exception.class)
