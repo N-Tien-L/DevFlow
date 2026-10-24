@@ -23,9 +23,12 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
     public static final String SESSION_IDENTITY_ATTRIBUTE = AuthenticatedSession.STOMP_SESSION_ATTRIBUTE;
 
     private final JwtTokenProvider tokenProvider;
+    private final SessionRevocationService sessionRevocationService;
 
-    public StompAuthenticationInterceptor(JwtTokenProvider tokenProvider) {
+    public StompAuthenticationInterceptor(JwtTokenProvider tokenProvider,
+                                          SessionRevocationService sessionRevocationService) {
         this.tokenProvider = tokenProvider;
+        this.sessionRevocationService = sessionRevocationService;
     }
 
     @Override
@@ -71,6 +74,10 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
             Instant expiresAt = claims.getExpiration().toInstant();
             if (!expiresAt.isAfter(Instant.now())) {
                 throw new MessageDeliveryException("AUTH_EXPIRED");
+            }
+            Instant issuedAt = claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant();
+            if (sessionRevocationService.isRevoked(userId, issuedAt)) {
+                throw new MessageDeliveryException("AUTH_INVALID");
             }
             UserPrincipal principal = UserPrincipal.create(userId, userId.toString());
             accessor.setUser(UsernamePasswordAuthenticationToken.authenticated(

@@ -19,6 +19,7 @@ import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
 import io.devflow.auth.internal.security.JwtProperties;
 import io.devflow.auth.internal.security.JwtTokenProvider;
+import io.devflow.auth.internal.security.SessionRevocationService;
 import io.devflow.auth.internal.support.AuthMetrics;
 import io.devflow.auth.internal.support.InputSanitizer;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -110,6 +111,10 @@ public class AuthService implements AuthApi {
 
         if (!user.isActive()) {
             throw new AccountNotVerifiedException();
+        }
+        if (SessionRevocationService.issuedBefore(jwtTokenProvider.getIssuedAtFromToken(token),
+                Optional.ofNullable(user.getPasswordChangedAt()))) {
+            throw new InvalidTokenException("Refresh token was revoked by a password change. Please sign in again.");
         }
 
         return createAuthResponse(user);

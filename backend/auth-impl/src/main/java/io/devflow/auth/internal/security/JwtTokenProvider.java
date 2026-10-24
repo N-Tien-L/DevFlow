@@ -142,6 +142,14 @@ public class JwtTokenProvider {
         return claims.get("type", String.class);
     }
 
+    /**
+     * Extracts the issued-at instant ({@code iat}), or null when the token carries none.
+     */
+    public Instant getIssuedAtFromToken(String token) {
+        Date issuedAt = getClaims(token).getIssuedAt();
+        return issuedAt == null ? null : issuedAt.toInstant();
+    }
+
     /** Returns the configured issuer without exposing the signing key. */
     public String getIssuer() {
         return jwtProperties.getIssuer();

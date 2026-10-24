@@ -34,6 +34,9 @@ public class UserEntity extends BaseEntity {
     @Column(name = "email_verified_at")
     private Instant emailVerifiedAt;
 
+    @Column(name = "password_changed_at")
+    private Instant passwordChangedAt;
+
     protected UserEntity() {
         // Required by JPA
     }
@@ -91,6 +94,18 @@ public class UserEntity extends BaseEntity {
 
     public Instant getEmailVerifiedAt() {
         return emailVerifiedAt;
+    }
+
+    public Instant getPasswordChangedAt() {
+        return passwordChangedAt;
+    }
+
+    /**
+     * Replaces the password. Every JWT issued before {@code changedAt} stops being accepted.
+     */
+    public void changePassword(String newPasswordHash, Instant changedAt) {
+        this.passwordHash = newPasswordHash;
+        this.passwordChangedAt = changedAt;
     }
 
     /**

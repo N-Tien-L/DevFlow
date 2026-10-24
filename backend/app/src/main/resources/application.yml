@@ -163,6 +163,15 @@ devflow:
       pat-manage: { capacity: 60, period: 1m }
       pat-use: { capacity: 300, period: 1m }
       pat-auth-failure: { capacity: 20, period: 1m }
+      # Password reset (T-008): per IP on both endpoints, plus per email address on forgot-password.
+      forgot-password: { capacity: 5, period: 15m }
+      forgot-password-per-email: { capacity: 3, period: 1h }
+      reset-password: { capacity: 10, period: 15m }
+  # Password reset (T-008). JWTs issued before a password change are rejected; each instance caches the
+  # user's password_changed_at for session-check-cache-ttl, so other instances follow within that delay.
+  password-reset:
+    token-ttl: ${PASSWORD_RESET_TOKEN_TTL:30m}
+    session-check-cache-ttl: 30s
   # Personal access tokens for MCP clients (T-038). Revoked/expired tokens are purged by the nightly
   # auth cleanup job once older than retention.
   pat:
@@ -188,6 +197,13 @@ resilience4j:
         exponential-backoff-multiplier: 2
         retry-exceptions:
           - org.springframework.mail.MailException
+      passwordResetEmail:
+        max-attempts: 3
+        wait-duration: 2s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.mail.MailException
       invitationEmail:
         max-attempts: 3
         wait-duration: 2s
@@ -198,6 +214,12 @@ resilience4j:
   circuitbreaker:
     instances:
       verificationEmail:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 2
+      passwordResetEmail:
         sliding-window-size: 10
         minimum-number-of-calls: 5
         failure-rate-threshold: 50

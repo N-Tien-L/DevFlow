@@ -22,6 +22,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
         register(registry, RateLimitProperties.REGISTER, "/api/v1/auth/register");
         register(registry, RateLimitProperties.VERIFY_EMAIL, "/api/v1/auth/verify-email");
         register(registry, RateLimitProperties.RESEND_VERIFICATION, "/api/v1/auth/resend-verification");
+        register(registry, RateLimitProperties.FORGOT_PASSWORD, "/api/v1/auth/forgot-password");
+        register(registry, RateLimitProperties.RESET_PASSWORD, "/api/v1/auth/reset-password");
     }
 
     private void register(InterceptorRegistry registry, String policyName, String path) {
