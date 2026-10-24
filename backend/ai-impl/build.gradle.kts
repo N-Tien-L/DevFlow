@@ -24,6 +24,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-actuator")
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
     implementation("io.micrometer:micrometer-core")
+    // Authenticated principal (AuthenticatedActor) and per-user AI rate limiting (T-032).
+    implementation("org.springframework.security:spring-security-core")
+    implementation("com.bucket4j:bucket4j-core:8.10.1")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.awaitility:awaitility")

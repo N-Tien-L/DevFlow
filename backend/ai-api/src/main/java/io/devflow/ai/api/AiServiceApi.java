@@ -22,10 +22,14 @@ public interface AiServiceApi {
     String answerProjectQuery(UUID projectId, String question);
 
     /**
-     * Turns a requirement or error log into an editable subtask proposal
-     * (PRODUCT_SPEC Section 5.2b — task creation &amp; breakdown from description).
+     * Turns a requirement or error log into an editable proposal of 3-5 subtasks
+     * (PRODUCT_SPEC Section 5.2b — task creation &amp; breakdown from description). Never creates tasks.
+     *
+     * @param userId      the authenticated caller; must be a member of {@code workspaceId}
+     * @param workspaceId workspace the proposal is for (membership check, per-user AI rate limit)
+     * @param description at most {@link TaskBreakdownRequest#MAX_DESCRIPTION_LENGTH} characters; treated as data
      */
-    TaskBreakdownProposal proposeTaskBreakdown(String description);
+    TaskBreakdownProposal proposeTaskBreakdown(UUID userId, UUID workspaceId, String description);
 
     /**
      * Summarizes a failed CI run's log into a short likely-cause statement

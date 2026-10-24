@@ -11,12 +11,16 @@ import io.micrometer.core.instrument.Timer;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ResponseEntity;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.http.converter.HttpMessageConversionException;
@@ -28,6 +32,11 @@ import org.springframework.web.client.ResourceAccessException;
  * The only path from AI features to the LLM (T-030). Every call goes through the shared
  * {@link ChatClient} and gets the same guards: prompt length limit, Resilience4j retry (transient
  * failures only) around a circuit breaker, and request/latency/token metrics.
+ *
+ * <p>Structured calls ({@link #completeEntity}) use Spring AI's {@code BeanOutputConverter}. An answer
+ * that does not convert or fails the caller's validation is reported as {@link AiMalformedOutputException}:
+ * the provider did answer, so it neither trips the circuit breaker nor triggers a transport retry; the
+ * feature decides whether to ask again.
  *
  * <p>Prompts and answers are never logged: they can contain user content, CI logs or secrets.
  */
@@ -62,21 +71,71 @@ public class AiChatGateway {
      * @throws AiProviderUnavailableException provider failed after retries, or the circuit is open
      */
     public AiCompletion complete(AiFeature feature, String systemPrompt, String userPrompt) {
+        Attempt<String> attempt = execute(feature, systemPrompt, userPrompt, null,
+                request -> {
+                    ChatResponse response = request.call().chatResponse();
+                    requireAnswer(response);
+                    return new Attempt<>(response, response.getResult().getOutput().getText());
+                },
+                UnaryOperator.identity());
+        return new AiCompletion(attempt.value(), attempt.model(), attempt.promptTokens(), attempt.completionTokens());
+    }
+
+    /**
+     * Asks for a JSON answer bound to {@code type} through Spring AI structured output.
+     *
+     * @param maxTokens completion-token cap for this call; {@code null} keeps {@code devflow.ai.chat.max-tokens}
+     * @param validator checks and normalizes the converted value; throws {@link AiMalformedOutputException}
+     *                  to reject it
+     * @throws AiMalformedOutputException    the answer did not convert to {@code type} or failed validation
+     * @throws AiPromptRejectedException     prompt empty or too large
+     * @throws AiProviderUnavailableException provider failed after retries, or the circuit is open
+     */
+    public <T> AiStructuredCompletion<T> completeEntity(AiFeature feature, String systemPrompt, String userPrompt,
+            Class<T> type, Integer maxTokens, UnaryOperator<T> validator) {
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(validator, "validator");
+        QuietBeanOutputConverter<T> converter = new QuietBeanOutputConverter<>(type);
+        Attempt<T> attempt = execute(feature, systemPrompt, userPrompt, maxTokens,
+                request -> {
+                    ResponseEntity<ChatResponse, T> answer = request.call().responseEntity(converter);
+                    requireAnswer(answer.response());
+                    return new Attempt<>(answer.response(), answer.entity());
+                },
+                value -> {
+                    if (value == null) {
+                        throw new AiMalformedOutputException("answer did not match " + type.getSimpleName());
+                    }
+                    return validator.apply(value);
+                });
+        return new AiStructuredCompletion<>(attempt.value(), attempt.model(), attempt.promptTokens(),
+                attempt.completionTokens());
+    }
+
+    private <V> Attempt<V> execute(AiFeature feature, String systemPrompt, String userPrompt, Integer maxTokens,
+            Function<ChatClient.ChatClientRequestSpec, Attempt<V>> invocation, UnaryOperator<V> accept) {
         Objects.requireNonNull(feature, "feature");
         Timer.Sample sample = metrics.start();
         String result = "error";
         try {
             validate(systemPrompt, userPrompt);
-            Supplier<AiCompletion> call = () -> invoke(systemPrompt, userPrompt);
-            Supplier<AiCompletion> guarded = Retry.decorateSupplier(resilience.retry(),
+            Supplier<Attempt<V>> call = () -> invocation.apply(request(systemPrompt, userPrompt, maxTokens));
+            Supplier<Attempt<V>> guarded = Retry.decorateSupplier(resilience.retry(),
                     CircuitBreaker.decorateSupplier(resilience.circuitBreaker(), call));
-            AiCompletion completion = guarded.get();
-            metrics.tokens(feature, completion.promptTokens(), completion.completionTokens());
+            Attempt<V> attempt = guarded.get();
+            // Tokens were spent even if the answer is rejected below.
+            metrics.tokens(feature, attempt.promptTokens(), attempt.completionTokens());
+            Attempt<V> accepted = attempt.withValue(accept.apply(attempt.value()));
             result = "success";
-            return completion;
+            return accepted;
         } catch (AiPromptRejectedException rejected) {
             result = "rejected";
             throw rejected;
+        } catch (AiMalformedOutputException malformed) {
+            result = "invalid_output";
+            log.warn("AI answer rejected feature={} provider={} model={} reason={}",
+                    feature.tag(), providerInfo.provider(), providerInfo.model(), malformed.getMessage());
+            throw malformed;
         } catch (CallNotPermittedException open) {
             result = "circuit_open";
             log.warn("AI provider call skipped: circuit open feature={} provider={}",
@@ -93,23 +152,23 @@ public class AiChatGateway {
         }
     }
 
-    private AiCompletion invoke(String systemPrompt, String userPrompt) {
+    private ChatClient.ChatClientRequestSpec request(String systemPrompt, String userPrompt, Integer maxTokens) {
         ChatClient.ChatClientRequestSpec request = chatClient.prompt();
         if (StringUtils.hasText(systemPrompt)) {
             request = request.system(systemPrompt);
         }
-        ChatResponse response = request.user(userPrompt).call().chatResponse();
+        if (maxTokens != null) {
+            request = request.options(ChatOptions.builder().maxTokens(maxTokens).build());
+        }
+        return request.user(userPrompt);
+    }
+
+    /** Inside the circuit breaker: repeated empty answers count as provider failures. */
+    private static void requireAnswer(ChatResponse response) {
         if (response == null || response.getResult() == null
                 || !StringUtils.hasText(response.getResult().getOutput().getText())) {
-            // Inside the circuit breaker: repeated empty answers count as provider failures.
             throw new IllegalStateException("AI provider returned an empty completion");
         }
-        Usage usage = response.getMetadata().getUsage();
-        String model = StringUtils.hasText(response.getMetadata().getModel())
-                ? response.getMetadata().getModel() : providerInfo.model();
-        return new AiCompletion(response.getResult().getOutput().getText(), model,
-                tokens(usage == null ? null : usage.getPromptTokens()),
-                tokens(usage == null ? null : usage.getCompletionTokens()));
     }
 
     private void validate(String systemPrompt, String userPrompt) {
@@ -125,6 +184,41 @@ public class AiChatGateway {
     private AiProviderUnavailableException unavailable(Throwable cause) {
         long retryAfter = Math.max(1, properties.getResilience().getWaitDurationInOpenState().toSeconds());
         return new AiProviderUnavailableException(retryAfter, cause);
+    }
+
+    /** One provider answer plus the usage it reported. */
+    private final class Attempt<V> {
+
+        private final ChatResponse response;
+        private final V value;
+
+        Attempt(ChatResponse response, V value) {
+            this.response = response;
+            this.value = value;
+        }
+
+        V value() {
+            return value;
+        }
+
+        Attempt<V> withValue(V newValue) {
+            return new Attempt<>(response, newValue);
+        }
+
+        String model() {
+            String model = response.getMetadata().getModel();
+            return StringUtils.hasText(model) ? model : providerInfo.model();
+        }
+
+        int promptTokens() {
+            Usage usage = response.getMetadata().getUsage();
+            return tokens(usage == null ? null : usage.getPromptTokens());
+        }
+
+        int completionTokens() {
+            Usage usage = response.getMetadata().getUsage();
+            return tokens(usage == null ? null : usage.getCompletionTokens());
+        }
     }
 
     /**

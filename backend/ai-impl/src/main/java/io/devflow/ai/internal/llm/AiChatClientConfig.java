@@ -57,9 +57,10 @@ public class AiChatClientConfig {
     @Bean
     ChatModel devflowChatModel(AiProperties properties, AiProviderInfo info,
             ObjectProvider<RestClient.Builder> restClientBuilder,
-            ObjectProvider<ObservationRegistry> observationRegistry) {
+            ObjectProvider<ObservationRegistry> observationRegistry,
+            ObjectProvider<DeterministicResponder> deterministicResponders) {
         if (info.isDeterministic()) {
-            return new DeterministicChatModel();
+            return new DeterministicChatModel(deterministicResponders.orderedStream().toList());
         }
         AiProperties.OpenAi openai = properties.getOpenai();
         OpenAiApi api = OpenAiApi.builder()

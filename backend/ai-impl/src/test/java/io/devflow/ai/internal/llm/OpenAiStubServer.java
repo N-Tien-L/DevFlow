@@ -1,12 +1,16 @@
 package io.devflow.ai.internal.llm;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,7 +19,7 @@ import java.util.concurrent.Executors;
  * Local stand-in for the OpenAI chat completions API: scripted status, body and delay; records every
  * request. Tests never reach the real provider.
  */
-final class OpenAiStubServer {
+public final class OpenAiStubServer {
 
     static final String COMPLETION_TEXT = "Stubbed answer from the fake provider.";
     static final String SUCCESS_BODY = """
@@ -24,18 +28,19 @@ final class OpenAiStubServer {
              "usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}
             """.formatted(COMPLETION_TEXT);
 
-    record RecordedRequest(String method, String path, String authorization, String body) {
+    public record RecordedRequest(String method, String path, String authorization, String body) {
     }
 
     private final HttpServer server;
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
+    private final Deque<String> queuedBodies = new ConcurrentLinkedDeque<>();
     private volatile int status = 200;
     private volatile String body = SUCCESS_BODY;
     private volatile long delayMs;
     private volatile int bytesBeforeDelay = -1;
 
-    OpenAiStubServer() {
+    public OpenAiStubServer() {
         try {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         } catch (IOException e) {
@@ -46,11 +51,11 @@ final class OpenAiStubServer {
         server.start();
     }
 
-    String baseUrl() {
+    public String baseUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    void respond(int status, String body, long delayMs) {
+    public void respond(int status, String body, long delayMs) {
         this.status = status;
         this.body = body;
         this.delayMs = delayMs;
@@ -63,16 +68,33 @@ final class OpenAiStubServer {
         this.bytesBeforeDelay = bytesBeforeHang;
     }
 
-    void reset() {
+    /** Answers 200 with these bodies in order, then with the regular scripted response. */
+    public void respondInSequence(List<String> bodies) {
+        queuedBodies.clear();
+        queuedBodies.addAll(bodies);
+    }
+
+    /** OpenAI chat completion envelope whose assistant message content is {@code content}. */
+    public static String completionWithContent(String content) {
+        try {
+            return SUCCESS_BODY.replace("\"" + COMPLETION_TEXT + "\"",
+                    new ObjectMapper().writeValueAsString(content));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    public void reset() {
+        queuedBodies.clear();
         requests.clear();
         respond(200, SUCCESS_BODY, 0);
     }
 
-    List<RecordedRequest> requests() {
+    public List<RecordedRequest> requests() {
         return requests;
     }
 
-    void stop() {
+    public void stop() {
         server.stop(0);
         // Interrupt handlers still sleeping on a scripted delay.
         executor.shutdownNow();
@@ -83,13 +105,15 @@ final class OpenAiStubServer {
         requests.add(new RecordedRequest(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
                 exchange.getRequestHeaders().getFirst("Authorization"), requestBody));
         try {
-            byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-            int head = bytesBeforeDelay;
-            if (head < 0 && delayMs > 0) {
+            String queued = queuedBodies.poll();
+            int responseStatus = queued != null ? 200 : status;
+            byte[] payload = (queued != null ? queued : body).getBytes(StandardCharsets.UTF_8);
+            int head = queued != null ? -1 : bytesBeforeDelay;
+            if (queued == null && head < 0 && delayMs > 0) {
                 Thread.sleep(delayMs);
             }
             exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(status, payload.length);
+            exchange.sendResponseHeaders(responseStatus, payload.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 if (head >= 0) {
                     out.write(payload, 0, head);

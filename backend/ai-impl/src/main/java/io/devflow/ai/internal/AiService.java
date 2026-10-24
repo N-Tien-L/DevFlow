@@ -2,14 +2,15 @@ package io.devflow.ai.internal;
 
 import io.devflow.ai.api.AiServiceApi;
 import io.devflow.ai.api.TaskBreakdownProposal;
-import java.util.List;
+import io.devflow.ai.internal.breakdown.TaskBreakdownService;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
  * The single shared AI brain (ARCHITECTURE.md Section 3): task breakdown, conversational
- * Q&amp;A, and CI/CD failure summarization. Consumed by the chat WebSocket gateway
- * ({@link ChatGatewayController}) and the MCP server ({@link McpToolConfig}) — both are
+ * Q&amp;A, and CI/CD failure summarization. Task breakdown (T-032) lives in
+ * {@link TaskBreakdownService}: a proposal only, never written to the board. Consumed by the
+ * chat WebSocket gateway ({@link ChatGatewayController}) and the MCP server ({@link McpToolConfig}) — both are
  * thin adapters and must contain no AI logic of their own.
  *
  * <p>TODO(PRODUCT_SPEC Section 5.2): call the LLM through
@@ -18,15 +19,18 @@ import org.springframework.stereotype.Service;
  * <ul>
  *   <li>{@link #answerProjectQuery} — ground answers in Board data obtained via
  *       {@code BoardApi} (never Board's internals — Section 10)</li>
- *   <li>{@link #proposeTaskBreakdown} — return an editable proposal; do NOT write to the
- *       board directly. Board changes are requested via events (Section 3: AI service does
- *       not own Board's data)</li>
  *   <li>{@link #summarizeCiFailure} — fetch the failure via {@code GitCiApi}, summarize,
  *       then publish {@code CiFailureSummarizedEvent}</li>
  * </ul>
  */
 @Service
 public class AiService implements AiServiceApi {
+
+    private final TaskBreakdownService taskBreakdownService;
+
+    public AiService(TaskBreakdownService taskBreakdownService) {
+        this.taskBreakdownService = taskBreakdownService;
+    }
 
     @Override
     public String answerProjectQuery(UUID projectId, String question) {
@@ -35,9 +39,8 @@ public class AiService implements AiServiceApi {
     }
 
     @Override
-    public TaskBreakdownProposal proposeTaskBreakdown(String description) {
-        // TODO(PRODUCT_SPEC 5.2b): real LLM-backed breakdown proposal.
-        return new TaskBreakdownProposal(description, List.of());
+    public TaskBreakdownProposal proposeTaskBreakdown(UUID userId, UUID workspaceId, String description) {
+        return taskBreakdownService.propose(userId, workspaceId, description);
     }
 
     @Override

@@ -33,6 +33,12 @@ public class AiProperties {
     @Valid
     private final Resilience resilience = new Resilience();
 
+    @Valid
+    private final RateLimit rateLimit = new RateLimit();
+
+    @Valid
+    private final Breakdown breakdown = new Breakdown();
+
     public Chat getChat() {
         return chat;
     }
@@ -43,6 +49,70 @@ public class AiProperties {
 
     public Resilience getResilience() {
         return resilience;
+    }
+
+    public RateLimit getRateLimit() {
+        return rateLimit;
+    }
+
+    public Breakdown getBreakdown() {
+        return breakdown;
+    }
+
+    /** Per-user token bucket shared by all AI features (each call consumes one token). */
+    public static class RateLimit {
+
+        @Min(1)
+        private long capacity = 10;
+
+        @NotNull
+        private Duration period = Duration.ofMinutes(10);
+
+        public long getCapacity() {
+            return capacity;
+        }
+
+        public void setCapacity(long capacity) {
+            this.capacity = capacity;
+        }
+
+        public Duration getPeriod() {
+            return period;
+        }
+
+        public void setPeriod(Duration period) {
+            this.period = period;
+        }
+    }
+
+    /** Task breakdown proposals (T-032). */
+    public static class Breakdown {
+
+        /** Completion-token cap; a 5-subtask answer with checklists needs more than the chat default. */
+        @Min(256)
+        @Max(16384)
+        private int maxOutputTokens = 2048;
+
+        /** Model calls per request when the answer is malformed or invalid (1 = no second try). */
+        @Min(1)
+        @Max(3)
+        private int maxOutputAttempts = 2;
+
+        public int getMaxOutputTokens() {
+            return maxOutputTokens;
+        }
+
+        public void setMaxOutputTokens(int maxOutputTokens) {
+            this.maxOutputTokens = maxOutputTokens;
+        }
+
+        public int getMaxOutputAttempts() {
+            return maxOutputAttempts;
+        }
+
+        public void setMaxOutputAttempts(int maxOutputAttempts) {
+            this.maxOutputAttempts = maxOutputAttempts;
+        }
     }
 
     public static class Chat {
