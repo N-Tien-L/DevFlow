@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.ColumnDefault;
 
 /**
  * JPA entity representing a registered user account in the system.
@@ -37,6 +38,9 @@ public class UserEntity extends BaseEntity {
     @Column(name = "password_changed_at")
     private Instant passwordChangedAt;
 
+    // Same DEFAULT as V10, so rows inserted without the column (raw SQL in tests, schema generated from
+    // entities) start at version 0.
+    @ColumnDefault("0")
     @Column(name = "token_version", nullable = false)
     private int tokenVersion;
 
