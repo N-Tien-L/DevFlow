@@ -286,7 +286,7 @@ Records that an account was erased (GDPR right to erasure) without keeping who i
 | `workspaces_deleted` | `INT` | NOT NULL, DEFAULT `0` | Sole-owned workspaces deleted with the account (`ck_account_deletion_audit_workspaces` >= 0) |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Audit timestamps |
 
-- **Erasure flow:** `DELETE /api/v1/auth/me` re-checks the password, refuses (409) while the user owns a workspace with other members, deletes sole-owned workspaces, invitations addressed to the user's email and the `users` row (memberships, verification tokens and personal access tokens cascade; invitation `invited_by` / `accepted_by` become NULL), then publishes `workspace.deleted` / `user.account_deleted` for Board (ARCHITECTURE.md Section 4).
+- **Erasure flow:** `DELETE /api/v1/auth/me` re-checks the password, refuses (409) while the user owns a workspace with other members, deletes sole-owned workspaces, invitations addressed to the user's email and the `users` row (memberships, verification tokens and personal access tokens cascade; invitation `invited_by` / `accepted_by` become NULL), then publishes `workspace.deleted` / `user.account_deleted` inside the transaction; Board records durable cleanup jobs from them (`board_account_cleanup_jobs`, ARCHITECTURE.md Section 4).
 
 ---
 
@@ -389,6 +389,25 @@ Many-to-many link between tasks and tags.
 
 - **Constraints:** `PRIMARY KEY (task_id, tag_id)`.
 - **Indexes:** `idx_tag_mappings_tag` on `(tag_id)`.
+
+---
+
+#### Table `board_account_cleanup_jobs` *(V12 tentative, T-009)*
+Durable Board cleanup still to do after an account or workspace deletion. Board writes the row from its `user.account_deleted` / `workspace.deleted` listener inside Auth's deletion transaction, so the work commits or rolls back with the deletion; it deletes the row in the transaction that performs the cleanup.
+
+| Column Name | Data Type | Attributes | Description & Constraints |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Job ID |
+| `kind` | `VARCHAR(16)` | NOT NULL | `USER` (unassign tasks, anonymise comments/audit) or `WORKSPACE` (delete boards and audit) (`ck_board_account_cleanup_jobs_kind`) |
+| `subject_id` | `UUID` | NOT NULL | Deleted user or workspace (soft reference); `uq_board_account_cleanup_jobs_subject UNIQUE (kind, subject_id)` |
+| `lock_user_id` | `UUID` | NOT NULL | Deleted account whose in-flight Board writes the cleanup waits for (per-user advisory lock) |
+| `attempts` | `INT` | NOT NULL, DEFAULT `0` | Failed attempts so far (`ck_board_account_cleanup_jobs_attempts` >= 0) |
+| `next_attempt_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | When the scheduled retry may run it next (backoff 30 s doubling, capped at 1 h) |
+| `last_error` | `VARCHAR(100)` | NULL | Exception type of the last failure (never its message) |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Audit timestamps |
+
+- **Indexes:** `idx_board_account_cleanup_jobs_due` on `(next_attempt_at)`.
+- **Processing:** run right after Auth commits; a failure is recorded on the row and retried every minute for due rows (`FOR UPDATE SKIP LOCKED`, safe with several instances) until it succeeds. Metrics `devflow.board.account_cleanup{kind,result}` and gauge `devflow.board.account_cleanup.pending`.
 
 ---
 
@@ -678,7 +697,7 @@ Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated
    - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` adds `workspace_invitations`.
    - MCP personal access tokens (T-038): `V9__auth_personal_access_tokens.sql` adds `personal_access_tokens`.
    - Password reset (T-008): `V10__auth_password_reset_token_type.sql` (number tentative, assigned at merge) allows `verification_tokens.type = 'PASSWORD_RESET'`, adds `uq_verification_tokens_open_password_reset`, `users.token_version` and `users.password_changed_at`.
-   - Account deletion (T-009): `V12__auth_account_deletion_audit.sql` (number tentative, assigned at merge) adds `account_deletion_audit`.
+   - Account deletion (T-009): `V12__account_deletion.sql` (number tentative, assigned at merge) adds `account_deletion_audit` (auth) and `board_account_cleanup_jobs` (board).
 4. **Phase 4 (Milestone M4 — Sprint 5):**
    - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.
