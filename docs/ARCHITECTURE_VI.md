@@ -102,10 +102,12 @@ Các module xuất bản (publish) và đăng ký nhận (subscribe) các sự k
 | `task.created` | Board | AI Service, Notification | taskId, projectId (workspace id), boardId, columnId, description, eventId, correlationId, actorId, occurredAt |
 | `task.status_changed` | Board (chuyển thủ công hoặc do Git kích hoạt) | Notification, AI Service | taskId, boardId, workspaceId, sourceColumnId, destinationColumnId, oldStatus/newStatus (tên cột), oldStatusCategory/newStatusCategory, cause (manual / git), eventId, correlationId, actorId (có thể null với tự động hóa hệ thống), occurredAt |
 | `git.commit_linked` | Git & CI | Board | task id, commit sha, repo, author |
-| `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo |
+| `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo, occurredAt, actorId (UUID user DevFlow của người mở/merge PR, có thể null) |
 | `ci.failure_detected` | Git & CI | AI Service | pipeline id, raw log reference, repo, commit sha |
 | `ci.failure_summarized` | AI Service | Board, Notification | pipeline id, summary text, related task id (if resolved) |
 | `risk.deadline_flagged` | AI Service | Notification | task id or sprint id, reason, severity |
+
+**Xác định actor cho thông báo Git:** Notification loại người có `actorId` trong event và không suy ra actor Git từ `SecurityContext` của request. `actorId = null` nghĩa là chưa biết người thực hiện, nên chưa thể loại thông báo cho chính người đó một cách tin cậy. Các constructor Git event cũ vẫn tương thích và đặt trường này là null. Follow-up cho producer Git & CI (Xuân): ánh xạ người mở/merge PR trên Git sang user DevFlow để truyền `actorId`; không dùng tác giả PR thay cho người thực sự merge PR.
 
 **Quy tắc:** theo hướng dẫn workspace đang áp dụng, giao tiếp liên module chỉ dùng typed event kế thừa `DevFlowEvent`; không gọi trực tiếp public interface hoặc import nội bộ của module khác. Event yêu cầu/quyết định đồng bộ phải chạy trên thread publish, trả đúng một quyết định và từ chối an toàn nếu không có phản hồi hợp lệ. Các event thông báo nghiệp vụ vẫn là typed event thông thường.
 

@@ -11,12 +11,18 @@ import java.util.UUID;
  * @param taskId task referenced by the PR
  * @param prUrl  URL of the merged pull request
  * @param repo   repository the PR was merged into
+ * @param actorId DevFlow user who merged the PR; null when the producer cannot map the Git actor
  */
-public record GitPrMergedEvent(UUID taskId, String prUrl, String repo, Instant occurredAt)
+public record GitPrMergedEvent(UUID taskId, String prUrl, String repo, UUID actorId, Instant occurredAt)
         implements DevFlowEvent {
 
     public GitPrMergedEvent(UUID taskId, String prUrl, String repo) {
-        this(taskId, prUrl, repo, Instant.now());
+        this(taskId, prUrl, repo, null, Instant.now());
+    }
+
+    /** Compatibility constructor for existing Git producers with no DevFlow actor mapping. */
+    public GitPrMergedEvent(UUID taskId, String prUrl, String repo, Instant occurredAt) {
+        this(taskId, prUrl, repo, null, occurredAt);
     }
 
     @Override

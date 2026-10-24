@@ -6,13 +6,18 @@ according to `AuthApi`. Unassigned/deleted tasks, unresolved CI tasks, and sprin
 risk events are skipped because the current public APIs cannot resolve their recipients.
 No module's internal classes or tables are read directly.
 
-Task events carry an actor and event ID. The actor is excluded. Legacy events without
-an actor use the authenticated principal when one is available; otherwise they are
-treated as system events. Git PR, CI summary, and risk event contracts do not currently
-carry an actor or event ID. These events receive a deterministic UUID derived from
-their type and serialized payload, including `occurredAt`. An exact replay deduplicates;
-reconstructing an event with a new timestamp is a new notification. A Git author's
-DevFlow identity cannot be excluded unless the producer supplies that identity.
+Task events carry an actor and event ID. The actor is excluded. Git PR events carry a
+nullable DevFlow `actorId`, which is excluded without relying on `SecurityContext`.
+The old three- and four-argument Git constructors remain compatible and set it to null.
+Null means unknown: self-notification cannot be excluded until the Git & CI producer
+maps the opener/merger's Git identity to a DevFlow user (follow-up for Xuan).
+CI summary/risk and legacy task events without an actor still use the authenticated
+principal when available; otherwise they are treated as system events.
+
+Git PR, CI summary, and risk events have no explicit event ID, so their type and payload,
+including `occurredAt`, determine a fallback UUID. Git `actorId` is omitted from this key
+to preserve IDs persisted before this field existed and to deduplicate actor enrichment.
+An exact replay deduplicates; reconstructing an event with a new timestamp is a new notification.
 
 Consumers run after commit, with fallback execution for producers that already emit
 after commit or operate without a transaction. Each insert commits in a new transaction.
@@ -51,6 +56,14 @@ and client SENDs to notification destinations are rejected. The shared broker ch
 only enables `/queue` alongside `/topic`. Raw broker queue access is denied to prevent
 guessed physical session queues from bypassing Spring's user destination resolver.
 
+The shared Auth STOMP interceptor also checks the server registry's authenticated
+session, expiry, and token version immediately before the outbound executor calls the
+WebSocket handler. Frames queued before expiry/revocation are checked again at dispatch.
+The socket may remain open for heartbeats after expiry, but notification payloads are
+dropped. Missing credentials or unavailable revocation checks fail closed. Password reset
+uses T-008's existing local session closure/cache eviction; cached token-version checks
+retain T-008's configured cache TTL. Notification imports no Auth internal classes.
+
 The pre-existing Java `NotificationApi.sendToUser` remains available for trusted internal
 system delivery. Such rows have no workspace/task reference and use a fresh event ID.
 
@@ -80,3 +93,6 @@ unread counts, recipient isolation, idempotent read mutations, rate limiting, re
 and private STOMP routing. PostgreSQL Testcontainers tests cover the actual migration,
 atomic concurrent replay, commit-before-push, realtime failure, and recipient FK cascade.
 The PostgreSQL tests skip only when Docker is unavailable; CI provides Docker.
+`./gradlew :auth-impl:test --tests '*Stomp*Test'` also covers outbound expiry after
+subscription, heartbeats, queued frames, revocation, missing token versions, and failed
+revocation checks. `:common:test` verifies Git event constructor compatibility.

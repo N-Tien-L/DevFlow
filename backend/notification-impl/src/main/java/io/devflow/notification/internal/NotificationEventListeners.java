@@ -54,12 +54,12 @@ public class NotificationEventListeners {
     }
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void on(GitPrOpenedEvent event) {
-        consume(event, event.taskId(), null, null, "Pull request opened",
+        consume(event, event.taskId(), null, event.actorId(), "Pull request opened",
                 "A pull request linked to your task has been opened.");
     }
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void on(GitPrMergedEvent event) {
-        consume(event, event.taskId(), null, null, "Pull request merged",
+        consume(event, event.taskId(), null, event.actorId(), "Pull request merged",
                 "A pull request linked to your task has been merged.");
     }
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
@@ -81,7 +81,10 @@ public class NotificationEventListeners {
             if (task.isEmpty()) { return; }
             var summary = task.get();
             UUID recipient = summary.assigneeId();
-            UUID actor = actorId == null ? currentActor() : actorId;
+            // Webhooks/background Git events must use their producer-supplied identity,
+            // never whichever request principal happens to publish them.
+            boolean gitEvent = event instanceof GitPrOpenedEvent || event instanceof GitPrMergedEvent;
+            UUID actor = actorId == null && !gitEvent ? currentActor() : actorId;
             if (recipient == null || recipient.equals(actor)
                     || !auth.isWorkspaceMember(recipient, summary.projectId())) { return; }
             UUID stableId = eventId == null ? legacyEventId(event) : eventId;
@@ -105,7 +108,15 @@ public class NotificationEventListeners {
     private UUID legacyEventId(DevFlowEvent event) {
         try {
             // Includes event class/type and occurredAt; identical replays yield the same id.
-            byte[] payload = mapper.writeValueAsBytes(event);
+            byte[] payload;
+            if (event instanceof GitPrOpenedEvent || event instanceof GitPrMergedEvent) {
+                var tree = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.valueToTree(event);
+                // Preserve already persisted fallback IDs from before actorId was added.
+                tree.remove("actorId");
+                payload = mapper.writeValueAsBytes(tree);
+            } else {
+                payload = mapper.writeValueAsBytes(event);
+            }
             byte[] prefix = event.eventType().getBytes(java.nio.charset.StandardCharsets.UTF_8);
             byte[] key = new byte[prefix.length + 1 + payload.length];
             System.arraycopy(prefix, 0, key, 0, prefix.length);

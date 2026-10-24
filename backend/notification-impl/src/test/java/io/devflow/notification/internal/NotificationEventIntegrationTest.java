@@ -30,7 +30,6 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -59,8 +58,8 @@ class NotificationEventIntegrationTest {
             new TaskStatusChangedEvent(TASK, "Todo", "Done", TaskStatusChangedEvent.StatusChangeCause.MANUAL,
                     UUID.randomUUID(), WORKSPACE, UUID.randomUUID(), UUID.randomUUID(), "TODO", "DONE",
                     UUID.randomUUID(), UUID.randomUUID(), ACTOR, Instant.now()),
-            new GitPrOpenedEvent(TASK, "https://example.test/pr/1", "private/repo"),
-            new GitPrMergedEvent(TASK, "https://example.test/pr/1", "private/repo"),
+            new GitPrOpenedEvent(TASK, "https://example.test/pr/1", "private/repo", ACTOR, Instant.now()),
+            new GitPrMergedEvent(TASK, "https://example.test/pr/1", "private/repo", ACTOR, Instant.now()),
             new CiFailureSummarizedEvent("pipeline", "secret", TASK),
             new RiskDeadlineFlaggedEvent(TASK, null, "secret", RiskDeadlineFlaggedEvent.Severity.HIGH));
     }
@@ -78,7 +77,9 @@ class NotificationEventIntegrationTest {
     @ParameterizedTest @MethodSource("events")
     void noneOfTheSixEventsNotifyTheActor(DevFlowEvent event) {
         UUID actor = event instanceof TaskCreatedEvent e ? e.actorId()
-                : event instanceof TaskStatusChangedEvent e ? e.actorId() : RECIPIENT;
+                : event instanceof TaskStatusChangedEvent e ? e.actorId()
+                : event instanceof GitPrOpenedEvent e ? e.actorId()
+                : event instanceof GitPrMergedEvent e ? e.actorId() : RECIPIENT;
         when(board.findTask(TASK)).thenReturn(Optional.of(new TaskSummary(TASK, WORKSPACE, "task", "TODO", actor, null)));
         if (actor.equals(RECIPIENT)) {
             AuthenticatedActor principal = () -> RECIPIENT;
@@ -116,6 +117,48 @@ class NotificationEventIntegrationTest {
                 @Override public void afterCommit() { publisher.publishEvent(events().findFirst().orElseThrow()); }
             }));
         verify(service).deliver(eq(RECIPIENT), any(), eq(WORKSPACE), eq(TASK), anyString(), anyString(), anyString());
+    }
+
+    static Stream<DevFlowEvent> selfAuthoredGitEvents() {
+        return Stream.of(
+                new GitPrOpenedEvent(TASK, "https://example.test/pr/1", "repo", RECIPIENT, Instant.now()),
+                new GitPrMergedEvent(TASK, "https://example.test/pr/1", "repo", RECIPIENT, Instant.now()));
+    }
+
+    @ParameterizedTest @MethodSource("selfAuthoredGitEvents")
+    void gitActorIsExcludedWithoutSecurityContext(DevFlowEvent event) {
+        SecurityContextHolder.clearContext();
+        new TransactionTemplate(manager).executeWithoutResult(status -> publisher.publishEvent(event));
+        verifyNoInteractions(service);
+    }
+
+    static Stream<DevFlowEvent> unknownGitActors() {
+        Instant occurredAt = Instant.parse("2026-10-24T12:00:00Z");
+        return Stream.of(
+                new GitPrOpenedEvent(TASK, "https://example.test/pr/1", "repo", occurredAt),
+                new GitPrMergedEvent(TASK, "https://example.test/pr/1", "repo", occurredAt));
+    }
+
+    @ParameterizedTest @MethodSource("unknownGitActors")
+    void unknownGitActorDoesNotUseTheRequestPrincipal(DevFlowEvent event) {
+        AuthenticatedActor principal = () -> RECIPIENT;
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(principal, null, List.of()));
+        publisher.publishEvent(event);
+        verify(service).deliver(eq(RECIPIENT), any(), eq(WORKSPACE), eq(TASK), eq(event.eventType()), anyString(), anyString());
+    }
+
+    @ParameterizedTest @MethodSource("unknownGitActors")
+    void preservesGitFallbackIdsAcrossActorEnrichment(DevFlowEvent legacy) {
+        DevFlowEvent enriched = legacy instanceof GitPrOpenedEvent e
+                ? new GitPrOpenedEvent(e.taskId(), e.prUrl(), e.repo(), ACTOR, e.occurredAt())
+                : new GitPrMergedEvent(TASK, "https://example.test/pr/1", "repo", ACTOR, legacy.occurredAt());
+        publisher.publishEvent(legacy);
+        publisher.publishEvent(enriched);
+        var ids = ArgumentCaptor.forClass(UUID.class);
+        verify(service, times(2)).deliver(eq(RECIPIENT), ids.capture(), eq(WORKSPACE), eq(TASK),
+                eq(legacy.eventType()), anyString(), anyString());
+        assertThat(ids.getAllValues().get(0)).isEqualTo(ids.getAllValues().get(1));
     }
 
     @Test void failureIsContainedAndNextEventStillRuns() {

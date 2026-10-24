@@ -1,39 +1,51 @@
 package io.devflow.auth.internal.security;
 
 import io.devflow.common.security.AuthenticatedSession;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageDeliveryException;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
-import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.messaging.support.ExecutorChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-/** Authenticates browser STOMP CONNECT frames using an access token sent in a STOMP header. */
+/** Authenticates CONNECT frames and rechecks session validity before protected STOMP payload delivery. */
 @Component
-public class StompAuthenticationInterceptor implements ChannelInterceptor {
+public class StompAuthenticationInterceptor implements ExecutorChannelInterceptor {
 
     public static final String SESSION_IDENTITY_ATTRIBUTE = AuthenticatedSession.STOMP_SESSION_ATTRIBUTE;
-    /** Token version the session authenticated with; re-checked on every SUBSCRIBE / SEND. */
+    /** Token version checked on SUBSCRIBE/SEND and again before outbound payload dispatch. */
     static final String TOKEN_VERSION_ATTRIBUTE = StompAuthenticationInterceptor.class.getName() + ".tokenVersion";
 
     private final JwtTokenProvider tokenProvider;
     private final SessionRevocationService sessionRevocationService;
     private final StompSessionRegistry sessionRegistry;
+    private final Clock clock;
 
+    @Autowired
     public StompAuthenticationInterceptor(JwtTokenProvider tokenProvider,
                                           SessionRevocationService sessionRevocationService,
                                           StompSessionRegistry sessionRegistry) {
+        this(tokenProvider, sessionRevocationService, sessionRegistry, Clock.systemUTC());
+    }
+
+    StompAuthenticationInterceptor(JwtTokenProvider tokenProvider, SessionRevocationService sessionRevocationService,
+            StompSessionRegistry sessionRegistry, Clock clock) {
         this.tokenProvider = tokenProvider;
         this.sessionRevocationService = sessionRevocationService;
         this.sessionRegistry = sessionRegistry;
+        this.clock = clock;
     }
 
     @Override
@@ -59,14 +71,41 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
      * A socket opened before a password reset must not subscribe or send afterwards (T-008).
      */
     private void requireSessionNotRevoked(StompHeaderAccessor accessor) {
-        Map<String, Object> attributes = accessor.getSessionAttributes();
+        requireActiveSession(accessor.getSessionAttributes());
+    }
+
+    private void requireActiveSession(Map<String, Object> attributes) {
         Object identity = attributes == null ? null : attributes.get(SESSION_IDENTITY_ATTRIBUTE);
         Object version = attributes == null ? null : attributes.get(TOKEN_VERSION_ATTRIBUTE);
         if (!(identity instanceof AuthenticatedSession session) || !(version instanceof Integer tokenVersion)) {
             throw new MessageDeliveryException("AUTH_INVALID");
         }
+        if (!session.expiresAt().isAfter(clock.instant())) {
+            throw new MessageDeliveryException("AUTH_EXPIRED");
+        }
         if (sessionRevocationService.isRevoked(session.userId(), tokenVersion)) {
             throw new MessageDeliveryException("AUTH_REVOKED");
+        }
+    }
+
+    /** Recheck at executor dispatch time: heartbeats must not extend JWT authorization. */
+    @Override
+    public Message<?> beforeHandle(Message<?> message, MessageChannel channel,
+            org.springframework.messaging.MessageHandler handler) {
+        if (SimpMessageHeaderAccessor.getMessageType(message.getHeaders()) != SimpMessageType.MESSAGE) {
+            return message;
+        }
+        try {
+            String sessionId = SimpMessageHeaderAccessor.getSessionId(message.getHeaders());
+            requireActiveSession(sessionRegistry.authenticatedAttributes(sessionId));
+            return message;
+        } catch (MessageDeliveryException exception) {
+            // Drop without sending another frame through this same outbound channel.
+            return null;
+        } catch (RuntimeException exception) {
+            org.slf4j.LoggerFactory.getLogger(getClass()).warn("STOMP outbound session check failed exceptionType={}",
+                    exception.getClass().getSimpleName());
+            return null;
         }
     }
 
@@ -94,7 +133,7 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
 
             UUID userId = UUID.fromString(claims.getSubject());
             Instant expiresAt = claims.getExpiration().toInstant();
-            if (!expiresAt.isAfter(Instant.now())) {
+            if (!expiresAt.isAfter(clock.instant())) {
                 throw new MessageDeliveryException("AUTH_EXPIRED");
             }
             int tokenVersion = JwtTokenProvider.tokenVersion(claims);
