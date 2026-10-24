@@ -106,6 +106,8 @@ Các module xuất bản (publish) và đăng ký nhận (subscribe) các sự k
 | `ci.failure_detected` | Git & CI | AI Service | pipeline id, raw log reference, repo, commit sha |
 | `ci.failure_summarized` | AI Service | Board, Notification | pipeline id, summary text, related task id (if resolved) |
 | `risk.deadline_flagged` | AI Service | Notification | task id or sprint id, reason, severity |
+| `user.account_deleted` | Auth (sau khi xoá tài khoản commit) | Board (Notification, AI Service: xem ghi chú) | userId, occurredAt — **không mang PII**. Board đặt `tasks.assignee_id` = NULL và thay tác giả comment / actor audit bằng `DeletedUser.ID` (hiển thị "Người dùng đã xoá"), giữ nguyên nội dung nhóm; thông báo của user bị xoá theo FK recipient `ON DELETE CASCADE` của bảng `notifications` (T-040A); AI Service chưa có lịch sử hội thoại theo user (TODO khi có). Consumer phải idempotent; cleanup lỗi được log và đếm metric, không tự thử lại (T-009) |
+| `workspace.deleted` | Auth (sau khi xoá commit) | Board | workspaceId, occurredAt. Board xoá các board của workspace (cascade column, task, comment, tag) và các dòng audit của workspace đó (T-009) |
 
 **Quy tắc:** theo hướng dẫn workspace đang áp dụng, giao tiếp liên module chỉ dùng typed event kế thừa `DevFlowEvent`; không gọi trực tiếp public interface hoặc import nội bộ của module khác. Event yêu cầu/quyết định đồng bộ phải chạy trên thread publish, trả đúng một quyết định và từ chối an toàn nếu không có phản hồi hợp lệ. Các event thông báo nghiệp vụ vẫn là typed event thông thường.
 
