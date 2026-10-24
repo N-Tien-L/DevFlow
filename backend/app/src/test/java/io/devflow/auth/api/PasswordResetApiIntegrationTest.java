@@ -277,6 +277,28 @@ class PasswordResetApiIntegrationTest {
     }
 
     @Test
+    void concurrentForgotAndResetForOneAccountNeverDeadlock() throws Exception {
+        for (int round = 0; round < 15; round++) {
+            TestUser user = user("lock-order-" + round, "ACTIVE");
+            forgot(user.email()).andExpect(status().isAccepted());
+            String token = lastResetToken();
+
+            // Both paths lock the user row before the token rows; the reverse order made PostgreSQL abort one (500).
+            List<Integer> statuses = concurrently(List.of(
+                    () -> statusOf(reset(token, NEW_PASSWORD)),
+                    () -> statusOf(forgot(user.email()))));
+
+            assertThat(statuses.get(1)).as("forgot, round %d", round).isEqualTo(202);
+            // 400 when the new request superseded the link before the reset consumed it.
+            assertThat(statuses.get(0)).as("reset, round %d", round).isIn(200, 400);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification_tokens "
+                    + "WHERE user_id = ? AND type = 'PASSWORD_RESET' AND used_at IS NULL", Long.class, user.id()))
+                    .isLessThanOrEqualTo(1);
+            login(user.email(), statuses.get(0) == 200 ? NEW_PASSWORD : OLD_PASSWORD).andExpect(status().isOk());
+        }
+    }
+
+    @Test
     void passwordOverSeventyTwoUtf8BytesIsA400NotA500() throws Exception {
         TestUser user = user("bytes", "ACTIVE");
         forgot(user.email()).andExpect(status().isAccepted());

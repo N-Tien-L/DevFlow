@@ -22,6 +22,9 @@ import org.springframework.web.socket.handler.WebSocketHandlerDecoratorFactory;
  * <p>The WebSocket session id is the STOMP {@code simpSessionId}, which {@link StompAuthenticationInterceptor}
  * binds to the user on CONNECT. Sessions on other instances are not reachable from here; they are stopped by the
  * revocation check on SUBSCRIBE / SEND and by the access token's expiry.
+ *
+ * <p>A user's membership set is only changed inside {@code compute} / {@code computeIfPresent} on its key, and an
+ * empty set is dropped there too, so a CONNECT and a disconnect racing on the same user cannot lose a session.
  */
 @Component
 public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
@@ -32,7 +35,8 @@ public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
     private static final Logger log = LoggerFactory.getLogger(StompSessionRegistry.class);
 
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
-    private final Map<UUID, Set<String>> sessionsByUser = new ConcurrentHashMap<>();
+    private final Map<String, UUID> userBySession = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Set<String>> sessionsByUser = new ConcurrentHashMap<>();
 
     @Override
     public WebSocketHandler decorate(WebSocketHandler handler) {
@@ -55,8 +59,19 @@ public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
      * Records that the STOMP session belongs to the user (called on an authenticated CONNECT).
      */
     public void bind(UUID userId, String sessionId) {
-        if (sessionId != null) {
-            sessionsByUser.computeIfAbsent(userId, id -> ConcurrentHashMap.newKeySet()).add(sessionId);
+        if (sessionId == null) {
+            return;
+        }
+        userBySession.put(sessionId, userId);
+        sessionsByUser.compute(userId, (id, ids) -> {
+            Set<String> members = ids == null ? ConcurrentHashMap.newKeySet() : ids;
+            members.add(sessionId);
+            return members;
+        });
+        if (!sessions.containsKey(sessionId)) {
+            // The socket closed while CONNECT was being processed.
+            userBySession.remove(sessionId, userId);
+            unbind(userId, sessionId);
         }
     }
 
@@ -72,6 +87,7 @@ public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
         }
         int closed = 0;
         for (String id : ids) {
+            userBySession.remove(id, userId);
             WebSocketSession session = sessions.remove(id);
             if (session == null || !session.isOpen()) {
                 continue;
@@ -94,7 +110,16 @@ public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
 
     private void forget(String sessionId) {
         sessions.remove(sessionId);
-        sessionsByUser.values().forEach(ids -> ids.remove(sessionId));
-        sessionsByUser.values().removeIf(Set::isEmpty);
+        UUID userId = userBySession.remove(sessionId);
+        if (userId != null) {
+            unbind(userId, sessionId);
+        }
+    }
+
+    private void unbind(UUID userId, String sessionId) {
+        sessionsByUser.computeIfPresent(userId, (id, ids) -> {
+            ids.remove(sessionId);
+            return ids.isEmpty() ? null : ids;
+        });
     }
 }

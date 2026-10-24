@@ -157,12 +157,16 @@ public class PasswordResetService {
         }
 
         UUID userId = token.getUser().getId();
+        // Lock order is user, then tokens, as in forgotPassword: the reverse order could deadlock with a concurrent
+        // forgot-password request for the same account.
+        userRepository.findByIdForUpdate(userId).filter(UserEntity::isActive)
+                .orElseThrow(() -> invalid("invalid"));
         // Conditional update: only one of several concurrent requests can consume the token.
         if (tokenRepository.markUsed(token.getId(), now) == 0) {
             throw invalid("invalid");
         }
-        UserEntity user = userRepository.findById(userId).filter(UserEntity::isActive)
-                .orElseThrow(() -> invalid("invalid"));
+        // markUsed cleared the persistence context; reload the row this transaction has locked.
+        UserEntity user = userRepository.findById(userId).orElseThrow(() -> invalid("invalid"));
 
         user.changePassword(passwordEncoder.encode(request.newPassword()), now);
         userRepository.saveAndFlush(user);
