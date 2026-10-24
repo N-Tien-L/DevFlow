@@ -23,6 +23,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -117,17 +119,53 @@ class ProjectQueryApiIntegrationTest {
                 .andExpect(jsonPath("$.answer").value("\"Write API docs\" is not assigned to anyone (status: to do)."));
     }
 
-    @Test
-    void saysThereIsNoInformationInsteadOfInventingAnAnswer() throws Exception {
-        for (String question : new String[] {
-                "What is the capital of France?",
-                "How many people live in Hanoi?",
-                "Who is working on the mobile app?",
-                "Khi n\u00e0o d\u1ef1 \u00e1n ph\u00e1t h\u00e0nh?"}) {
-            ask(project.projectId, question)
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.answer").value(ProjectQueryPrompts.NO_INFORMATION));
-        }
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "How many tasks does Bob have left?",
+            "How many tasks are assigned to Bob Tran?",
+            "Bob c\u00f2n bao nhi\u00eau task ch\u01b0a xong?",
+            "S\u1ed1 l\u01b0\u1ee3ng task c\u1ee7a Bob Tran"})
+    void countsTasksLeftForOnePerson(String question) throws Exception {
+        ask(project.projectId, question)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value("Bob Tran has 2 tasks not done yet and 0 done."));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "How many tasks do I have left?",
+            "T\u00f4i c\u00f2n bao nhi\u00eau task ch\u01b0a xong?"})
+    void countsTheAskersOwnTasks(String question) throws Exception {
+        ask(project.projectId, question)
+                .andExpect(jsonPath("$.answer").value("Alice Nguyen has 1 task not done yet and 1 done."));
+    }
+
+    /**
+     * Each question has a condition the offline model cannot apply (time, history, label, priority, column,
+     * an unknown or second person, overdue) or is not about the project; a count that ignored it would be
+     * wrong, so the answer is "no information".
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "What is the capital of France?",
+            "How many people live in Hanoi?",
+            "Who is working on the mobile app?",
+            "Khi n\u00e0o d\u1ef1 \u00e1n ph\u00e1t h\u00e0nh?",
+            "How many tasks were completed last week?",
+            "How many tasks did Bob finish yesterday?",
+            "Tu\u1ea7n tr\u01b0\u1edbc ho\u00e0n th\u00e0nh bao nhi\u00eau task?",
+            "C\u00f2n bao nhi\u00eau task c\u00f3 nh\u00e3n bug?",
+            "How many tasks are in the Backlog column?",
+            "How many high priority tasks are left?",
+            "How many overdue tasks are there?",
+            "How many tasks does Charlie have left?",
+            "How many tasks do Bob and Alice have left?",
+            "How many tasks do I and Bob have left?",
+            "Ai \u0111ang l\u00e0m task Implement payment module tu\u1ea7n tr\u01b0\u1edbc?"})
+    void saysThereIsNoInformationInsteadOfInventingAnAnswer(String question) throws Exception {
+        ask(project.projectId, question)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value(ProjectQueryPrompts.NO_INFORMATION));
     }
 
     @Test

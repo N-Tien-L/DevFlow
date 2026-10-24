@@ -101,6 +101,48 @@ class ProjectSnapshotBuilderTest {
     }
 
     @Test
+    void namesFewerPeopleWhenTheirNamesWouldNotFitTheBudget() throws Exception {
+        limits.setMaxContextChars(1000);
+        Map<UUID, String> longNames = new java.util.HashMap<>();
+        List<TaskSummary> tasks = IntStream.range(0, 30).mapToObj(i -> {
+            UUID person = UUID.randomUUID();
+            longNames.put(person, "Person " + i + " " + "n".repeat(70));
+            return task("Task " + i, "TODO", person, null);
+        }).toList();
+
+        String json = new ProjectSnapshotBuilder(limits).build(tasks, longNames::get, ALICE, TODAY, 100_000).json();
+
+        assertThat(json.length()).isLessThanOrEqualTo(1000);
+        JsonNode summary = this.json.readTree(json).path("summary");
+        assertThat(summary.path("totalTasks").asInt()).isEqualTo(30);
+        assertThat(summary.path("assignees").size()).isPositive().isLessThan(30);
+        assertThat(summary.path("assignees").size() + summary.path("otherAssignees").asInt()).isEqualTo(30);
+        // Named people stay within half the budget, leaving room to list tasks too.
+        assertThat(summary.path("tasksListed").asInt()).isPositive();
+    }
+
+    @Test
+    void keepsTheBareSummaryWhenNothingElseFits() throws Exception {
+        Map<UUID, String> longNames = new java.util.HashMap<>();
+        List<TaskSummary> tasks = IntStream.range(0, 5).mapToObj(i -> {
+            UUID person = UUID.randomUUID();
+            longNames.put(person, "x".repeat(80));
+            return task("A rather long task title " + i, "TODO", person, null);
+        }).toList();
+        int bare = new ProjectSnapshotBuilder(limits).build(List.of(), longNames::get, ALICE, TODAY, 100_000)
+                .json().length();
+
+        String json = new ProjectSnapshotBuilder(limits).build(tasks, longNames::get, ALICE, TODAY, bare + 5).json();
+
+        assertThat(json.length()).isLessThanOrEqualTo(bare + 5);
+        JsonNode summary = this.json.readTree(json).path("summary");
+        assertThat(summary.path("assignees").size()).isZero();
+        assertThat(summary.path("otherAssignees").asInt()).isEqualTo(5);
+        assertThat(summary.path("tasksListed").asInt()).isZero();
+        assertThat(summary.path("notDone").asInt()).isEqualTo(5);
+    }
+
+    @Test
     void capsNamedAssigneesAndCountsTheRest() throws Exception {
         limits.setMaxAssignees(1);
         List<TaskSummary> tasks = List.of(task("A", "TODO", ALICE, null), task("B", "TODO", BOB, null),

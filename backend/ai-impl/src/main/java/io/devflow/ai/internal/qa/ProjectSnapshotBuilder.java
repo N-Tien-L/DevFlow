@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -44,9 +45,14 @@ final class ProjectSnapshotBuilder {
     }
 
     /**
+     * The result is always within {@code maxChars} (and {@code devflow.ai.qa.max-context-chars}) as long as the
+     * bare summary fits: its counts without any named person or task, a few hundred characters, well under the
+     * 1000-character minimum of {@code max-context-chars}. Named people may use at most half the budget
+     * while tasks are listed, then fill whatever room is left; people who are not named are still counted in
+     * {@code otherAssignees}.
+     *
      * @param names    display name per assignee id; a blank or missing name shows as {@value #UNKNOWN_MEMBER}
-     * @param maxChars character budget for the JSON, on top of {@code devflow.ai.qa.max-context-chars};
-     *                 the summary is always kept
+     * @param maxChars character budget for the JSON, on top of {@code devflow.ai.qa.max-context-chars}
      */
     Built build(List<TaskSummary> tasks, Function<UUID, String> names, UUID askerId, LocalDate today, int maxChars) {
         List<TaskSummary> ordered = new ArrayList<>(tasks);
@@ -55,10 +61,17 @@ final class ProjectSnapshotBuilder {
         Map<UUID, String> nameCache = new HashMap<>();
         Function<UUID, String> name = id -> id == null ? null
                 : nameCache.computeIfAbsent(id, key -> oneLine(names.apply(key), MAX_NAME_CHARS, UNKNOWN_MEMBER));
+        Snapshots snapshots = new Snapshots(ordered, name, askerId, today);
 
         int budget = Math.min(maxChars, limits.getMaxContextChars());
         List<TaskEntry> entries = new ArrayList<>();
-        int used = json(snapshot(ordered, entries, name, askerId, today)).length();
+        int maxPeople = (int) Math.min(limits.getMaxAssignees(),
+                ordered.stream().map(TaskSummary::assigneeId).filter(Objects::nonNull).distinct().count());
+        int people = maxPeople;
+        while (people > 0 && snapshots.json(entries, people).length() > budget / 2) {
+            people--;
+        }
+        int used = snapshots.json(entries, people).length();
         for (TaskSummary task : ordered) {
             if (entries.size() >= limits.getMaxTasks()) {
                 break;
@@ -71,17 +84,46 @@ final class ProjectSnapshotBuilder {
             entries.add(entry);
             used += cost;
         }
-        // Summary counts grow by a digit or two once tasks are listed; drop tasks until it fits.
-        String json = json(snapshot(ordered, entries, name, askerId, today));
-        while (json.length() > budget && !entries.isEmpty()) {
-            entries.remove(entries.size() - 1);
-            json = json(snapshot(ordered, entries, name, askerId, today));
+        // Give room the tasks did not need back to named people.
+        while (people < maxPeople && snapshots.json(entries, people + 1).length() <= budget) {
+            people++;
+        }
+        // Summary counts grow by a digit or two once tasks are listed: drop tasks, then people, until it fits.
+        String json = snapshots.json(entries, people);
+        while (json.length() > budget && (!entries.isEmpty() || people > 0)) {
+            if (!entries.isEmpty()) {
+                entries.remove(entries.size() - 1);
+            } else {
+                people--;
+            }
+            json = snapshots.json(entries, people);
         }
         return new Built(json, ordered.size(), entries.size());
     }
 
+    /** Snapshots of one task list with a varying number of listed tasks and named people. */
+    private final class Snapshots {
+
+        private final List<TaskSummary> tasks;
+        private final Function<UUID, String> name;
+        private final UUID askerId;
+        private final LocalDate today;
+
+        Snapshots(List<TaskSummary> tasks, Function<UUID, String> name, UUID askerId, LocalDate today) {
+            this.tasks = tasks;
+            this.name = name;
+            this.askerId = askerId;
+            this.today = today;
+        }
+
+        String json(List<TaskEntry> listed, int people) {
+            return ProjectSnapshotBuilder.this.json(snapshot(tasks, listed, name, askerId, today, people));
+        }
+    }
+
+    /** @param people most assignees named in the summary, busiest first */
     private ProjectSnapshot snapshot(List<TaskSummary> tasks, List<TaskEntry> listed, Function<UUID, String> name,
-            UUID askerId, LocalDate today) {
+            UUID askerId, LocalDate today, int people) {
         Map<String, Integer> byStatus = new LinkedHashMap<>();
         for (ColumnStatusCategory category : ColumnStatusCategory.values()) {
             byStatus.put(category.name(), 0);
@@ -120,7 +162,7 @@ final class ProjectSnapshotBuilder {
         }
         List<AssigneeLoad> assignees = loads.entrySet().stream()
                 .sorted(Comparator.comparingInt((Map.Entry<UUID, int[]> load) -> load.getValue()[0]).reversed())
-                .limit(limits.getMaxAssignees())
+                .limit(people)
                 .map(load -> new AssigneeLoad(name.apply(load.getKey()), load.getKey().equals(askerId),
                         load.getValue()[0], load.getValue()[1], load.getValue()[2]))
                 .toList();
