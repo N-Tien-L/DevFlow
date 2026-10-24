@@ -91,6 +91,16 @@ public class AuthMetrics {
         registry.counter("devflow.auth.pat_auth", "result", result).increment();
     }
 
+    /** {@code result}: requested | skipped | success | invalid | expired */
+    public void passwordReset(String result) {
+        registry.counter("devflow.auth.password_reset", "result", result).increment();
+    }
+
+    /** {@code kind}: reset_link | password_changed; {@code result}: sent | failed | rejected */
+    public void passwordResetEmail(String kind, String result) {
+        registry.counter("devflow.auth.password_reset_email", "kind", kind, "result", result).increment();
+    }
+
     public void purged(String kind, int count) {
         registry.counter("devflow.auth.purged", "kind", kind).increment(count);
     }

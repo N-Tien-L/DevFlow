@@ -1,12 +1,14 @@
 package io.devflow.auth.internal;
 
 import io.devflow.auth.api.AuthResponse;
+import io.devflow.auth.api.ForgotPasswordRequest;
 import io.devflow.auth.api.LoginRequest;
 import io.devflow.auth.api.MessageResponse;
 import io.devflow.auth.api.RefreshTokenRequest;
 import io.devflow.auth.api.RegisterRequest;
 import io.devflow.auth.api.RegisterResponse;
 import io.devflow.auth.api.ResendVerificationRequest;
+import io.devflow.auth.api.ResetPasswordRequest;
 import io.devflow.auth.api.UserSummary;
 import io.devflow.auth.api.VerifyEmailRequest;
 import io.devflow.auth.api.WorkspaceSummary;
@@ -39,10 +41,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final RegistrationService registrationService;
+    private final PasswordResetService passwordResetService;
 
-    public AuthController(AuthService authService, RegistrationService registrationService) {
+    public AuthController(AuthService authService, RegistrationService registrationService,
+                          PasswordResetService passwordResetService) {
         this.authService = authService;
         this.registrationService = registrationService;
+        this.passwordResetService = passwordResetService;
     }
 
     /**
@@ -71,6 +76,25 @@ public class AuthController {
     public ResponseEntity<MessageResponse> resendVerification(
             @Valid @RequestBody ResendVerificationRequest request) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(registrationService.resendVerification(request));
+    }
+
+    /**
+     * Starts a password reset. Always answers 202 with the same message, whether or not the email has an account.
+     * Requires a Turnstile token when bot protection is on.
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<MessageResponse> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request, HttpServletRequest servletRequest) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(passwordResetService.forgotPassword(request, servletRequest.getRemoteAddr()));
+    }
+
+    /**
+     * Sets a new password with the token from the reset email and signs the user out everywhere.
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return ResponseEntity.ok(passwordResetService.resetPassword(request));
     }
 
     /**

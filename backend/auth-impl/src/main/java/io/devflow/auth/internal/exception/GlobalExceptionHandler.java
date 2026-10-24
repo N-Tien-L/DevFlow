@@ -56,6 +56,7 @@ public class GlobalExceptionHandler {
             errors.put(fieldError.getField(), fieldError.getDefaultMessage());
         }
         problem.setProperty("errors", errors);
+        problem.setProperty("code", "VALIDATION_FAILED");
         problem.setProperty("timestamp", Instant.now().toString());
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
@@ -70,9 +71,8 @@ public class GlobalExceptionHandler {
         problem.setTitle("Validation Failed");
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("errors", Map.of(ex.getField(), ex.getMessage()));
-        if (ex instanceof EmailDomainRejectedException rejected) {
-            problem.setProperty("code", rejected.getCode());
-        }
+        problem.setProperty("code",
+                ex instanceof EmailDomainRejectedException rejected ? rejected.getCode() : "VALIDATION_FAILED");
         problem.setProperty("timestamp", Instant.now().toString());
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
@@ -208,6 +208,32 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
+    @ExceptionHandler(PasswordResetTokenInvalidException.class)
+    public ResponseEntity<ProblemDetail> handlePasswordResetTokenInvalid(
+            PasswordResetTokenInvalidException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Bad Request");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "RESET_TOKEN_INVALID");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(PasswordResetTokenExpiredException.class)
+    public ResponseEntity<ProblemDetail> handlePasswordResetTokenExpired(
+            PasswordResetTokenExpiredException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.GONE, ex.getMessage());
+        problem.setTitle("Gone");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "RESET_TOKEN_EXPIRED");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.GONE).body(problem);
+    }
+
     @ExceptionHandler(BotChallengeFailedException.class)
     public ResponseEntity<ProblemDetail> handleBotChallengeFailed(
             BotChallengeFailedException ex, HttpServletRequest request) {
@@ -305,6 +331,7 @@ public class GlobalExceptionHandler {
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("timestamp", Instant.now().toString());
         problem.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
+        problem.setProperty("code", "RATE_LIMIT_EXCEEDED");
 
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))

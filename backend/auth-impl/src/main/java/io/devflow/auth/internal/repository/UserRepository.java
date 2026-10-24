@@ -24,6 +24,12 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
     boolean existsByEmail(String email);
 
     /**
+     * The user's current token version; empty when the user does not exist.
+     */
+    @Query("SELECT u.tokenVersion FROM UserEntity u WHERE u.id = :id")
+    Optional<Integer> findTokenVersion(@Param("id") UUID id);
+
+    /**
      * Loads a user with a row lock, serialising that user's concurrent workspace creations so the
      * per-user workspace quota cannot be raced.
      */

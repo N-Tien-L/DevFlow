@@ -29,9 +29,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider tokenProvider;
+    private final SessionRevocationService sessionRevocationService;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, SessionRevocationService sessionRevocationService) {
         this.tokenProvider = tokenProvider;
+        this.sessionRevocationService = sessionRevocationService;
     }
 
     @Override
@@ -49,8 +51,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String tokenType = tokenProvider.getTokenTypeFromToken(jwt);
                 // Only allow access tokens for general API request authentication
                 if ("access".equalsIgnoreCase(tokenType) || tokenType == null) {
-                    UUID userId = tokenProvider.getUserIdFromToken(jwt);
-                    String email = tokenProvider.getEmailFromToken(jwt);
+                    var claims = tokenProvider.getClaims(jwt);
+                    UUID userId = UUID.fromString(claims.getSubject());
+                    String email = claims.get("email", String.class);
+                    if (sessionRevocationService.isRevoked(userId, JwtTokenProvider.tokenVersion(claims))) {
+                        // Signed out by a password reset: leave the request unauthenticated (401).
+                        log.debug("Access token for user {} predates the last password change", userId);
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
 
                     UserPrincipal principal = UserPrincipal.create(userId, email);
                     UsernamePasswordAuthenticationToken authentication =

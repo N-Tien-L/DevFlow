@@ -168,6 +168,8 @@ Lưu trữ thông tin tài khoản và định danh cá nhân của người dù
 | `avatar_url` | `VARCHAR(512)` | NULL | Đường dẫn ảnh đại diện (CDN hoặc gravatar) |
 | `status` | `VARCHAR(32)` | NOT NULL, DEFAULT `'PENDING_VERIFICATION'` | Trạng thái tài khoản: `PENDING_VERIFICATION`, `ACTIVE` (`ck_users_status`). Chỉ `ACTIVE` mới đăng nhập được. *(V3, T-004A)* |
 | `email_verified_at` | `TIMESTAMPTZ` | NULL | Thời điểm xác thực email *(V3, T-004A)* |
+| `password_changed_at` | `TIMESTAMPTZ` | NULL | Lần đổi mật khẩu gần nhất (reset), chỉ để tham khảo *(V10 tạm, T-008)* |
+| `token_version` | `INTEGER` | NOT NULL, DEFAULT `0`, CHECK `>= 0` | Nhúng vào mọi JWT access/refresh (claim `tv`); reset mật khẩu tăng giá trị này nên mọi token cũ bị từ chối, không phụ thuộc thời điểm phát hành (`ck_users_token_version`, *V10 tạm, T-008*) |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm tạo tài khoản |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật thông tin gần nhất |
 
@@ -184,13 +186,13 @@ Token dùng một lần, có hạn, gửi qua email. Chỉ lưu digest SHA-256; 
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính |
 | `user_id` | `UUID` | FK, NOT NULL | FK nội bộ tới `users(id)` ON DELETE CASCADE |
 | `token_hash` | `VARCHAR(64)` | UK, NOT NULL | SHA-256 dạng hex của token ngẫu nhiên 256-bit (`uq_verification_tokens_hash`) |
-| `type` | `VARCHAR(32)` | NOT NULL | Mục đích: `EMAIL_VERIFICATION` (`ck_verification_tokens_type`; mở rộng khi có reset mật khẩu) |
+| `type` | `VARCHAR(32)` | NOT NULL | Mục đích: `EMAIL_VERIFICATION` (hạn 24h) hoặc `PASSWORD_RESET` (hạn 30 phút, *T-008*) (`ck_verification_tokens_type`). Phát token mới sẽ vô hiệu các token chưa dùng cùng loại của user |
 | `expires_at` | `TIMESTAMPTZ` | NOT NULL | Hạn dùng (mặc định 24h) |
 | `used_at` | `TIMESTAMPTZ` | NULL | Gán khi token được dùng hoặc bị thay bởi lần gửi lại; token đã gán bị từ chối |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm phát hành |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Thời điểm cập nhật gần nhất |
 
-- **Chỉ mục:** `idx_verification_tokens_user_type` trên `(user_id, type)`; `idx_verification_tokens_expires_at` trên `(expires_at)`.
+- **Chỉ mục:** `idx_verification_tokens_user_type` trên `(user_id, type)`; `idx_verification_tokens_expires_at` trên `(expires_at)`; `uq_verification_tokens_open_password_reset` UNIQUE một phần trên `(user_id) WHERE type = 'PASSWORD_RESET' AND used_at IS NULL` (mỗi user tối đa một link reset còn dùng được; khi phát còn khóa dòng user, *T-008*).
 - **Lưu trữ:** job chạy hằng đêm xóa token hết hạn/đã dùng quá 7 ngày và tài khoản `PENDING_VERIFICATION` quá 7 ngày (token bị xóa theo cascade).
 
 ---
@@ -676,7 +678,8 @@ V3–V5 đã được triển khai cho board audit, task audit và task version.
    - Lưu ý: Cột `task_id` trong `git_commits` và `pull_requests` khai báo `UUID NULL` thuần túy.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` bổ sung `users.status`, `users.email_verified_at` và bảng `verification_tokens`.
    - Lời mời workspace (T-007): `V8__auth_workspace_invitations.sql` bổ sung bảng `workspace_invitations`.
-   - Token cá nhân cho MCP (T-038): `V9__auth_personal_access_tokens.sql` (số tạm, cấp lại khi merge) bổ sung bảng `personal_access_tokens`.
+   - Token cá nhân cho MCP (T-038): `V9__auth_personal_access_tokens.sql` bổ sung bảng `personal_access_tokens`.
+   - Đặt lại mật khẩu (T-008): `V10__auth_password_reset_token_type.sql` (số tạm, cấp lại khi merge) cho phép `verification_tokens.type = 'PASSWORD_RESET'`, thêm `uq_verification_tokens_open_password_reset`, `users.token_version` và `users.password_changed_at`.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
    - File: chọn version chưa được sử dụng (V8+) khi triển khai; không tái sử dụng V4–V7.
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.

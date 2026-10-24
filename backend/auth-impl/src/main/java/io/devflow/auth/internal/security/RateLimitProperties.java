@@ -29,6 +29,10 @@ public class RateLimitProperties {
     public static final String PAT_MANAGE = "pat-manage";
     public static final String PAT_USE = "pat-use";
     public static final String PAT_AUTH_FAILURE = "pat-auth-failure";
+    // Password reset (T-008): per IP on both endpoints, plus per email address on forgot-password.
+    public static final String FORGOT_PASSWORD = "forgot-password";
+    public static final String FORGOT_PASSWORD_PER_EMAIL = "forgot-password-per-email";
+    public static final String RESET_PASSWORD = "reset-password";
 
     private final Map<String, Policy> policies = new LinkedHashMap<>(Map.ofEntries(
             Map.entry(LOGIN, new Policy(5, Duration.ofMinutes(1))),
@@ -43,7 +47,10 @@ public class RateLimitProperties {
             Map.entry(PAT_CREATE, new Policy(10, Duration.ofHours(1))),
             Map.entry(PAT_MANAGE, new Policy(60, Duration.ofMinutes(1))),
             Map.entry(PAT_USE, new Policy(300, Duration.ofMinutes(1))),
-            Map.entry(PAT_AUTH_FAILURE, new Policy(20, Duration.ofMinutes(1)))
+            Map.entry(PAT_AUTH_FAILURE, new Policy(20, Duration.ofMinutes(1))),
+            Map.entry(FORGOT_PASSWORD, new Policy(5, Duration.ofMinutes(15))),
+            Map.entry(FORGOT_PASSWORD_PER_EMAIL, new Policy(3, Duration.ofHours(1))),
+            Map.entry(RESET_PASSWORD, new Policy(10, Duration.ofMinutes(15)))
     ));
 
     public Map<String, Policy> getPolicies() {

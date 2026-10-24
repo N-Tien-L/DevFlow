@@ -21,6 +21,7 @@ import static org.mockito.Mockito.*;
 class JwtAuthenticationFilterTest {
 
     private JwtTokenProvider tokenProvider;
+    private SessionRevocationService sessionRevocationService;
     private JwtAuthenticationFilter filter;
     private FilterChain filterChain;
 
@@ -36,10 +37,37 @@ class JwtAuthenticationFilterTest {
         jwtProperties.setIssuer("devflow-test");
 
         tokenProvider = new JwtTokenProvider(jwtProperties);
-        filter = new JwtAuthenticationFilter(tokenProvider);
+        sessionRevocationService = mock(SessionRevocationService.class);
+        filter = new JwtAuthenticationFilter(tokenProvider, sessionRevocationService);
         filterChain = mock(FilterChain.class);
 
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("An access token issued before the last password change is ignored")
+    void accessTokenRevokedByPasswordChangeIsIgnored() throws ServletException, IOException {
+        String token = tokenProvider.generateAccessToken(testUserId, testEmail);
+        when(sessionRevocationService.isRevoked(eq(testUserId), anyInt())).thenReturn(true);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer " + token);
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(filterChain).doFilter(any(), any());
+    }
+
+    @Test
+    @DisplayName("A personal access token is never treated as a JWT")
+    void personalAccessTokenIsIgnored() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer dfp_0123456789ab" + "A".repeat(43));
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verifyNoInteractions(sessionRevocationService);
     }
 
     @AfterEach

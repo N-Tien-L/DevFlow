@@ -86,7 +86,7 @@ public class PersonalAccessTokenAuthenticationFilter extends OncePerRequestFilte
             authenticated = tokenService.authenticate(header.substring(BEARER_PREFIX.length()).trim(), clientIp);
         } catch (RateLimitExceededException e) {
             writeProblem(request, response, HttpStatus.TOO_MANY_REQUESTS.value(), "Too Many Requests",
-                    e.getMessage(), "RATE_LIMITED", e.getRetryAfterSeconds());
+                    e.getMessage(), "RATE_LIMIT_EXCEEDED", e.getRetryAfterSeconds());
             return;
         } catch (RuntimeException e) {
             // Fail closed. Exception text is not logged: it may echo request data.

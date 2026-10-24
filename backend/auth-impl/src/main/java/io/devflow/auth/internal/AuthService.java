@@ -111,6 +111,9 @@ public class AuthService implements AuthApi {
         if (!user.isActive()) {
             throw new AccountNotVerifiedException();
         }
+        if (jwtTokenProvider.getTokenVersionFromToken(token) != user.getTokenVersion()) {
+            throw new InvalidTokenException("Refresh token was revoked by a password change. Please sign in again.");
+        }
 
         return createAuthResponse(user);
     }
@@ -179,8 +182,10 @@ public class AuthService implements AuthApi {
     // --- Helper Methods ---
 
     private AuthResponse createAuthResponse(UserEntity user) {
-        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail());
-        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId(), user.getEmail());
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail(),
+                user.getTokenVersion());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId(), user.getEmail(),
+                user.getTokenVersion());
         long expiresIn = jwtProperties.getAccessTokenExpirationMs() / 1000;
         UserSummary summary = toUserSummary(user);
         return AuthResponse.of(accessToken, refreshToken, expiresIn, summary);

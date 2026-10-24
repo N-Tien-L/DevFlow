@@ -54,6 +54,17 @@ class JwtTokenProviderTest {
     }
 
     @Test
+    @DisplayName("Should carry the token version in access and refresh tokens")
+    void tokenVersion_shouldRoundTripInBothTokenTypes() {
+        assertThat(jwtTokenProvider.getTokenVersionFromToken(
+                jwtTokenProvider.generateAccessToken(testUserId, testEmail, 3))).isEqualTo(3);
+        assertThat(jwtTokenProvider.getTokenVersionFromToken(
+                jwtTokenProvider.generateRefreshToken(testUserId, testEmail, 4))).isEqualTo(4);
+        assertThat(jwtTokenProvider.getTokenVersionFromToken(
+                jwtTokenProvider.generateAccessToken(testUserId, testEmail))).isZero();
+    }
+
+    @Test
     @DisplayName("Should return false when validating expired token")
     void validateToken_shouldReturnFalseForExpiredToken() {
         // Generate a token that expired 5 seconds ago

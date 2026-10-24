@@ -25,6 +25,9 @@ import java.util.UUID;
 @Component
 public class JwtTokenProvider {
 
+    /** Claim carrying the user's token version; see {@code UserEntity#getTokenVersion()}. */
+    public static final String TOKEN_VERSION_CLAIM = "tv";
+
     private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
 
     private final JwtProperties jwtProperties;
@@ -50,7 +53,14 @@ public class JwtTokenProvider {
      * @return signed JWT string
      */
     public String generateAccessToken(UUID userId, String email) {
-        return generateToken(userId, email, jwtProperties.getAccessTokenExpirationMs(), "access");
+        return generateAccessToken(userId, email, 0);
+    }
+
+    /**
+     * Generates an access token bound to the user's current token version.
+     */
+    public String generateAccessToken(UUID userId, String email, int tokenVersion) {
+        return generateToken(userId, email, jwtProperties.getAccessTokenExpirationMs(), "access", tokenVersion);
     }
 
     /**
@@ -61,13 +71,27 @@ public class JwtTokenProvider {
      * @return signed JWT string
      */
     public String generateRefreshToken(UUID userId, String email) {
-        return generateToken(userId, email, jwtProperties.getRefreshTokenExpirationMs(), "refresh");
+        return generateRefreshToken(userId, email, 0);
+    }
+
+    /**
+     * Generates a refresh token bound to the user's current token version.
+     */
+    public String generateRefreshToken(UUID userId, String email, int tokenVersion) {
+        return generateToken(userId, email, jwtProperties.getRefreshTokenExpirationMs(), "refresh", tokenVersion);
     }
 
     /**
      * Generates a token with specified expiration duration and token type claim.
      */
     public String generateToken(UUID userId, String email, long expirationMs, String tokenType) {
+        return generateToken(userId, email, expirationMs, tokenType, 0);
+    }
+
+    /**
+     * Generates a token with specified expiration, token type and token version claims.
+     */
+    public String generateToken(UUID userId, String email, long expirationMs, String tokenType, int tokenVersion) {
         Instant now = Instant.now();
         Instant expiry = now.plusMillis(expirationMs);
 
@@ -75,6 +99,7 @@ public class JwtTokenProvider {
                 .subject(userId.toString())
                 .claim("email", email)
                 .claim("type", tokenType)
+                .claim(TOKEN_VERSION_CLAIM, tokenVersion)
                 .issuer(jwtProperties.getIssuer())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
@@ -140,6 +165,21 @@ public class JwtTokenProvider {
     public String getTokenTypeFromToken(String token) {
         Claims claims = getClaims(token);
         return claims.get("type", String.class);
+    }
+
+    /**
+     * Extracts the token version claim ({@code tv}); 0 for tokens issued before versioning.
+     */
+    public int getTokenVersionFromToken(String token) {
+        return tokenVersion(getClaims(token));
+    }
+
+    /**
+     * Token version claim of a parsed token; tokens issued before versioning count as version 0.
+     */
+    public static int tokenVersion(Claims claims) {
+        Number version = claims.get(TOKEN_VERSION_CLAIM, Number.class);
+        return version == null ? 0 : version.intValue();
     }
 
     /** Returns the configured issuer without exposing the signing key. */
