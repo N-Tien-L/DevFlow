@@ -22,6 +22,14 @@ type Values = Record<ResetPasswordField, string>;
 
 const FIELD_ORDER: ResetPasswordField[] = ['newPassword', 'confirmPassword'];
 
+const finalTitles: Record<'invalid' | 'expired' | 'unconfirmed', string> = {
+  invalid: 'Liên kết không hợp lệ',
+  expired: 'Liên kết đã hết hạn',
+  unconfirmed: 'Chưa xác nhận được kết quả',
+};
+
+const secondaryLinkClass = 'block w-full rounded-xl border border-slate-300 px-4 py-3 text-center font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus-visible:ring-indigo-500/30';
+
 const primaryLinkClass = 'block w-full rounded-xl bg-indigo-600 px-4 py-3 text-center font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 dark:shadow-none dark:focus-visible:ring-indigo-500/40';
 
 function failureMessage(failure: ResetPasswordFailure) {
@@ -36,6 +44,8 @@ function failureMessage(failure: ResetPasswordFailure) {
       return 'Bạn thử quá nhiều lần. Vui lòng đợi rồi thử lại.';
     case 'uncertain':
       return 'Chưa rõ mật khẩu đã được đổi hay chưa do không nhận được phản hồi từ máy chủ. Hãy thử lại; nếu liên kết báo đã được sử dụng, hãy đăng nhập bằng mật khẩu mới.';
+    case 'unconfirmed':
+      return 'Máy chủ đã nhận yêu cầu nhưng phản hồi không đọc được, nên chưa xác nhận được kết quả. Mật khẩu có thể đã được đổi: hãy thử đăng nhập bằng mật khẩu mới, hoặc yêu cầu liên kết mới nếu không đăng nhập được.';
     case 'failed':
       return 'Không đặt lại được mật khẩu. Vui lòng thử lại.';
   }
@@ -58,11 +68,16 @@ export default function ResetPasswordPage() {
   const wait = useCountdown();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const inputs = useRef<Partial<Record<ResetPasswordField, HTMLInputElement | null>>>({});
+  // The in-flight reset. Aborted on unmount: an answer that arrives after the user has left must not sign out
+  // or redirect whoever is using the app by then (possibly a different account).
+  const pending = useRef<AbortController | null>(null);
 
   useEffect(() => {
     // Strip the token from the address bar and this history entry before anything else can see it.
     removeTokenFromAddressBar();
   }, []);
+
+  useEffect(() => () => pending.current?.abort(), []);
 
   const final = failure !== null && isFinalResetFailure(failure);
   useEffect(() => {
@@ -95,16 +110,22 @@ export default function ResetPasswordPage() {
     }
     // The previous message stays until the new outcome replaces it, so the button does not jump under a double-click.
     setBusy(true);
+    const controller = new AbortController();
+    pending.current = controller;
     try {
-      await resetPassword(token, values.newPassword);
+      await resetPassword(token, values.newPassword, controller.signal);
+      if (controller.signal.aborted) return;
       setToken(null);
       // The server has revoked every session of the account; drop any session this tab still holds.
       signOut();
       const notice: LoginNotice = 'passwordReset';
       navigate('/login', { replace: true, state: { notice } });
     } catch (reason) {
+      if (controller.signal.aborted) return;
       const next = resetPasswordFailure(reason);
       if (isFinalResetFailure(next)) setToken(null);
+      // The password may have changed, which revokes every session; a stale one here would only fail later.
+      if (next.kind === 'unconfirmed') signOut();
       if (next.kind === 'uncertain') setHadUncertainAttempt(true);
       if (next.kind === 'rateLimited') wait.start(next.retryAfterSeconds);
       if (next.kind === 'password') {
@@ -115,7 +136,8 @@ export default function ResetPasswordPage() {
         setFailure(next);
       }
     } finally {
-      setBusy(false);
+      if (pending.current === controller) pending.current = null;
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
 
@@ -123,8 +145,19 @@ export default function ResetPasswordPage() {
   const requestNewLink = <Link className={primaryLinkClass} to="/forgot-password">Yêu cầu liên kết mới</Link>;
 
   if (failure && isFinalResetFailure(failure)) {
+    if (failure.kind === 'unconfirmed') {
+      return (
+        <AuthLayout headingRef={headingRef} title={finalTitles.unconfirmed}>
+          <div className="space-y-4">
+            <FormAlert tone="warning">{failureMessage(failure)}</FormAlert>
+            <Link className={primaryLinkClass} to="/login">Đăng nhập bằng mật khẩu mới</Link>
+            <Link className={secondaryLinkClass} to="/forgot-password">Yêu cầu liên kết mới</Link>
+          </div>
+        </AuthLayout>
+      );
+    }
     return (
-      <AuthLayout headingRef={headingRef} title={failure.kind === 'expired' ? 'Liên kết đã hết hạn' : 'Liên kết không hợp lệ'} footer={footer}>
+      <AuthLayout headingRef={headingRef} title={finalTitles[failure.kind]} footer={footer}>
         <div className="space-y-5">
           <FormAlert tone="error">
             {failureMessage(failure)}

@@ -77,6 +77,22 @@ describe('public auth API', () => {
     expect(body).toEqual({ token: 'tok', newPassword: ' Mật khẩu1 ' });
   });
 
+  it('marks a 2xx reset whose body cannot be read as uncertain, but not an ordinary error', async () => {
+    mockFetch(new Response('<html>portal</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    let reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toBeInstanceOf(ApiError);
+    expect(reason).toMatchObject({ status: 200, uncertain: true });
+
+    mockFetch(new Response('{"message":', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toMatchObject({ status: 200, uncertain: true });
+
+    mockFetch(jsonResponse(400, { status: 400, code: 'RESET_TOKEN_INVALID' }));
+    reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toMatchObject({ status: 400, uncertain: false });
+    expect(problemCode(reason)).toBe(AuthErrorCode.ResetTokenInvalid);
+  });
+
   it('surfaces EMAIL_NOT_VERIFIED from login as an ApiError', async () => {
     mockFetch(jsonResponse(403, { status: 403, detail: 'Email address has not been verified', code: 'EMAIL_NOT_VERIFIED' }));
     const reason = await login('a@b.dev', 'pw').catch((error: unknown) => error);

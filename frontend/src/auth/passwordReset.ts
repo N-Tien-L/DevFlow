@@ -43,12 +43,18 @@ export type ResetPasswordFailure =
   | { kind: 'rateLimited'; retryAfterSeconds: number }
   /** No definite answer (network, timeout, 5xx): the password may already have been changed. */
   | { kind: 'uncertain' }
+  /**
+   * A 2xx arrived but its body could not be read. Retrying would most likely meet a spent token, so the page
+   * stops here and points to signing in with the new password or requesting a new link.
+   */
+  | { kind: 'unconfirmed' }
   | { kind: 'failed' };
 
 /** Maps a reset-password failure to what the page shows. Status is the fallback when the body has no code. */
 export function resetPasswordFailure(reason: unknown): ResetPasswordFailure {
   const code = problemCode(reason);
   const status = reason instanceof ApiError ? reason.status : -1;
+  if (status >= 200 && status < 300) return { kind: 'unconfirmed' };
   if (code === AuthErrorCode.ResetTokenExpired || (!code && status === 410)) return { kind: 'expired' };
   if (code === AuthErrorCode.ResetTokenInvalid) return { kind: 'invalid' };
   if (code === AuthErrorCode.RateLimitExceeded) {
@@ -61,7 +67,9 @@ export function resetPasswordFailure(reason: unknown): ResetPasswordFailure {
   return { kind: 'failed' };
 }
 
-/** Whether the link is dead for good, so the in-memory token can be dropped. */
-export function isFinalResetFailure(failure: ResetPasswordFailure) {
-  return failure.kind === 'invalid' || failure.kind === 'expired';
+/** Whether the page is done with the link, so the in-memory token can be dropped. */
+export function isFinalResetFailure(
+  failure: ResetPasswordFailure,
+): failure is Extract<ResetPasswordFailure, { kind: 'invalid' | 'expired' | 'unconfirmed' }> {
+  return failure.kind === 'invalid' || failure.kind === 'expired' || failure.kind === 'unconfirmed';
 }

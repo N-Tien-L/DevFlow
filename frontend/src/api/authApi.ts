@@ -71,8 +71,17 @@ export function forgotPassword(email: string, turnstileToken: string | null, sig
 }
 
 /** The password is sent as typed: the server neither trims nor normalises it. */
-export function resetPassword(token: string, newPassword: string, signal?: AbortSignal) {
-  return postPublic<MessageResponse>('/api/v1/auth/reset-password', { token, newPassword }, signal);
+export async function resetPassword(token: string, newPassword: string, signal?: AbortSignal) {
+  try {
+    return await postPublic<MessageResponse>('/api/v1/auth/reset-password', { token, newPassword }, signal);
+  } catch (reason) {
+    // A 2xx whose body is not the expected JSON (truncated response, proxy or captive portal page) proves
+    // nothing either way: the password may or may not have changed, and the token may already be spent.
+    if (reason instanceof ApiError && reason.status >= 200 && reason.status < 300) {
+      throw new ApiError(reason.message, reason.status, reason.problem, true);
+    }
+    throw reason;
+  }
 }
 
 export function login(email: string, password: string, signal?: AbortSignal) {

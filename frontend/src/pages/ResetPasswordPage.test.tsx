@@ -25,7 +25,13 @@ function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function routeFetch(handlers: Record<string, (init?: RequestInit) => Response>) {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function routeFetch(handlers: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const handler = handlers[String(input)];
     if (!handler) throw new Error(`Unexpected request ${String(input)}`);
@@ -155,6 +161,63 @@ describe('ResetPasswordPage', () => {
     expect(calls).toHaveLength(2);
     expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ token: TOKEN });
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Chưa rõ mật khẩu đã được đổi');
+  });
+
+  it('ignores a success that arrives after the user left the page', async () => {
+    // Whoever is signed in by the time the late answer lands (maybe another account) must keep their session.
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ accessToken: 'a', refreshToken: 'r', user }));
+    const response = deferred<Response>();
+    routeFetch({
+      '/api/v1/auth/me': () => json(200, user),
+      '/api/v1/auth/reset-password': () => response.promise,
+    });
+    await mount(`/reset-password?token=${TOKEN}`);
+    await fillAndSubmit('NewSecret1');
+    await act(async () => container.querySelector<HTMLAnchorElement>('a[href="/login"]')?.click());
+    expect(heading()).toBe('login');
+
+    await act(async () => response.resolve(json(200, { message: 'reset' })));
+    await settle();
+
+    expect(sessionStorage.getItem(STORAGE_KEY)).not.toBeNull();
+    expect(loginState).toBeNull();
+    expect(window.location.pathname).toBe('/login');
+  });
+
+  it('aborts the pending reset on unmount', async () => {
+    let signal: AbortSignal | null | undefined;
+    routeFetch({
+      '/api/v1/auth/reset-password': (init) => {
+        signal = init?.signal;
+        return new Promise<Response>(() => {});
+      },
+    });
+    await mount(`/reset-password?token=${TOKEN}`);
+    await fillAndSubmit('NewSecret1');
+    expect(signal?.aborted).toBe(false);
+    await act(async () => root?.unmount());
+    root = null;
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('treats a 2xx with an unreadable body as unconfirmed: clears the session and points to login or a new link', async () => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ accessToken: 'a', refreshToken: 'r', user }));
+    const fetchMock = routeFetch({
+      '/api/v1/auth/me': () => json(200, user),
+      '/api/v1/auth/reset-password': () => new Response('<html>proxy</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    });
+    await mount(`/reset-password?token=${TOKEN}`);
+    await fillAndSubmit('NewSecret1');
+
+    expect(resetCalls(fetchMock)).toHaveLength(1);
+    expect(heading()).toBe('Chưa xác nhận được kết quả');
+    expect(document.activeElement?.tagName).toBe('H1');
+    expect(container.textContent).toContain('Mật khẩu có thể đã được đổi');
+    expect(container.querySelector('form')).toBeNull();
+    expect(container.querySelector('a[href="/login"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/forgot-password"]')).not.toBeNull();
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(window.location.pathname).toBe('/reset-password');
   });
 
   it('explains a missing token instead of showing the form', async () => {

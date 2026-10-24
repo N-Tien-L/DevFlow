@@ -56,9 +56,15 @@ describe('resetPasswordFailure', () => {
     expect(resetPasswordFailure(new Error('boom'))).toEqual({ kind: 'failed' });
   });
 
+  it('reports an unreadable 2xx as unconfirmed rather than failed', () => {
+    expect(resetPasswordFailure(new ApiError('bad body', 200, undefined, true))).toEqual({ kind: 'unconfirmed' });
+    expect(resetPasswordFailure(new ApiError('bad body', 204))).toEqual({ kind: 'unconfirmed' });
+  });
+
   it('only drops the token for definitive answers', () => {
     expect(isFinalResetFailure({ kind: 'invalid' })).toBe(true);
     expect(isFinalResetFailure({ kind: 'expired' })).toBe(true);
+    expect(isFinalResetFailure({ kind: 'unconfirmed' })).toBe(true);
     expect(isFinalResetFailure({ kind: 'password' })).toBe(false);
     expect(isFinalResetFailure({ kind: 'uncertain' })).toBe(false);
     expect(isFinalResetFailure({ kind: 'rateLimited', retryAfterSeconds: 1 })).toBe(false);
