@@ -166,6 +166,7 @@ Stores user accounts, credentials, and profile information.
 | `avatar_url` | `VARCHAR(512)` | NULL | Avatar URL hosted on CDN or Gravatar |
 | `status` | `VARCHAR(32)` | NOT NULL, DEFAULT `'PENDING_VERIFICATION'` | Account lifecycle: `PENDING_VERIFICATION`, `ACTIVE` (`ck_users_status`). Only `ACTIVE` accounts can log in. *(V3, T-004A)* |
 | `email_verified_at` | `TIMESTAMPTZ` | NULL | When the email address was confirmed *(V3, T-004A)* |
+| `password_changed_at` | `TIMESTAMPTZ` | NULL | Last password change (reset). Access and refresh JWTs issued before it are rejected, signing the user out everywhere *(V10 tentative, T-008)* |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Account creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Last profile update timestamp |
 
@@ -182,7 +183,7 @@ Single-use, expiring tokens delivered by email. Only the SHA-256 digest is store
 | `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Token record ID |
 | `user_id` | `UUID` | FK, NOT NULL | Internal FK referencing `users(id)` ON DELETE CASCADE |
 | `token_hash` | `VARCHAR(64)` | UK, NOT NULL | Hex SHA-256 of the 256-bit raw token (`uq_verification_tokens_hash`) |
-| `type` | `VARCHAR(32)` | NOT NULL | Purpose: `EMAIL_VERIFICATION` (`ck_verification_tokens_type`; extend for password reset) |
+| `type` | `VARCHAR(32)` | NOT NULL | Purpose: `EMAIL_VERIFICATION` (TTL 24h) or `PASSWORD_RESET` (TTL 30 min, *T-008*) (`ck_verification_tokens_type`). Issuing a token invalidates the user's unused tokens of the same type |
 | `expires_at` | `TIMESTAMPTZ` | NOT NULL | Expiry (default TTL 24h) |
 | `used_at` | `TIMESTAMPTZ` | NULL | Set when consumed or superseded by a resend; non-null tokens are rejected |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `CURRENT_TIMESTAMP` | Issue timestamp |
@@ -658,7 +659,8 @@ Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated
    - Requirement: `git_commits.task_id` and `pull_requests.task_id` MUST be declared as `UUID NULL`.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` adds `users.status`, `users.email_verified_at` and `verification_tokens`.
    - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` adds `workspace_invitations`.
-   - MCP personal access tokens (T-038): `V9__auth_personal_access_tokens.sql` (number tentative, assigned at merge) adds `personal_access_tokens`.
+   - MCP personal access tokens (T-038): `V9__auth_personal_access_tokens.sql` adds `personal_access_tokens`.
+   - Password reset (T-008): `V10__auth_password_reset_token_type.sql` (number tentative, assigned at merge) allows `verification_tokens.type = 'PASSWORD_RESET'` and adds `users.password_changed_at`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
    - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.
