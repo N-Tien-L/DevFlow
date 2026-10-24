@@ -19,7 +19,6 @@ import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
 import io.devflow.auth.internal.security.JwtProperties;
 import io.devflow.auth.internal.security.JwtTokenProvider;
-import io.devflow.auth.internal.security.SessionRevocationService;
 import io.devflow.auth.internal.support.AuthMetrics;
 import io.devflow.auth.internal.support.InputSanitizer;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -112,8 +111,7 @@ public class AuthService implements AuthApi {
         if (!user.isActive()) {
             throw new AccountNotVerifiedException();
         }
-        if (SessionRevocationService.issuedBefore(jwtTokenProvider.getIssuedAtFromToken(token),
-                Optional.ofNullable(user.getPasswordChangedAt()))) {
+        if (jwtTokenProvider.getTokenVersionFromToken(token) != user.getTokenVersion()) {
             throw new InvalidTokenException("Refresh token was revoked by a password change. Please sign in again.");
         }
 
@@ -184,8 +182,10 @@ public class AuthService implements AuthApi {
     // --- Helper Methods ---
 
     private AuthResponse createAuthResponse(UserEntity user) {
-        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail());
-        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId(), user.getEmail());
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail(),
+                user.getTokenVersion());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId(), user.getEmail(),
+                user.getTokenVersion());
         long expiresIn = jwtProperties.getAccessTokenExpirationMs() / 1000;
         UserSummary summary = toUserSummary(user);
         return AuthResponse.of(accessToken, refreshToken, expiresIn, summary);

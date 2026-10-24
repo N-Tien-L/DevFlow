@@ -109,8 +109,8 @@ class AuthServiceTest {
             when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
             when(passwordEncoder.matches(rawPassword, hashedPassword)).thenReturn(true);
             when(jwtProperties.getAccessTokenExpirationMs()).thenReturn(3600000L);
-            when(jwtTokenProvider.generateAccessToken(userId, email)).thenReturn("access-token-123");
-            when(jwtTokenProvider.generateRefreshToken(userId, email)).thenReturn("refresh-token-123");
+            when(jwtTokenProvider.generateAccessToken(userId, email, 0)).thenReturn("access-token-123");
+            when(jwtTokenProvider.generateRefreshToken(userId, email, 0)).thenReturn("refresh-token-123");
 
             AuthResponse response = authService.login(request);
 
@@ -200,8 +200,8 @@ class AuthServiceTest {
             when(jwtTokenProvider.getUserIdFromToken(refreshToken)).thenReturn(userId);
             when(userRepository.findById(userId)).thenReturn(Optional.of(user));
             when(jwtProperties.getAccessTokenExpirationMs()).thenReturn(3600000L);
-            when(jwtTokenProvider.generateAccessToken(userId, email)).thenReturn("new-access-token");
-            when(jwtTokenProvider.generateRefreshToken(userId, email)).thenReturn("new-refresh-token");
+            when(jwtTokenProvider.generateAccessToken(userId, email, 0)).thenReturn("new-access-token");
+            when(jwtTokenProvider.generateRefreshToken(userId, email, 0)).thenReturn("new-refresh-token");
 
             AuthResponse response = authService.refreshToken(request);
 
@@ -248,6 +248,27 @@ class AuthServiceTest {
 
             assertThatThrownBy(() -> authService.refreshToken(request))
                     .isInstanceOf(AccountNotVerifiedException.class);
+        }
+
+        @Test
+        @DisplayName("Should reject a refresh token minted before a password change, even within the same second")
+        void refreshToken_staleTokenVersion_throwsInvalidToken() {
+            String token = "refresh-token-before-reset";
+            RefreshTokenRequest request = new RefreshTokenRequest(token);
+            UserEntity user = createActiveTestUser();
+            // Same instant as the token's issue time: only the version tells the two apart.
+            user.changePassword("$2a$10$newhash", Instant.now());
+
+            when(jwtTokenProvider.validateToken(token)).thenReturn(true);
+            when(jwtTokenProvider.getTokenTypeFromToken(token)).thenReturn("refresh");
+            when(jwtTokenProvider.getUserIdFromToken(token)).thenReturn(userId);
+            when(jwtTokenProvider.getTokenVersionFromToken(token)).thenReturn(0);
+            when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+            assertThatThrownBy(() -> authService.refreshToken(request))
+                    .isInstanceOf(InvalidTokenException.class)
+                    .hasMessageContaining("revoked");
+            verify(jwtTokenProvider, never()).generateRefreshToken(any(), any(), anyInt());
         }
     }
 

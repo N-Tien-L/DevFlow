@@ -25,15 +25,65 @@ class StompAuthenticationInterceptorTest {
 
     private final JwtTokenProvider tokenProvider = mock(JwtTokenProvider.class);
     private final SessionRevocationService sessionRevocationService = mock(SessionRevocationService.class);
+    private final StompSessionRegistry sessionRegistry = new StompSessionRegistry();
     private final StompAuthenticationInterceptor interceptor =
-            new StompAuthenticationInterceptor(tokenProvider, sessionRevocationService);
+            new StompAuthenticationInterceptor(tokenProvider, sessionRevocationService, sessionRegistry);
+
+    @Test
+    void rejectsSubscribeAndSendOnASessionRevokedAfterConnect() {
+        UUID userId = UUID.randomUUID();
+        mockAccessToken(userId, Instant.now().plusSeconds(60));
+        StompHeaderAccessor connect = connectAccessor("valid-token");
+        interceptor.preSend(message(connect), null);
+
+        org.mockito.Mockito.when(sessionRevocationService.isRevoked(
+                org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.anyInt())).thenReturn(true);
+        for (StompCommand command : new StompCommand[] {StompCommand.SUBSCRIBE, StompCommand.SEND}) {
+            StompHeaderAccessor frame = StompHeaderAccessor.create(command);
+            frame.setSessionId("session-1");
+            frame.setSessionAttributes(connect.getSessionAttributes());
+            frame.setUser(connect.getUser());
+            frame.setDestination("/topic/boards/" + UUID.randomUUID());
+            frame.setLeaveMutable(true);
+
+            assertThatThrownBy(() -> interceptor.preSend(message(frame), null))
+                    .isInstanceOf(MessageDeliveryException.class)
+                    .hasMessageContaining("AUTH_REVOKED");
+        }
+    }
+
+    @Test
+    void connectRegistersTheSocketSoAResetCanCloseIt() throws Exception {
+        UUID userId = UUID.randomUUID();
+        org.springframework.web.socket.WebSocketSession socket =
+                mock(org.springframework.web.socket.WebSocketSession.class);
+        when(socket.getId()).thenReturn("session-1");
+        when(socket.isOpen()).thenReturn(true);
+        sessionRegistry.decorate(mock(org.springframework.web.socket.WebSocketHandler.class))
+                .afterConnectionEstablished(socket);
+        mockAccessToken(userId, Instant.now().plusSeconds(60));
+        StompHeaderAccessor connect = connectAccessor("valid-token");
+        interceptor.preSend(message(connect), null);
+
+        // Still valid: SUBSCRIBE goes through.
+        StompHeaderAccessor subscribe = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        subscribe.setSessionId("session-1");
+        subscribe.setSessionAttributes(connect.getSessionAttributes());
+        subscribe.setUser(connect.getUser());
+        subscribe.setDestination("/topic/boards/" + UUID.randomUUID());
+        subscribe.setLeaveMutable(true);
+        assertThat(interceptor.preSend(message(subscribe), null)).isNotNull();
+
+        assertThat(sessionRegistry.closeSessions(userId)).isEqualTo(1);
+        org.mockito.Mockito.verify(socket).close(StompSessionRegistry.SESSION_REVOKED);
+    }
 
     @Test
     void rejectsAnAccessTokenRevokedByAPasswordChange() {
         UUID userId = UUID.randomUUID();
         mockAccessToken(userId, Instant.now().plusSeconds(60));
         org.mockito.Mockito.when(sessionRevocationService.isRevoked(
-                org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+                org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.anyInt())).thenReturn(true);
         StompHeaderAccessor accessor = connectAccessor("valid-token");
 
         assertThatThrownBy(() -> interceptor.preSend(message(accessor), null))

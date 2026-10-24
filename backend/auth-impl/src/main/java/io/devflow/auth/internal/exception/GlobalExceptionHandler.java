@@ -331,7 +331,7 @@ public class GlobalExceptionHandler {
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("timestamp", Instant.now().toString());
         problem.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
-        problem.setProperty("code", "RATE_LIMITED");
+        problem.setProperty("code", "RATE_LIMIT_EXCEEDED");
 
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))

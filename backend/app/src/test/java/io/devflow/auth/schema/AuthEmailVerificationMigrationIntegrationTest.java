@@ -95,6 +95,27 @@ class AuthEmailVerificationMigrationIntegrationTest {
                 + "WHERE type = 'PASSWORD_RESET'", Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT password_changed_at IS NOT NULL FROM " + schema + ".users WHERE id = ?",
                 Boolean.class, user)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT token_version FROM " + schema + ".users WHERE id = ?",
+                Integer.class, user)).isZero();
+        assertThatThrownBy(() -> jdbc.update("UPDATE " + schema + ".users SET token_version = -1 WHERE id = ?", user))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void atMostOneOpenPasswordResetTokenPerUser() {
+        String schema = migratedSchema();
+        UUID user = insertUser(schema, "one-open");
+        String insert = "INSERT INTO " + schema + ".verification_tokens(user_id, token_hash, type, expires_at, used_at) "
+                + "VALUES (?, ?, 'PASSWORD_RESET', ?, ?)";
+        Timestamp expiresAt = Timestamp.from(Instant.now().plusSeconds(1800));
+
+        jdbc.update(insert, user, "d".repeat(64), expiresAt, Timestamp.from(Instant.now()));
+        jdbc.update(insert, user, "e".repeat(64), expiresAt, null);
+        assertThatThrownBy(() -> jdbc.update(insert, user, "f".repeat(64), expiresAt, null))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        // Email verification tokens are not limited by the reset index.
+        insertToken(schema, user, "1".repeat(64));
+        insertToken(schema, user, "2".repeat(64));
     }
 
     private UUID insertUser(String schema, String label) {

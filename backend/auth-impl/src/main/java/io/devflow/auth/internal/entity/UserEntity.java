@@ -37,6 +37,9 @@ public class UserEntity extends BaseEntity {
     @Column(name = "password_changed_at")
     private Instant passwordChangedAt;
 
+    @Column(name = "token_version", nullable = false)
+    private int tokenVersion;
+
     protected UserEntity() {
         // Required by JPA
     }
@@ -101,11 +104,20 @@ public class UserEntity extends BaseEntity {
     }
 
     /**
-     * Replaces the password. Every JWT issued before {@code changedAt} stops being accepted.
+     * Version embedded in every JWT issued to this user (claim {@code tv}); tokens carrying another value are
+     * rejected.
+     */
+    public int getTokenVersion() {
+        return tokenVersion;
+    }
+
+    /**
+     * Replaces the password and bumps the token version, so every JWT issued before this call stops being accepted.
      */
     public void changePassword(String newPasswordHash, Instant changedAt) {
         this.passwordHash = newPasswordHash;
         this.passwordChangedAt = changedAt;
+        this.tokenVersion++;
     }
 
     /**

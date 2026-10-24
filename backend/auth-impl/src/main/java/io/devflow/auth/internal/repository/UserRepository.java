@@ -24,10 +24,10 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
     boolean existsByEmail(String email);
 
     /**
-     * When the user's password last changed; empty when it never changed or the user does not exist.
+     * The user's current token version; empty when the user does not exist.
      */
-    @Query("SELECT u.passwordChangedAt FROM UserEntity u WHERE u.id = :id")
-    Optional<Instant> findPasswordChangedAt(@Param("id") UUID id);
+    @Query("SELECT u.tokenVersion FROM UserEntity u WHERE u.id = :id")
+    Optional<Integer> findTokenVersion(@Param("id") UUID id);
 
     /**
      * Loads a user with a row lock, serialising that user's concurrent workspace creations so the

@@ -18,6 +18,7 @@ import io.devflow.auth.internal.repository.VerificationTokenRepository;
 import io.devflow.auth.internal.security.RateLimitProperties;
 import io.devflow.auth.internal.security.RateLimiterService;
 import io.devflow.auth.internal.security.SessionRevocationService;
+import io.devflow.auth.internal.security.StompSessionRegistry;
 import io.devflow.auth.internal.support.AuthMetrics;
 import io.devflow.auth.internal.support.InputSanitizer;
 import io.devflow.auth.internal.support.LogMasking;
@@ -40,8 +41,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  *
  * <p>Reset tokens reuse {@code verification_tokens} (type {@code PASSWORD_RESET}): 256-bit random, stored as a
  * SHA-256 digest, single use, short-lived, and issuing one invalidates the previous ones. A successful reset signs
- * the user out everywhere: JWTs issued before the change are rejected (see {@link SessionRevocationService}) and
- * personal access tokens are revoked.
+ * the user out everywhere: the token version is bumped so every earlier JWT is rejected (see
+ * {@link SessionRevocationService}), open STOMP sockets are closed and personal access tokens are revoked.
  */
 @Service
 public class PasswordResetService {
@@ -61,6 +62,7 @@ public class PasswordResetService {
     private final RateLimiterService rateLimiterService;
     private final TurnstileService turnstileService;
     private final SessionRevocationService sessionRevocationService;
+    private final StompSessionRegistry stompSessionRegistry;
     private final ApplicationEventPublisher eventPublisher;
     private final AuthMetrics metrics;
     private final Clock clock;
@@ -75,6 +77,7 @@ public class PasswordResetService {
             RateLimiterService rateLimiterService,
             TurnstileService turnstileService,
             SessionRevocationService sessionRevocationService,
+            StompSessionRegistry stompSessionRegistry,
             ApplicationEventPublisher eventPublisher,
             AuthMetrics metrics,
             Clock clock) {
@@ -87,6 +90,7 @@ public class PasswordResetService {
         this.rateLimiterService = rateLimiterService;
         this.turnstileService = turnstileService;
         this.sessionRevocationService = sessionRevocationService;
+        this.stompSessionRegistry = stompSessionRegistry;
         this.eventPublisher = eventPublisher;
         this.metrics = metrics;
         this.clock = clock;
@@ -110,7 +114,10 @@ public class PasswordResetService {
         String rawToken = tokenGenerator.generateRawToken();
         String tokenHash = tokenGenerator.hash(rawToken);
 
-        Optional<UserEntity> account = userRepository.findByEmail(email).filter(UserEntity::isActive);
+        // The user row lock serialises concurrent requests for one account, so exactly one link stays open
+        // (backed by the uq_verification_tokens_open_password_reset partial unique index).
+        Optional<UserEntity> account = userRepository.findByEmail(email).filter(UserEntity::isActive)
+                .flatMap(found -> userRepository.findByIdForUpdate(found.getId()));
         if (account.isPresent()) {
             UserEntity user = account.get();
             Instant now = clock.instant();
@@ -161,7 +168,7 @@ public class PasswordResetService {
         userRepository.saveAndFlush(user);
         tokenRepository.invalidateActiveTokens(userId, VerificationTokenType.PASSWORD_RESET, now);
         int revokedAccessTokens = accessTokenRepository.revokeAllForUser(userId, now);
-        evictSessionCacheAfterCommit(userId);
+        signOutEverywhereAfterCommit(userId);
         eventPublisher.publishEvent(new PasswordChangedEmailRequestedEvent(
                 userId, user.getEmail(), user.getFullName(), now));
 
@@ -176,11 +183,19 @@ public class PasswordResetService {
         return new PasswordResetTokenInvalidException();
     }
 
-    private void evictSessionCacheAfterCommit(UUID userId) {
+    /**
+     * Once the new token version is committed: drop this instance's cached version and close the user's open
+     * STOMP sockets here (other instances catch up through the cache TTL and the SUBSCRIBE / SEND check).
+     */
+    private void signOutEverywhereAfterCommit(UUID userId) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 sessionRevocationService.evict(userId);
+                int closed = stompSessionRegistry.closeSessions(userId);
+                if (closed > 0) {
+                    log.info("Closed {} open STOMP sessions of user {} after password reset", closed, userId);
+                }
             }
         });
     }

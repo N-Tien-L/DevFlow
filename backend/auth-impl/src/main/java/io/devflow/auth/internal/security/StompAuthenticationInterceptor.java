@@ -21,14 +21,19 @@ import org.springframework.util.StringUtils;
 public class StompAuthenticationInterceptor implements ChannelInterceptor {
 
     public static final String SESSION_IDENTITY_ATTRIBUTE = AuthenticatedSession.STOMP_SESSION_ATTRIBUTE;
+    /** Token version the session authenticated with; re-checked on every SUBSCRIBE / SEND. */
+    static final String TOKEN_VERSION_ATTRIBUTE = StompAuthenticationInterceptor.class.getName() + ".tokenVersion";
 
     private final JwtTokenProvider tokenProvider;
     private final SessionRevocationService sessionRevocationService;
+    private final StompSessionRegistry sessionRegistry;
 
     public StompAuthenticationInterceptor(JwtTokenProvider tokenProvider,
-                                          SessionRevocationService sessionRevocationService) {
+                                          SessionRevocationService sessionRevocationService,
+                                          StompSessionRegistry sessionRegistry) {
         this.tokenProvider = tokenProvider;
         this.sessionRevocationService = sessionRevocationService;
+        this.sessionRegistry = sessionRegistry;
     }
 
     @Override
@@ -44,8 +49,25 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
             authenticateConnect(accessor);
         } else if (accessor.getCommand() != null && accessor.getUser() == null) {
             throw new MessageDeliveryException("AUTH_REQUIRED");
+        } else if (accessor.getCommand() == StompCommand.SUBSCRIBE || accessor.getCommand() == StompCommand.SEND) {
+            requireSessionNotRevoked(accessor);
         }
         return message;
+    }
+
+    /**
+     * A socket opened before a password reset must not subscribe or send afterwards (T-008).
+     */
+    private void requireSessionNotRevoked(StompHeaderAccessor accessor) {
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        Object identity = attributes == null ? null : attributes.get(SESSION_IDENTITY_ATTRIBUTE);
+        Object version = attributes == null ? null : attributes.get(TOKEN_VERSION_ATTRIBUTE);
+        if (!(identity instanceof AuthenticatedSession session) || !(version instanceof Integer tokenVersion)) {
+            throw new MessageDeliveryException("AUTH_INVALID");
+        }
+        if (sessionRevocationService.isRevoked(session.userId(), tokenVersion)) {
+            throw new MessageDeliveryException("AUTH_REVOKED");
+        }
     }
 
     private void authenticateConnect(StompHeaderAccessor accessor) {
@@ -75,8 +97,8 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
             if (!expiresAt.isAfter(Instant.now())) {
                 throw new MessageDeliveryException("AUTH_EXPIRED");
             }
-            Instant issuedAt = claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant();
-            if (sessionRevocationService.isRevoked(userId, issuedAt)) {
+            int tokenVersion = JwtTokenProvider.tokenVersion(claims);
+            if (sessionRevocationService.isRevoked(userId, tokenVersion)) {
                 throw new MessageDeliveryException("AUTH_INVALID");
             }
             UserPrincipal principal = UserPrincipal.create(userId, userId.toString());
@@ -87,6 +109,8 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
                 throw new MessageDeliveryException("AUTH_INVALID");
             }
             attributes.put(SESSION_IDENTITY_ATTRIBUTE, new AuthenticatedSession(userId, expiresAt));
+            attributes.put(TOKEN_VERSION_ATTRIBUTE, tokenVersion);
+            sessionRegistry.bind(userId, accessor.getSessionId());
         } catch (MessageDeliveryException exception) {
             throw exception;
         } catch (RuntimeException exception) {

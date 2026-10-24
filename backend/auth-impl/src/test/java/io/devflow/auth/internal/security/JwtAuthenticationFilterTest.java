@@ -48,7 +48,7 @@ class JwtAuthenticationFilterTest {
     @DisplayName("An access token issued before the last password change is ignored")
     void accessTokenRevokedByPasswordChangeIsIgnored() throws ServletException, IOException {
         String token = tokenProvider.generateAccessToken(testUserId, testEmail);
-        when(sessionRevocationService.isRevoked(eq(testUserId), any())).thenReturn(true);
+        when(sessionRevocationService.isRevoked(eq(testUserId), anyInt())).thenReturn(true);
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer " + token);
 

@@ -14,7 +14,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -55,8 +54,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     var claims = tokenProvider.getClaims(jwt);
                     UUID userId = UUID.fromString(claims.getSubject());
                     String email = claims.get("email", String.class);
-                    Instant issuedAt = claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant();
-                    if (sessionRevocationService.isRevoked(userId, issuedAt)) {
+                    if (sessionRevocationService.isRevoked(userId, JwtTokenProvider.tokenVersion(claims))) {
                         // Signed out by a password reset: leave the request unauthenticated (401).
                         log.debug("Access token for user {} predates the last password change", userId);
                         filterChain.doFilter(request, response);

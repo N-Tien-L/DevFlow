@@ -2,7 +2,9 @@ package io.devflow.auth.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,7 +18,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.devflow.auth.internal.passwordreset.PasswordChangedEmailRequestedEvent;
 import io.devflow.auth.internal.passwordreset.PasswordResetEmailRequestedEvent;
+import io.devflow.auth.internal.security.JwtTokenProvider;
 import io.devflow.auth.internal.security.RateLimiterService;
+import io.devflow.auth.internal.security.StompSessionRegistry;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import java.util.ArrayList;
@@ -50,6 +54,9 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketSession;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -109,6 +116,12 @@ class PasswordResetApiIntegrationTest {
     private RateLimiterService rateLimiterService;
 
     @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private StompSessionRegistry stompSessionRegistry;
+
+    @Autowired
     private ApplicationEvents applicationEvents;
 
     @MockitoBean
@@ -163,14 +176,14 @@ class PasswordResetApiIntegrationTest {
         }
         forgot(email).andExpect(status().isTooManyRequests())
                 .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
-                .andExpect(jsonPath("$.code").value("RATE_LIMITED"));
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
 
         String ip = "203.0.113.77";
         for (int i = 0; i < 5; i++) {
             forgotFrom(ip, "ip-" + i + "-" + UUID.randomUUID() + "@example.test").andExpect(status().isAccepted());
         }
         forgotFrom(ip, "ip-last@example.test").andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.code").value("RATE_LIMITED"));
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
     }
 
     // --- Reset password ---
@@ -186,14 +199,15 @@ class PasswordResetApiIntegrationTest {
                 .andExpect(status().isCreated());
         mockMvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + oldAccess))
                 .andExpect(status().isOk());
-        // JWT iat has second precision; make sure the old session is from an earlier second than the reset.
-        Thread.sleep(1100);
+        WebSocketSession socket = openStompSocket(user.id());
+        // No pause: the old session is usually from the same second as the reset, which must not matter.
 
         forgot(user.email()).andExpect(status().isAccepted());
         String token = lastResetToken();
         reset(token, NEW_PASSWORD)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").exists());
+        verify(socket).close(argThat(closeStatus -> closeStatus.getCode() == CloseStatus.POLICY_VIOLATION.getCode()));
 
         login(user.email(), OLD_PASSWORD).andExpect(status().isUnauthorized());
         JsonNode fresh = readJson(login(user.email(), NEW_PASSWORD).andExpect(status().isOk()));
@@ -213,11 +227,71 @@ class PasswordResetApiIntegrationTest {
                 + "WHERE user_id = ? AND revoked_at IS NULL", Long.class, user.id())).isZero();
         assertThat(jdbc.queryForObject("SELECT password_changed_at IS NOT NULL FROM users WHERE id = ?",
                 Boolean.class, user.id())).isTrue();
+        assertThat(jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, user.id()))
+                .isEqualTo(1);
         assertThat(applicationEvents.stream(PasswordChangedEmailRequestedEvent.class))
                 .singleElement()
                 .satisfies(event -> assertThat(event.userId()).isEqualTo(user.id()));
         verify(mailSender, timeout(5000).times(2)).send(any(MimeMessage.class));
         assertThat(output).doesNotContain(token).doesNotContain(user.email());
+    }
+
+    @Test
+    void tokensWithThePreResetVersionAreRejectedWhateverTheirIssueTime() throws Exception {
+        TestUser user = user("same-second", "ACTIVE");
+        forgot(user.email()).andExpect(status().isAccepted());
+        reset(lastResetToken(), NEW_PASSWORD).andExpect(status().isOk());
+
+        // Minted after the reset, so their iat is not before it (the old time watermark accepted these), but they
+        // carry the pre-reset version 0, exactly like a session issued in the same second as the reset.
+        String staleAccess = jwtTokenProvider.generateAccessToken(user.id(), user.email(), 0);
+        String staleRefresh = jwtTokenProvider.generateRefreshToken(user.id(), user.email(), 0);
+
+        mockMvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + staleAccess))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("refreshToken", staleRefresh))))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION,
+                        "Bearer " + jwtTokenProvider.generateAccessToken(user.id(), user.email(), 1)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void concurrentForgotPasswordRequestsLeaveExactlyOneOpenLink() throws Exception {
+        TestUser user = user("parallel", "ACTIVE");
+
+        // Three requests stay within the per-email limit; each comes from its own IP.
+        List<Integer> statuses = concurrently(List.of(
+                () -> statusOf(forgot(user.email())),
+                () -> statusOf(forgot(user.email())),
+                () -> statusOf(forgot(user.email()))));
+
+        // All succeed (no unique-index violation surfacing as a 500) and every link but one is invalidated.
+        assertThat(statuses).containsOnly(202);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification_tokens "
+                + "WHERE user_id = ? AND type = 'PASSWORD_RESET'", Long.class, user.id())).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification_tokens "
+                + "WHERE user_id = ? AND type = 'PASSWORD_RESET' AND used_at IS NULL", Long.class, user.id()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void passwordOverSeventyTwoUtf8BytesIsA400NotA500() throws Exception {
+        TestUser user = user("bytes", "ACTIVE");
+        forgot(user.email()).andExpect(status().isAccepted());
+        String token = lastResetToken();
+        // 38 characters, within @Size, but 73 bytes in UTF-8: BCrypt would throw.
+        String tooLong = "Aa1" + "é".repeat(35);
+
+        reset(token, tooLong).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.newPassword").exists());
+        login(user.email(), tooLong).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        // Rejected before the token was touched; a 72-byte accented password is accepted.
+        reset(token, "Aa1" + "é".repeat(34) + "x").andExpect(status().isOk());
+        login(user.email(), "Aa1" + "é".repeat(34) + "x").andExpect(status().isOk());
     }
 
     @Test
@@ -281,7 +355,7 @@ class PasswordResetApiIntegrationTest {
             resetFrom(ip, "guess-" + i, NEW_PASSWORD).andExpect(status().isBadRequest());
         }
         resetFrom(ip, "guess-final", NEW_PASSWORD).andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.code").value("RATE_LIMITED"));
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
     }
 
     @Test
@@ -312,6 +386,19 @@ class PasswordResetApiIntegrationTest {
         jdbc.update("INSERT INTO users(id, email, password_hash, full_name, status) VALUES (?, ?, ?, ?, ?)",
                 id, email, passwordEncoder.encode(OLD_PASSWORD), "T-008 " + label, status);
         return new TestUser(id, email);
+    }
+
+    /**
+     * Registers an open WebSocket as if the user had sent an authenticated STOMP CONNECT on this instance.
+     */
+    private WebSocketSession openStompSocket(UUID userId) throws Exception {
+        WebSocketSession socket = mock(WebSocketSession.class);
+        String sessionId = "ws-" + UUID.randomUUID();
+        when(socket.getId()).thenReturn(sessionId);
+        when(socket.isOpen()).thenReturn(true);
+        stompSessionRegistry.decorate(mock(WebSocketHandler.class)).afterConnectionEstablished(socket);
+        stompSessionRegistry.bind(userId, sessionId);
+        return socket;
     }
 
     private String lastResetToken() {
