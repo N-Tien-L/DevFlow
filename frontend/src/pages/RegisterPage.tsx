@@ -8,14 +8,15 @@ import {
   EMAIL_MAX_LENGTH,
   FULL_NAME_MAX_LENGTH,
   PASSWORD_MAX_LENGTH,
-  passwordRules,
   validateRegistration,
   type FieldErrors,
   type RegisterField,
 } from '../auth/validation';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, PasswordField, SecondaryButton, SubmitButton, TextField, linkClass } from '../components/auth/FormControls';
+import { PasswordChecklist } from '../components/auth/PasswordChecklist';
 import { ResendVerification } from '../components/auth/ResendVerification';
+import { TurnstileField } from '../components/auth/TurnstileField';
 import { useCountdown } from '../hooks/useCountdown';
 import { useTurnstile } from '../hooks/useTurnstile';
 import type { RegisterResponse } from '../types/auth';
@@ -45,26 +46,6 @@ function serverFieldErrors(reason: unknown, values: Values): FieldErrors<Registe
       : local[field] ?? 'Giá trị này không hợp lệ. Vui lòng kiểm tra lại.';
   }
   return errors;
-}
-
-function PasswordChecklist({ password }: { password: string }) {
-  const rules = passwordRules(password);
-  const items: [boolean, string][] = [
-    [rules.length, `8–${PASSWORD_MAX_LENGTH} ký tự`],
-    [rules.uppercase, 'Có chữ hoa (A–Z)'],
-    [rules.lowercase, 'Có chữ thường (a–z)'],
-    [rules.digit, 'Có chữ số (0–9)'],
-  ];
-  return (
-    <ul className="grid grid-cols-1 gap-1 min-[400px]:grid-cols-2">
-      {items.map(([met, label]) => (
-        <li key={label} className={met ? 'text-emerald-700 dark:text-emerald-400' : undefined}>
-          <span aria-hidden="true">{met ? '✓' : '○'}</span> {label}
-          <span className="sr-only">{met ? ': đã đạt' : ': chưa đạt'}</span>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 function RegisterForm({ onRegistered }: { onRegistered(response: RegisterResponse): void }) {
@@ -182,19 +163,7 @@ function RegisterForm({ onRegistered }: { onRegistered(response: RegisterRespons
         required
       />
 
-      {turnstile.enabled && (
-        <div>
-          <div ref={turnstile.hostRef} className="min-h-[65px]" />
-          {turnstile.status === 'loading' && <p className="text-xs text-slate-500 dark:text-slate-400" role="status">Đang tải bước kiểm tra bảo mật…</p>}
-          {turnstile.status === 'expired' && <p className="mt-2 text-sm text-amber-700 dark:text-amber-300" role="status">Kết quả kiểm tra bảo mật đã hết hạn, vui lòng xác minh lại.</p>}
-          {turnstile.status === 'error' && (
-            <p className="mt-2 text-sm text-rose-600 dark:text-rose-400" role="alert">
-              Không tải được bước kiểm tra bảo mật.{' '}
-              <button type="button" className={linkClass} onClick={turnstile.reset}>Thử lại</button>
-            </p>
-          )}
-        </div>
-      )}
+      <TurnstileField turnstile={turnstile} />
       {botMessage && !(botMessage.missing && turnstile.satisfied) && <FormAlert tone="error">{botMessage.text}</FormAlert>}
 
       {failure && (

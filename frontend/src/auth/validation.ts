@@ -1,27 +1,37 @@
-// Client-side checks mirroring the server's Bean Validation on RegisterRequest / LoginRequest.
-// They only improve feedback; the server re-validates everything.
+// Client-side checks mirroring the server's Bean Validation on RegisterRequest / LoginRequest /
+// ForgotPasswordRequest / ResetPasswordRequest. They only improve feedback; the server re-validates everything.
 
 export const EMAIL_MAX_LENGTH = 254;
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 72;
+/** BCrypt reads at most 72 bytes; the server checks the UTF-8 length on top of the character count. */
+export const PASSWORD_MAX_BYTES = 72;
 export const FULL_NAME_MAX_LENGTH = 255;
 export const WORKSPACE_NAME_MAX_LENGTH = 100;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const utf8 = new TextEncoder();
 
 export type RegisterField = 'fullName' | 'email' | 'password';
 export type FieldErrors<F extends string> = Partial<Record<F, string>>;
 
 export interface PasswordRules {
   length: boolean;
+  /** Accented letters take 2-3 bytes, so a password can fit 72 characters and still exceed 72 bytes. */
+  withinByteLimit: boolean;
   lowercase: boolean;
   uppercase: boolean;
   digit: boolean;
 }
 
+export function utf8ByteLength(value: string) {
+  return utf8.encode(value).length;
+}
+
 export function passwordRules(password: string): PasswordRules {
   return {
     length: password.length >= PASSWORD_MIN_LENGTH && password.length <= PASSWORD_MAX_LENGTH,
+    withinByteLimit: utf8ByteLength(password) <= PASSWORD_MAX_BYTES,
     lowercase: /[a-z]/.test(password),
     uppercase: /[A-Z]/.test(password),
     digit: /[0-9]/.test(password),
@@ -40,8 +50,17 @@ export function validateNewPassword(password: string): string | undefined {
   if (!password) return 'Vui lòng nhập mật khẩu.';
   if (password.length < PASSWORD_MIN_LENGTH) return `Mật khẩu cần ít nhất ${PASSWORD_MIN_LENGTH} ký tự.`;
   if (password.length > PASSWORD_MAX_LENGTH) return `Mật khẩu không được dài quá ${PASSWORD_MAX_LENGTH} ký tự.`;
+  if (utf8ByteLength(password) > PASSWORD_MAX_BYTES) {
+    return `Mật khẩu vượt quá ${PASSWORD_MAX_BYTES} byte (mỗi chữ có dấu chiếm 2–3 byte). Hãy rút ngắn mật khẩu.`;
+  }
   const rules = passwordRules(password);
   if (!rules.lowercase || !rules.uppercase || !rules.digit) return 'Mật khẩu cần có chữ hoa, chữ thường và chữ số.';
+  return undefined;
+}
+
+export function validatePasswordConfirmation(password: string, confirmation: string): string | undefined {
+  if (!confirmation) return 'Vui lòng nhập lại mật khẩu mới.';
+  if (confirmation !== password) return 'Mật khẩu nhập lại không khớp.';
   return undefined;
 }
 
@@ -76,4 +95,20 @@ export function validateLogin(values: { email: string; password: string }): Fiel
   if (email) errors.email = email;
   if (!values.password) errors.password = 'Vui lòng nhập mật khẩu.';
   return errors;
+}
+
+export type ResetPasswordField = 'newPassword' | 'confirmPassword';
+
+export function validateResetPassword(values: Record<ResetPasswordField, string>): FieldErrors<ResetPasswordField> {
+  const errors: FieldErrors<ResetPasswordField> = {};
+  const newPassword = validateNewPassword(values.newPassword);
+  const confirmPassword = validatePasswordConfirmation(values.newPassword, values.confirmPassword);
+  if (newPassword) errors.newPassword = newPassword;
+  if (confirmPassword) errors.confirmPassword = confirmPassword;
+  return errors;
+}
+
+export function validateForgotPassword(values: { email: string }): FieldErrors<'email'> {
+  const email = validateEmail(values.email);
+  return email ? { email } : {};
 }

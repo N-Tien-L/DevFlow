@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { passwordRules, validateEmail, validateFullName, validateLogin, validateNewPassword, validateRegistration, validateWorkspaceName } from './validation';
+import {
+  passwordRules,
+  utf8ByteLength,
+  validateEmail,
+  validateForgotPassword,
+  validateFullName,
+  validateLogin,
+  validateNewPassword,
+  validatePasswordConfirmation,
+  validateRegistration,
+  validateResetPassword,
+  validateWorkspaceName,
+} from './validation';
 
 describe('validateEmail', () => {
   it('accepts a normal address with surrounding spaces', () => {
@@ -27,8 +39,43 @@ describe('validateNewPassword', () => {
   });
 
   it('reports each rule separately for the checklist', () => {
-    expect(passwordRules('abc')).toEqual({ length: false, lowercase: true, uppercase: false, digit: false });
-    expect(passwordRules('Abcdefg1')).toEqual({ length: true, lowercase: true, uppercase: true, digit: true });
+    expect(passwordRules('abc')).toEqual({ length: false, withinByteLimit: true, lowercase: true, uppercase: false, digit: false });
+    expect(passwordRules('Abcdefg1')).toEqual({ length: true, withinByteLimit: true, lowercase: true, uppercase: true, digit: true });
+  });
+
+  it('counts UTF-8 bytes like the server (BCrypt reads 72 bytes)', () => {
+    expect(utf8ByteLength('a')).toBe(1);
+    expect(utf8ByteLength('é')).toBe(2);
+    expect(utf8ByteLength('ệ')).toBe(3);
+    expect(utf8ByteLength('😀')).toBe(4);
+    // 24 characters, 72 bytes: exactly at the limit.
+    expect(validateNewPassword(`Aa1${'ệ'.repeat(23)}`)).toBeUndefined();
+    // 25 characters, well under 72, but 75 bytes.
+    const tooManyBytes = `Aa1${'ệ'.repeat(24)}`;
+    expect(tooManyBytes.length).toBeLessThan(72);
+    expect(validateNewPassword(tooManyBytes)).toMatch(/72 byte/);
+    expect(passwordRules(tooManyBytes)).toMatchObject({ length: true, withinByteLimit: false });
+  });
+
+  it('counts characters as UTF-16 units, as Java @Size does', () => {
+    // An emoji is 2 UTF-16 units in both Java and JavaScript: 3 + 35 * 2 = 73 "characters".
+    expect(validateNewPassword(`Aa1${'😀'.repeat(35)}`)).toMatch(/72 ký tự/);
+  });
+});
+
+describe('password reset forms', () => {
+  it('requires the confirmation to match exactly', () => {
+    expect(validatePasswordConfirmation('Secret12', '')).toBeDefined();
+    expect(validatePasswordConfirmation('Secret12', 'Secret13')).toMatch(/không khớp/);
+    expect(validatePasswordConfirmation('Secret12', 'Secret12 ')).toMatch(/không khớp/);
+    expect(validatePasswordConfirmation('Secret12', 'Secret12')).toBeUndefined();
+  });
+
+  it('collects reset and forgot-password errors', () => {
+    expect(Object.keys(validateResetPassword({ newPassword: 'weak', confirmPassword: '' }))).toEqual(['newPassword', 'confirmPassword']);
+    expect(validateResetPassword({ newPassword: 'Secret123', confirmPassword: 'Secret123' })).toEqual({});
+    expect(validateForgotPassword({ email: 'nope' })).toHaveProperty('email');
+    expect(validateForgotPassword({ email: ' an@devflow.dev ' })).toEqual({});
   });
 });
 

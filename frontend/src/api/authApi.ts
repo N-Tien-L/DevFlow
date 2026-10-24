@@ -63,6 +63,18 @@ export function resendVerification(email: string, signal?: AbortSignal) {
   return postPublic<MessageResponse>('/api/v1/auth/resend-verification', { email: normaliseEmail(email) }, signal);
 }
 
+export function forgotPassword(email: string, turnstileToken: string | null, signal?: AbortSignal) {
+  return postPublic<MessageResponse>('/api/v1/auth/forgot-password', {
+    email: normaliseEmail(email),
+    turnstileToken: turnstileToken || null,
+  }, signal);
+}
+
+/** The password is sent as typed: the server neither trims nor normalises it. */
+export function resetPassword(token: string, newPassword: string, signal?: AbortSignal) {
+  return postPublic<MessageResponse>('/api/v1/auth/reset-password', { token, newPassword }, signal);
+}
+
 export function login(email: string, password: string, signal?: AbortSignal) {
   return postPublic<AuthResponse>('/api/v1/auth/login', { email: normaliseEmail(email), password }, signal);
 }

@@ -5,9 +5,11 @@ import { DEFAULT_AFTER_LOGIN, loginPathWithReturnTo, returnToFromSearch } from '
 import ChatPanel from './components/ChatPanel';
 import BoardPage from './pages/BoardPage';
 import EmailVerificationPage from './pages/EmailVerificationPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import InvitationAcceptPage from './pages/InvitationAcceptPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import WorkspaceCreatePage from './pages/WorkspaceCreatePage';
 import WorkspaceSelectionPage from './pages/WorkspaceSelectionPage';
 
@@ -45,6 +47,10 @@ function AuthenticatedApp() {
         <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
         <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
         <Route path="/verify-email" element={<EmailVerificationPage />} />
+        {/* Open to signed-in users too: someone may want to reset from an emailed link while still signed in
+            somewhere. A successful reset signs this tab out (the server has already revoked every session). */}
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         {/* Not behind RequireAuth: the page keeps the token in memory and links to /login itself, so the
             token never ends up in a returnTo URL. */}
         <Route path="/invitations/accept" element={<InvitationAcceptPage />} />
