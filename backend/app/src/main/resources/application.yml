@@ -76,6 +76,8 @@ logging:
     root: info
     # Spring AI logs the full prompt at WARN when OpenAI returns no choices; prompts may hold user data.
     org.springframework.ai.openai.OpenAiChatModel: error
+    # BeanOutputConverter logs the raw model answer at ERROR when structured output fails to parse.
+    org.springframework.ai.converter.BeanOutputConverter: off
 
 devflow:
   websocket:
@@ -135,6 +137,14 @@ devflow:
       failure-rate-threshold: 50
       wait-duration-in-open-state: 30s
       permitted-number-of-calls-in-half-open-state: 3
+    # Per-user budget shared by all AI features; every model-backed request consumes one token.
+    rate-limit:
+      capacity: ${AI_RATE_LIMIT_CAPACITY:10}
+      period: ${AI_RATE_LIMIT_PERIOD:10m}
+    breakdown:
+      max-output-tokens: 2048
+      # One extra model call when the structured answer is malformed or fails validation.
+      max-output-attempts: 2
   # Token-bucket policies per client key (capacity requests per period).
   rate-limit:
     policies:

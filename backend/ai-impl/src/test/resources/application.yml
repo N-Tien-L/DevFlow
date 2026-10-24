@@ -19,3 +19,8 @@ devflow:
   ai:
     chat:
       model: none
+
+logging:
+  level:
+    # As in production: never log raw model answers.
+    org.springframework.ai.converter.BeanOutputConverter: off

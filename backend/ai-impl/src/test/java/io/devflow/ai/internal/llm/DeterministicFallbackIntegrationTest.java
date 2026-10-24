@@ -69,11 +69,11 @@ class DeterministicFallbackIntegrationTest {
         assertThat(completion.text()).isEqualTo(DeterministicChatModel.RESPONSE_TEXT);
         assertThat(completion.model()).isEqualTo(DeterministicChatModel.MODEL);
         assertThat(completion.promptTokens()).isPositive();
-        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "task_breakdown", "result", "success")
+        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "breakdown", "result", "success")
                 .count()).isGreaterThanOrEqualTo(1);
-        assertThat(meterRegistry.timer("devflow.ai.request.latency", "feature", "task_breakdown", "result", "success")
+        assertThat(meterRegistry.timer("devflow.ai.request.latency", "feature", "breakdown", "result", "success")
                 .count()).isGreaterThanOrEqualTo(1);
-        assertThat(meterRegistry.counter("devflow.ai.tokens", "feature", "task_breakdown", "type", "prompt")
+        assertThat(meterRegistry.counter("devflow.ai.tokens", "feature", "breakdown", "type", "prompt")
                 .count()).isPositive();
     }
 

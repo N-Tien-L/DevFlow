@@ -4,7 +4,7 @@ package io.devflow.ai.internal.llm;
 public enum AiFeature {
 
     PROJECT_QA("project_qa"),
-    TASK_BREAKDOWN("task_breakdown"),
+    TASK_BREAKDOWN("breakdown"),
     CI_SUMMARY("ci_summary");
 
     private final String tag;
