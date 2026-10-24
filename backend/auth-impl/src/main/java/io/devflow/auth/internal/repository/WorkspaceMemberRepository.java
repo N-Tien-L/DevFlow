@@ -25,4 +25,6 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
             UUID workspaceId, String fullName, Pageable pageable);
 
     List<WorkspaceMemberEntity> findAllByUserId(UUID userId);
+
+    long countByWorkspaceIdAndUserIdNot(UUID workspaceId, UUID userId);
 }

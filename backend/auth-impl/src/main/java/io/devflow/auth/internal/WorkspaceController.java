@@ -3,6 +3,7 @@ package io.devflow.auth.internal;
 import io.devflow.auth.api.AcceptInvitationRequest;
 import io.devflow.auth.api.CreateInvitationRequest;
 import io.devflow.auth.api.CreateWorkspaceRequest;
+import io.devflow.auth.api.TransferWorkspaceOwnershipRequest;
 import io.devflow.auth.api.WorkspaceInvitationSummary;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.internal.security.UserPrincipal;
@@ -21,8 +22,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * REST API for workspace creation and member invitations (T-007). All endpoints require a JWT;
- * each is rate limited per user inside the service layer.
+ * REST API for workspace creation, member invitations (T-007) and ownership transfer (T-009). All endpoints
+ * require a JWT; each is rate limited per user inside the service layer.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -44,6 +45,17 @@ public class WorkspaceController {
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreateWorkspaceRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(workspaceService.createWorkspace(principal.getId(), request));
+    }
+
+    /**
+     * Hands the workspace to another member; the caller becomes {@code ADMIN}. Owner only.
+     */
+    @PostMapping("/workspaces/{workspaceId}/transfer-ownership")
+    public ResponseEntity<WorkspaceSummary> transferOwnership(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable("workspaceId") UUID workspaceId,
+            @Valid @RequestBody TransferWorkspaceOwnershipRequest request) {
+        return ResponseEntity.ok(workspaceService.transferOwnership(principal.getId(), workspaceId, request));
     }
 
     /**

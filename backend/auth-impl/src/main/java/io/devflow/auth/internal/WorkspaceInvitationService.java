@@ -196,7 +196,9 @@ public class WorkspaceInvitationService {
                     metrics.workspaceInvitationAccept("invalid");
                     return new InvalidInvitationException();
                 });
-        UserEntity user = userRepository.findById(actorId).orElseThrow(InvalidInvitationException::new);
+        // Lock order users -> workspaces -> invitation/member rows, as in account deletion (T-009): the reverse
+        // could deadlock with the owner deleting their account, or with this user deleting theirs.
+        UserEntity user = userRepository.findByIdForUpdate(actorId).orElseThrow(InvalidInvitationException::new);
         if (!user.getEmail().equalsIgnoreCase(invitation.getEmail())) {
             metrics.workspaceInvitationAccept("email_mismatch");
             throw new InvitationEmailMismatchException();
@@ -206,7 +208,8 @@ public class WorkspaceInvitationService {
             throw new InvitationExpiredException();
         }
 
-        WorkspaceEntity workspace = invitation.getWorkspace();
+        WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(invitation.getWorkspace().getId())
+                .orElseThrow(InvalidInvitationException::new);
         WorkspaceRole invitedRole = invitation.getRole();
         // Conditional update: only one of several concurrent requests can consume the invitation.
         if (invitationRepository.markAccepted(invitation.getId(), actorId, now) == 0) {

@@ -1,6 +1,9 @@
 package io.devflow.auth.internal.security;
 
 import io.devflow.auth.internal.TestAuthApplication;
+import io.devflow.auth.internal.entity.UserEntity;
+import io.devflow.auth.internal.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,8 +34,19 @@ class SecurityConfigIntegrationTest {
     @Autowired
     private JwtTokenProvider tokenProvider;
 
-    private final UUID testUserId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    @Autowired
+    private UserRepository userRepository;
+
     private final String testEmail = "secured.user@devflow.io";
+    private UUID testUserId;
+
+    /** Access tokens only authenticate while their user exists (a deleted account's tokens are revoked). */
+    @BeforeEach
+    void ensureUser() {
+        testUserId = userRepository.findByEmail(testEmail)
+                .orElseGet(() -> userRepository.save(new UserEntity(testEmail, "not-a-real-hash", "Secured User")))
+                .getId();
+    }
 
     @TestConfiguration
     static class TestEndpointConfig {

@@ -274,6 +274,22 @@ Long-lived, revocable tokens used by AI coding agents (Cursor, Claude Code) on t
 
 ---
 
+#### Table `account_deletion_audit` *(V12 tentative, T-009)*
+Records that an account was erased (GDPR right to erasure) without keeping who it was: no email, no name, no full IP.
+
+| Column Name | Data Type | Attributes | Description & Constraints |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Record ID |
+| `user_id` | `UUID` | UK, NOT NULL | Id of the erased account (`uq_account_deletion_audit_user`); deliberately no FK, the `users` row no longer exists |
+| `deleted_at` | `TIMESTAMPTZ` | NOT NULL | When the account was erased |
+| `client_ip_masked` | `VARCHAR(45)` | NULL | Caller IP truncated to the IPv4 /24 or IPv6 /48 (e.g. `203.0.113.0`); NULL if not an IP literal |
+| `workspaces_deleted` | `INT` | NOT NULL, DEFAULT `0` | Sole-owned workspaces deleted with the account (`ck_account_deletion_audit_workspaces` >= 0) |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Audit timestamps |
+
+- **Erasure flow:** `DELETE /api/v1/auth/me` re-checks the password, refuses (409) while the user owns a workspace with other members, deletes sole-owned workspaces, invitations addressed to the user's email and the `users` row (memberships, verification tokens and personal access tokens cascade; invitation `invited_by` / `accepted_by` become NULL), then publishes `workspace.deleted` / `user.account_deleted` for Board (ARCHITECTURE.md Section 4).
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 #### Table `boards`
@@ -662,6 +678,7 @@ Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated
    - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` adds `workspace_invitations`.
    - MCP personal access tokens (T-038): `V9__auth_personal_access_tokens.sql` adds `personal_access_tokens`.
    - Password reset (T-008): `V10__auth_password_reset_token_type.sql` (number tentative, assigned at merge) allows `verification_tokens.type = 'PASSWORD_RESET'`, adds `uq_verification_tokens_open_password_reset`, `users.token_version` and `users.password_changed_at`.
+   - Account deletion (T-009): `V12__auth_account_deletion_audit.sql` (number tentative, assigned at merge) adds `account_deletion_audit`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
    - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.

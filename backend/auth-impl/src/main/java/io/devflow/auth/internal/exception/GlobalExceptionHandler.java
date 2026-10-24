@@ -234,6 +234,33 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.GONE).body(problem);
     }
 
+    @ExceptionHandler(ReauthenticationFailedException.class)
+    public ResponseEntity<ProblemDetail> handleReauthenticationFailed(
+            ReauthenticationFailedException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Forbidden");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "REAUTHENTICATION_FAILED");
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(OwnershipTransferRequiredException.class)
+    public ResponseEntity<ProblemDetail> handleOwnershipTransferRequired(
+            OwnershipTransferRequiredException ex, HttpServletRequest request) {
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Conflict");
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("code", "WORKSPACE_OWNERSHIP_TRANSFER_REQUIRED");
+        problem.setProperty("workspaces", ex.getWorkspaces());
+        problem.setProperty("timestamp", Instant.now().toString());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
     @ExceptionHandler(BotChallengeFailedException.class)
     public ResponseEntity<ProblemDetail> handleBotChallengeFailed(
             BotChallengeFailedException ex, HttpServletRequest request) {

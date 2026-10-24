@@ -277,6 +277,22 @@ Token cá nhân dài hạn, thu hồi được, cho coding agent (Cursor, Claude
 
 ---
 
+#### Bảng `account_deletion_audit` *(V12 tạm, T-009)*
+Ghi nhận một tài khoản đã bị xoá (quyền được xoá dữ liệu theo GDPR) mà không giữ danh tính: không email, không họ tên, không IP đầy đủ.
+
+| Tên cột | Kiểu dữ liệu | Thuộc tính | Mô tả & Ràng buộc |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Khóa chính |
+| `user_id` | `UUID` | UK, NOT NULL | Id tài khoản đã xoá (`uq_account_deletion_audit_user`); cố ý không có FK vì dòng `users` không còn |
+| `deleted_at` | `TIMESTAMPTZ` | NOT NULL | Thời điểm xoá |
+| `client_ip_masked` | `VARCHAR(45)` | NULL | IP người gọi đã cắt còn IPv4 /24 hoặc IPv6 /48 (vd `203.0.113.0`); NULL nếu không phải IP |
+| `workspaces_deleted` | `INT` | NOT NULL, DEFAULT `0` | Số workspace chỉ có mình user bị xoá cùng (`ck_account_deletion_audit_workspaces` >= 0) |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Thời điểm tạo / cập nhật |
+
+- **Luồng xoá:** `DELETE /api/v1/auth/me` kiểm tra lại mật khẩu, từ chối (409) khi user còn sở hữu workspace có thành viên khác, xoá các workspace chỉ có mình user, các lời mời gửi tới email của user và dòng `users` (membership, verification token, personal access token bị xoá theo cascade; `invited_by` / `accepted_by` của lời mời thành NULL), rồi publish `workspace.deleted` / `user.account_deleted` cho Board (ARCHITECTURE_VI.md mục 4).
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 Quản lý vòng đời công việc, bảng Kanban, các cột trạng thái, bình luận và nhãn phân loại.
@@ -680,6 +696,7 @@ V3–V5 đã được triển khai cho board audit, task audit và task version.
    - Lời mời workspace (T-007): `V8__auth_workspace_invitations.sql` bổ sung bảng `workspace_invitations`.
    - Token cá nhân cho MCP (T-038): `V9__auth_personal_access_tokens.sql` bổ sung bảng `personal_access_tokens`.
    - Đặt lại mật khẩu (T-008): `V10__auth_password_reset_token_type.sql` (số tạm, cấp lại khi merge) cho phép `verification_tokens.type = 'PASSWORD_RESET'`, thêm `uq_verification_tokens_open_password_reset`, `users.token_version` và `users.password_changed_at`.
+   - Xoá tài khoản (T-009): `V12__auth_account_deletion_audit.sql` (số tạm, cấp lại khi merge) thêm bảng `account_deletion_audit`.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
    - File: chọn version chưa được sử dụng (V8+) khi triển khai; không tái sử dụng V4–V7.
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.

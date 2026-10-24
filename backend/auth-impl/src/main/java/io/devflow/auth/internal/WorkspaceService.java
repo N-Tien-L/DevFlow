@@ -1,6 +1,7 @@
 package io.devflow.auth.internal;
 
 import io.devflow.auth.api.CreateWorkspaceRequest;
+import io.devflow.auth.api.TransferWorkspaceOwnershipRequest;
 import io.devflow.auth.api.WorkspaceSummary;
 import io.devflow.auth.internal.entity.UserEntity;
 import io.devflow.auth.internal.entity.WorkspaceEntity;
@@ -9,6 +10,7 @@ import io.devflow.auth.internal.entity.WorkspaceRole;
 import io.devflow.auth.internal.exception.InvalidFieldException;
 import io.devflow.auth.internal.exception.ResourceNotFoundException;
 import io.devflow.auth.internal.exception.ConflictException;
+import io.devflow.auth.internal.exception.WorkspacePermissionDeniedException;
 import io.devflow.auth.internal.repository.UserRepository;
 import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
@@ -25,7 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Workspace creation (T-007). The creator becomes the workspace {@code OWNER}.
+ * Workspace creation (T-007) and ownership transfer (T-009). The creator becomes the workspace {@code OWNER}.
  */
 @Service
 public class WorkspaceService {
@@ -84,6 +86,60 @@ public class WorkspaceService {
         log.info("User {} created workspace {}", actorId, workspace.getId());
         return new WorkspaceSummary(workspace.getId(), workspace.getName(), workspace.getSlug(),
                 WorkspaceRole.OWNER.name(), workspace.getCreatedAt());
+    }
+
+    /**
+     * Hands the workspace to another member (T-009: lets an owner leave or delete their account). The new owner
+     * becomes {@code OWNER} and the caller stays on as {@code ADMIN}.
+     *
+     * <p>Locks the new owner's user row, then the workspace (users before workspaces, as account deletion does),
+     * so a concurrent deletion of either account cannot leave the workspace without a valid owner.
+     *
+     * @return the workspace as the caller now sees it (role {@code ADMIN})
+     * @throws WorkspacePermissionDeniedException the caller is not the owner, or the workspace does not exist
+     * @throws InvalidFieldException              the target is the caller or not a member of the workspace
+     */
+    @Transactional
+    public WorkspaceSummary transferOwnership(UUID actorId, UUID workspaceId, TransferWorkspaceOwnershipRequest request) {
+        rateLimiterService.checkRateLimit(RateLimitProperties.WORKSPACE_TRANSFER, actorId.toString());
+        UUID newOwnerId = request.newOwnerId();
+        requireOwner(actorId, workspaceRepository.findById(workspaceId).orElse(null));
+        if (newOwnerId.equals(actorId)) {
+            metrics.workspaceOwnershipTransferred("invalid_target");
+            throw new InvalidFieldException("newOwnerId", "You already own this workspace.");
+        }
+
+        UserEntity newOwner = userRepository.findByIdForUpdate(newOwnerId).filter(UserEntity::isActive)
+                .orElseThrow(() -> notAMember());
+        WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(workspaceId).orElse(null);
+        // Re-checked under the lock: a concurrent transfer may have moved the workspace already.
+        requireOwner(actorId, workspace);
+        WorkspaceMemberEntity target = workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, newOwnerId)
+                .orElseThrow(() -> notAMember());
+        WorkspaceMemberEntity previous = workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, actorId)
+                .orElseThrow(() -> new IllegalStateException("Workspace owner has no membership row"));
+
+        workspace.setOwner(newOwner);
+        target.setRole(WorkspaceRole.OWNER);
+        previous.setRole(WorkspaceRole.ADMIN);
+
+        metrics.workspaceOwnershipTransferred("success");
+        log.info("User {} transferred ownership of workspace {} to user {}", actorId, workspaceId, newOwnerId);
+        return new WorkspaceSummary(workspace.getId(), workspace.getName(), workspace.getSlug(),
+                WorkspaceRole.ADMIN.name(), workspace.getCreatedAt());
+    }
+
+    /** Same answer for "not the owner" and "no such workspace", so ids cannot be enumerated. */
+    private void requireOwner(UUID actorId, WorkspaceEntity workspace) {
+        if (workspace == null || !workspace.getOwner().getId().equals(actorId)) {
+            metrics.workspaceOwnershipTransferred("forbidden");
+            throw new WorkspacePermissionDeniedException("Only the workspace owner can transfer ownership.");
+        }
+    }
+
+    private InvalidFieldException notAMember() {
+        metrics.workspaceOwnershipTransferred("invalid_target");
+        return new InvalidFieldException("newOwnerId", "The new owner must be an active member of this workspace.");
     }
 
     private String uniqueSlug(String name) {

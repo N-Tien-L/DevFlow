@@ -33,16 +33,17 @@ public class SessionRevocationService {
     }
 
     /**
-     * True when the token's version no longer matches the user's. Uses the cache.
+     * True when the token's version no longer matches the user's, or the user no longer exists (account deleted,
+     * T-009). Uses the cache.
      */
     public boolean isRevoked(UUID userId, int tokenVersion) {
         return tokenVersions.get(userId, userRepository::findTokenVersion)
                 .map(current -> current != tokenVersion)
-                .orElse(false);
+                .orElse(true);
     }
 
     /**
-     * Drops the cached value, e.g. right after this instance changed the user's password.
+     * Drops the cached value, e.g. right after this instance changed the user's password or deleted the account.
      */
     public void evict(UUID userId) {
         tokenVersions.invalidate(userId);
