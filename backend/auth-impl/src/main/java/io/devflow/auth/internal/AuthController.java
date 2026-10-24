@@ -1,6 +1,7 @@
 package io.devflow.auth.internal;
 
 import io.devflow.auth.api.AuthResponse;
+import io.devflow.auth.api.DeleteAccountRequest;
 import io.devflow.auth.api.ForgotPasswordRequest;
 import io.devflow.auth.api.LoginRequest;
 import io.devflow.auth.api.MessageResponse;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,12 +44,14 @@ public class AuthController {
     private final AuthService authService;
     private final RegistrationService registrationService;
     private final PasswordResetService passwordResetService;
+    private final AccountDeletionService accountDeletionService;
 
     public AuthController(AuthService authService, RegistrationService registrationService,
-                          PasswordResetService passwordResetService) {
+                          PasswordResetService passwordResetService, AccountDeletionService accountDeletionService) {
         this.authService = authService;
         this.registrationService = registrationService;
         this.passwordResetService = passwordResetService;
+        this.accountDeletionService = accountDeletionService;
     }
 
     /**
@@ -123,6 +127,19 @@ public class AuthController {
     public ResponseEntity<UserSummary> getCurrentUser(@AuthenticationPrincipal UserPrincipal principal) {
         UserSummary summary = authService.getCurrentUser(principal.getId());
         return ResponseEntity.ok(summary);
+    }
+
+    /**
+     * Permanently deletes the caller's account after re-checking the password (T-009). Answers 204; 403 for a
+     * wrong password, 409 while the caller still owns workspaces with other members.
+     */
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> deleteAccount(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody DeleteAccountRequest request,
+            HttpServletRequest servletRequest) {
+        accountDeletionService.deleteAccount(principal.getId(), request, servletRequest.getRemoteAddr());
+        return ResponseEntity.noContent().build();
     }
 
     /**

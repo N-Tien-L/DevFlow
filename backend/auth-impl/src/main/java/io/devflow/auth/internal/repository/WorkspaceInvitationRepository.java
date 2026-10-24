@@ -51,6 +51,13 @@ public interface WorkspaceInvitationRepository extends JpaRepository<WorkspaceIn
     int markRevoked(@Param("id") UUID id, @Param("workspaceId") UUID workspaceId, @Param("now") Instant now);
 
     /**
+     * Deletes every invitation addressed to an email, whatever its state (erasure of that address).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM WorkspaceInvitationEntity i WHERE i.email = :email")
+    int deleteAllByEmail(@Param("email") String email);
+
+    /**
      * Purges invitations that expired or were revoked before the cutoff (accepted ones go once expired).
      */
     @Modifying

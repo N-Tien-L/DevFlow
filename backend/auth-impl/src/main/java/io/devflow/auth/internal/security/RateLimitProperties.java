@@ -33,6 +33,9 @@ public class RateLimitProperties {
     public static final String FORGOT_PASSWORD = "forgot-password";
     public static final String FORGOT_PASSWORD_PER_EMAIL = "forgot-password-per-email";
     public static final String RESET_PASSWORD = "reset-password";
+    // Account deletion & ownership transfer (T-009), per user. Also caps password guessing via re-authentication.
+    public static final String ACCOUNT_DELETE = "account-delete";
+    public static final String WORKSPACE_TRANSFER = "workspace-transfer";
 
     private final Map<String, Policy> policies = new LinkedHashMap<>(Map.ofEntries(
             Map.entry(LOGIN, new Policy(5, Duration.ofMinutes(1))),
@@ -50,7 +53,9 @@ public class RateLimitProperties {
             Map.entry(PAT_AUTH_FAILURE, new Policy(20, Duration.ofMinutes(1))),
             Map.entry(FORGOT_PASSWORD, new Policy(5, Duration.ofMinutes(15))),
             Map.entry(FORGOT_PASSWORD_PER_EMAIL, new Policy(3, Duration.ofHours(1))),
-            Map.entry(RESET_PASSWORD, new Policy(10, Duration.ofMinutes(15)))
+            Map.entry(RESET_PASSWORD, new Policy(10, Duration.ofMinutes(15))),
+            Map.entry(ACCOUNT_DELETE, new Policy(5, Duration.ofMinutes(15))),
+            Map.entry(WORKSPACE_TRANSFER, new Policy(10, Duration.ofHours(1)))
     ));
 
     public Map<String, Policy> getPolicies() {

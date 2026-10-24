@@ -1,6 +1,8 @@
 package io.devflow.auth.internal.support;
 
 import java.lang.reflect.Method;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,6 +10,7 @@ import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.mail.MailSendException;
 
 /**
@@ -16,6 +19,8 @@ import org.springframework.mail.MailSendException;
 public final class LogMasking {
 
     private static final int MAX_FAILURE_PARTS = 8;
+    private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
+    private static final Pattern IPV6_CHARS = Pattern.compile("^[0-9a-fA-F:.]{2,45}$");
 
     private LogMasking() {
     }
@@ -32,6 +37,32 @@ public final class LogMasking {
             return "***";
         }
         return email.charAt(0) + "***" + email.substring(at);
+    }
+
+    /**
+     * Truncates a client IP for storage without identifying the person: IPv4 keeps the /24 ({@code 203.0.113.0}),
+     * IPv6 the /48 ({@code 2001:db8:85a3::}). Returns null for anything that is not an IP literal.
+     */
+    public static String maskIp(String ip) {
+        if (ip == null) {
+            return null;
+        }
+        if (IPV4.matcher(ip).matches()) {
+            return ip.substring(0, ip.lastIndexOf('.')) + ".0";
+        }
+        if (ip.indexOf(':') >= 0 && IPV6_CHARS.matcher(ip).matches()) {
+            try {
+                // An IPv6 literal is parsed locally; no DNS lookup happens.
+                byte[] bytes = InetAddress.getByName(ip).getAddress();
+                if (bytes.length == 16) {
+                    return String.format("%x:%x:%x::", ((bytes[0] & 0xff) << 8) | (bytes[1] & 0xff),
+                            ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff), ((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff));
+                }
+            } catch (UnknownHostException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

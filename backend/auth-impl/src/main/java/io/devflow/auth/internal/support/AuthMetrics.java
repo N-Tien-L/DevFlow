@@ -101,6 +101,16 @@ public class AuthMetrics {
         registry.counter("devflow.auth.password_reset_email", "kind", kind, "result", result).increment();
     }
 
+    /** {@code result}: success | reauthentication_failed | ownership_transfer_required */
+    public void accountDeleted(String result) {
+        registry.counter("devflow.auth.account_deleted", "result", result).increment();
+    }
+
+    /** {@code result}: success | forbidden | invalid_target */
+    public void workspaceOwnershipTransferred(String result) {
+        registry.counter("devflow.auth.workspace_ownership_transferred", "result", result).increment();
+    }
+
     public void purged(String kind, int count) {
         registry.counter("devflow.auth.purged", "kind", kind).increment(count);
     }

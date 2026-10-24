@@ -35,6 +35,12 @@ public final class EventTypes {
     /** Published by AI service. Consumed by Notification. */
     public static final String RISK_DEADLINE_FLAGGED = "risk.deadline_flagged";
 
+    /** Published by Auth after commit. Consumed by Board. Carries no PII. */
+    public static final String USER_ACCOUNT_DELETED = "user.account_deleted";
+
+    /** Published by Auth after commit. Consumed by Board. */
+    public static final String WORKSPACE_DELETED = "workspace.deleted";
+
     private EventTypes() {
     }
 }

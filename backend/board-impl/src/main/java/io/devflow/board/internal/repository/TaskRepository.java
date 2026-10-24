@@ -1,6 +1,7 @@
 package io.devflow.board.internal.repository;
 
 import io.devflow.board.internal.entity.TaskEntity;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -8,6 +9,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -57,4 +59,16 @@ public interface TaskRepository extends JpaRepository<TaskEntity, UUID> {
             where task.id = :taskId
             """)
     Optional<TaskEntity> findTaskWithBoard(@Param("taskId") UUID taskId);
+
+    /**
+     * Unassigns every task of a deleted user (T-009). Bumps the optimistic-lock version so a client still holding
+     * the old assignee cannot write it back.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update TaskEntity task
+            set task.assigneeId = null, task.version = task.version + 1, task.updatedAt = :now
+            where task.assigneeId = :userId
+            """)
+    int unassignUser(@Param("userId") UUID userId, @Param("now") Instant now);
 }

@@ -92,7 +92,8 @@ public class WorkspaceInvitationService {
      *
      * <p>Only {@code OWNER}/{@code ADMIN} members may invite, and only the {@code OWNER} may invite admins.
      * The workspace row is locked so the pending quota and the one-open-invitation-per-email rule hold
-     * under concurrency (the partial unique index backs the latter).
+     * under concurrency (the partial unique index backs the latter). The inviter's user row is locked first:
+     * users before workspaces, as account deletion does, so the two cannot deadlock (T-009).
      */
     @Transactional
     public WorkspaceInvitationSummary invite(UUID actorId, UUID workspaceId, CreateInvitationRequest request) {
@@ -108,6 +109,8 @@ public class WorkspaceInvitationService {
 
         String email = InputSanitizer.normalizeEmail(request.email());
         Instant now = clock.instant();
+        userRepository.findByIdForUpdate(actorId)
+                .orElseThrow(() -> new WorkspacePermissionDeniedException(MANAGE_DENIED));
         WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(workspaceId)
                 .orElseThrow(() -> new WorkspacePermissionDeniedException(MANAGE_DENIED));
 
@@ -196,7 +199,9 @@ public class WorkspaceInvitationService {
                     metrics.workspaceInvitationAccept("invalid");
                     return new InvalidInvitationException();
                 });
-        UserEntity user = userRepository.findById(actorId).orElseThrow(InvalidInvitationException::new);
+        // Lock order users -> workspaces -> invitation/member rows, as in account deletion (T-009): the reverse
+        // could deadlock with the owner deleting their account, or with this user deleting theirs.
+        UserEntity user = userRepository.findByIdForUpdate(actorId).orElseThrow(InvalidInvitationException::new);
         if (!user.getEmail().equalsIgnoreCase(invitation.getEmail())) {
             metrics.workspaceInvitationAccept("email_mismatch");
             throw new InvitationEmailMismatchException();
@@ -206,7 +211,8 @@ public class WorkspaceInvitationService {
             throw new InvitationExpiredException();
         }
 
-        WorkspaceEntity workspace = invitation.getWorkspace();
+        WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(invitation.getWorkspace().getId())
+                .orElseThrow(InvalidInvitationException::new);
         WorkspaceRole invitedRole = invitation.getRole();
         // Conditional update: only one of several concurrent requests can consume the invitation.
         if (invitationRepository.markAccepted(invitation.getId(), actorId, now) == 0) {

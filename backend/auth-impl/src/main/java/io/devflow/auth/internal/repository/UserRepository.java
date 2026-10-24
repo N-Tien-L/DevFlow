@@ -38,6 +38,14 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
     Optional<UserEntity> findByIdForUpdate(@Param("id") UUID id);
 
     /**
+     * Erases one account. Memberships, verification tokens and personal access tokens go with it through
+     * {@code ON DELETE CASCADE}; invitation inviter/acceptor references are set to NULL.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM UserEntity u WHERE u.id = :id")
+    int deleteAccount(@Param("id") UUID id);
+
+    /**
      * Removes abandoned sign-ups (accounts never verified before the cutoff).
      * Their verification tokens are removed by the {@code ON DELETE CASCADE} foreign key.
      */
