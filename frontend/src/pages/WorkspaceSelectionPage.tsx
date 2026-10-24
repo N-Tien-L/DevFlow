@@ -3,15 +3,10 @@ import { Link } from 'react-router-dom';
 import { listWorkspaces } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { authErrorMessage } from '../auth/authErrorMessage';
+import { workspaceRoleLabel } from '../auth/workspaceRole';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, SecondaryButton, linkClass } from '../components/auth/FormControls';
 import type { WorkspaceSummary } from '../types/board';
-
-const roleLabels: Record<string, string> = {
-  OWNER: 'Chủ sở hữu',
-  ADMIN: 'Quản trị',
-  MEMBER: 'Thành viên',
-};
 
 type State =
   | { kind: 'loading' }
@@ -98,7 +93,7 @@ export default function WorkspaceSelectionPage() {
                   <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">{workspace.slug}</span>
                 </span>
                 <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                  {roleLabels[workspace.role] ?? workspace.role}
+                  {workspaceRoleLabel(workspace.role)}
                 </span>
               </Link>
             </li>

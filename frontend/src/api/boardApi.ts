@@ -16,6 +16,14 @@ export function listWorkspaces(request: ApiRequest) {
   return request<WorkspaceSummary[]>('/api/v1/auth/workspaces');
 }
 
+/** Joins the workspace behind an invitation token; an existing member keeps their role (still 200). */
+export function acceptInvitation(request: ApiRequest, token: string) {
+  return request<WorkspaceSummary>('/api/v1/auth/invitations/accept', {
+    method: 'POST',
+    body: JSON.stringify({ token: token.trim() }),
+  });
+}
+
 export function createWorkspace(request: ApiRequest, name: string) {
   return request<WorkspaceSummary>('/api/v1/auth/workspaces', {
     method: 'POST',
