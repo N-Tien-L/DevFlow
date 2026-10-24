@@ -14,7 +14,7 @@ import io.devflow.auth.internal.exception.InvalidInvitationException;
 import io.devflow.auth.internal.exception.InvitationEmailMismatchException;
 import io.devflow.auth.internal.exception.InvitationExpiredException;
 import io.devflow.auth.internal.exception.ResourceNotFoundException;
-import io.devflow.auth.internal.exception.WorkspaceConflictException;
+import io.devflow.auth.internal.exception.ConflictException;
 import io.devflow.auth.internal.exception.WorkspacePermissionDeniedException;
 import io.devflow.auth.internal.repository.UserRepository;
 import io.devflow.auth.internal.repository.WorkspaceInvitationRepository;
@@ -116,7 +116,7 @@ public class WorkspaceInvitationService {
         if (open.isPresent()) {
             if (!open.get().isExpired(now)) {
                 metrics.workspaceInvitation("already_pending");
-                throw new WorkspaceConflictException("INVITATION_ALREADY_PENDING",
+                throw new ConflictException("INVITATION_ALREADY_PENDING",
                         "An invitation is already pending for this email. Revoke it to send a new one.");
             }
             // An expired invitation still occupies the open-invitation slot until purged; replace it.
@@ -126,7 +126,7 @@ public class WorkspaceInvitationService {
         if (invitationRepository.countByWorkspaceIdAndStatusAndExpiresAtAfter(
                 workspaceId, InvitationStatus.PENDING, now) >= properties.getMaxPendingInvitations()) {
             metrics.workspaceInvitation("limit_reached");
-            throw new WorkspaceConflictException("INVITATION_LIMIT_REACHED",
+            throw new ConflictException("INVITATION_LIMIT_REACHED",
                     "This workspace has too many pending invitations. Revoke some before inviting more.");
         }
 

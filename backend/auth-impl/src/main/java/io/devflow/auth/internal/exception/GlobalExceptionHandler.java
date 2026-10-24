@@ -143,9 +143,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.GONE).body(problem);
     }
 
-    @ExceptionHandler(WorkspaceConflictException.class)
-    public ResponseEntity<ProblemDetail> handleWorkspaceConflict(
-            WorkspaceConflictException ex, HttpServletRequest request) {
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ProblemDetail> handleConflict(
+            ConflictException ex, HttpServletRequest request) {
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Conflict");

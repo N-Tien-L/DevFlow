@@ -76,6 +76,21 @@ public class AuthMetrics {
         registry.counter("devflow.auth.workspace_invitation_email", "result", result).increment();
     }
 
+    /** {@code result}: success | limit_reached */
+    public void personalAccessTokenCreated(String result) {
+        registry.counter("devflow.auth.pat_created", "result", result).increment();
+    }
+
+    /** {@code result}: success | not_found */
+    public void personalAccessTokenRevoked(String result) {
+        registry.counter("devflow.auth.pat_revoked", "result", result).increment();
+    }
+
+    /** {@code result}: success | malformed | invalid | revoked | expired | inactive_user | rate_limited */
+    public void personalAccessTokenAuth(String result) {
+        registry.counter("devflow.auth.pat_auth", "result", result).increment();
+    }
+
     public void purged(String kind, int count) {
         registry.counter("devflow.auth.purged", "kind", kind).increment(count);
     }

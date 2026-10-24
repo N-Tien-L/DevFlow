@@ -42,7 +42,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             String jwt = resolveToken(request);
-            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
+            // Personal access tokens (dfp_...) are handled by PersonalAccessTokenAuthenticationFilter on MCP
+            // paths only; they are never accepted as a JWT.
+            if (StringUtils.hasText(jwt) && !PersonalAccessTokenAuthenticationFilter.isPersonalAccessToken(jwt)
+                    && tokenProvider.validateToken(jwt)) {
                 String tokenType = tokenProvider.getTokenTypeFromToken(jwt);
                 // Only allow access tokens for general API request authentication
                 if ("access".equalsIgnoreCase(tokenType) || tokenType == null) {
@@ -60,7 +63,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (Exception ex) {
-            log.error("Could not set user authentication in security context: {}", ex.getMessage());
+            log.error("Could not set user authentication in security context: {}",
+                    io.devflow.auth.internal.support.LogMasking.describeFailure(ex));
         }
 
         filterChain.doFilter(request, response);
