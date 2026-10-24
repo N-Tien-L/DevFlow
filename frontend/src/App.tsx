@@ -5,6 +5,7 @@ import { DEFAULT_AFTER_LOGIN, loginPathWithReturnTo, returnToFromSearch } from '
 import ChatPanel from './components/ChatPanel';
 import BoardPage from './pages/BoardPage';
 import EmailVerificationPage from './pages/EmailVerificationPage';
+import InvitationAcceptPage from './pages/InvitationAcceptPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import WorkspaceCreatePage from './pages/WorkspaceCreatePage';
@@ -44,6 +45,9 @@ function AuthenticatedApp() {
         <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
         <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
         <Route path="/verify-email" element={<EmailVerificationPage />} />
+        {/* Not behind RequireAuth: the page keeps the token in memory and links to /login itself, so the
+            token never ends up in a returnTo URL. */}
+        <Route path="/invitations/accept" element={<InvitationAcceptPage />} />
         <Route path="/workspaces" element={<RequireAuth><WorkspaceSelectionPage /></RequireAuth>} />
         <Route path="/workspaces/new" element={<RequireAuth><WorkspaceCreatePage /></RequireAuth>} />
         <Route path="/boards" element={<RequireAuth><BoardPage /></RequireAuth>} />
