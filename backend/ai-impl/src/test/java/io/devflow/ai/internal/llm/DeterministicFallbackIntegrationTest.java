@@ -85,7 +85,7 @@ class DeterministicFallbackIntegrationTest {
         assertThatThrownBy(() -> gateway.complete(AiFeature.PROJECT_QA, "s", "x".repeat(100)))
                 .isInstanceOf(AiPromptRejectedException.class)
                 .extracting("code").isEqualTo(AiChatGateway.PROMPT_TOO_LARGE);
-        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "project_qa", "result", "rejected")
+        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "qa", "result", "rejected")
                 .count()).isGreaterThanOrEqualTo(2);
     }
 

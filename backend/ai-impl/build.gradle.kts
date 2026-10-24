@@ -4,8 +4,10 @@ dependencies {
     api(platform("org.springframework.ai:spring-ai-bom:1.0.0"))
     api(project(":common"))
     api(project(":ai-api"))
-    // Other modules' -api projects may be added here when a synchronous call is truly
-    // needed (e.g. :board-api to read tasks for Q&A). NEVER another module's -impl.
+    // Other modules' -api projects only, for synchronous read-only queries. NEVER another module's -impl.
+    // Project Q&A (T-033) reads tasks through BoardApi and assignee display names through AuthApi.
+    implementation(project(":board-api"))
+    implementation(project(":auth-api"))
 
     api("org.springframework.boot:spring-boot-starter-web")
     api("org.springframework.boot:spring-boot-starter-websocket")

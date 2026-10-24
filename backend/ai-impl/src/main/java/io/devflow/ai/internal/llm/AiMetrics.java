@@ -23,7 +23,7 @@ public class AiMetrics {
         return Timer.start(registry);
     }
 
-    /** {@code result}: success | error | circuit_open | rejected */
+    /** {@code result}: success | error | circuit_open | rejected | invalid_output */
     void request(AiFeature feature, String result, Timer.Sample sample) {
         registry.counter("devflow.ai.requests", "feature", feature.tag(), "result", result).increment();
         sample.stop(Timer.builder("devflow.ai.request.latency")

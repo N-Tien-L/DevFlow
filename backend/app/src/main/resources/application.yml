@@ -145,6 +145,15 @@ devflow:
       max-output-tokens: 2048
       # One extra model call when the structured answer is malformed or fails validation.
       max-output-attempts: 2
+    # Grounded project Q&A (T-033): summary counts cover every task; these bound the per-task list.
+    qa:
+      max-tasks: 150
+      max-title-chars: 120
+      max-context-chars: 10000
+      max-assignees: 30
+      max-output-tokens: 512
+      # One extra model call when the answer is empty or too long.
+      max-output-attempts: 2
   # Token-bucket policies per client key (capacity requests per period).
   rate-limit:
     policies:

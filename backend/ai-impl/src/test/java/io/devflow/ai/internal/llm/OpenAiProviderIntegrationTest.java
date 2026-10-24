@@ -133,7 +133,7 @@ class OpenAiProviderIntegrationTest {
         assertThat(PROVIDER.requests()).hasSize(3);
         assertThat(body).doesNotContain("SECRET-PROVIDER-DETAIL", "503 -", "openai", "sk-test");
         assertThat(output).doesNotContain(PROMPT_CANARY, "SECRET-PROVIDER-DETAIL", "sk-test-not-real");
-        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "project_qa", "result", "error")
+        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "qa", "result", "error")
                 .count()).isGreaterThanOrEqualTo(1);
     }
 
@@ -227,7 +227,7 @@ class OpenAiProviderIntegrationTest {
                 .isInstanceOf(AiProviderUnavailableException.class);
 
         assertThat(PROVIDER.requests()).hasSize(callsWhileClosed);
-        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "project_qa", "result", "circuit_open")
+        assertThat(meterRegistry.counter("devflow.ai.requests", "feature", "qa", "result", "circuit_open")
                 .count()).isGreaterThanOrEqualTo(1);
         assertThat(healthIndicator.health().getStatus()).isEqualTo(AiProviderHealthIndicator.DEGRADED);
         assertThat(healthIndicator.health().getDetails()).containsEntry("provider", AiProviderInfo.OPENAI)

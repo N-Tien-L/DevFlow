@@ -1,15 +1,19 @@
 package io.devflow.ai.internal;
 
 import io.devflow.ai.api.AiServiceApi;
+import io.devflow.ai.api.ProjectQueryAnswer;
 import io.devflow.ai.api.TaskBreakdownProposal;
 import io.devflow.ai.internal.breakdown.TaskBreakdownService;
+import io.devflow.ai.internal.qa.ProjectQueryService;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
  * The single shared AI brain (ARCHITECTURE.md Section 3): task breakdown, conversational
  * Q&amp;A, and CI/CD failure summarization. Task breakdown (T-032) lives in
- * {@link TaskBreakdownService}: a proposal only, never written to the board. Consumed by the
+ * {@link TaskBreakdownService}: a proposal only, never written to the board. Project Q&amp;A (T-033) lives in
+ * {@link ProjectQueryService}: membership first, then answers grounded in Board data read through
+ * {@code BoardApi} (never Board's internals — Section 10). Consumed by the
  * chat WebSocket gateway ({@link ChatGatewayController}) and the MCP server ({@link McpToolConfig}) — both are
  * thin adapters and must contain no AI logic of their own.
  *
@@ -17,8 +21,6 @@ import org.springframework.stereotype.Service;
  * {@link io.devflow.ai.internal.llm.AiChatGateway} (shared {@code ChatClient} with timeouts, retry,
  * circuit breaker and metrics; deterministic fallback when no provider is configured) and implement:
  * <ul>
- *   <li>{@link #answerProjectQuery} — ground answers in Board data obtained via
- *       {@code BoardApi} (never Board's internals — Section 10)</li>
  *   <li>{@link #summarizeCiFailure} — fetch the failure via {@code GitCiApi}, summarize,
  *       then publish {@code CiFailureSummarizedEvent}</li>
  * </ul>
@@ -27,15 +29,16 @@ import org.springframework.stereotype.Service;
 public class AiService implements AiServiceApi {
 
     private final TaskBreakdownService taskBreakdownService;
+    private final ProjectQueryService projectQueryService;
 
-    public AiService(TaskBreakdownService taskBreakdownService) {
+    public AiService(TaskBreakdownService taskBreakdownService, ProjectQueryService projectQueryService) {
         this.taskBreakdownService = taskBreakdownService;
+        this.projectQueryService = projectQueryService;
     }
 
     @Override
-    public String answerProjectQuery(UUID projectId, String question) {
-        // TODO(PRODUCT_SPEC 5.2b): real LLM-backed answer grounded in project data.
-        return "AI assistant Q&A is not implemented yet.";
+    public ProjectQueryAnswer answerProjectQuery(UUID userId, UUID projectId, String question) {
+        return projectQueryService.answer(userId, projectId, question);
     }
 
     @Override

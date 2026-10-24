@@ -46,6 +46,12 @@ public final class AiApiException extends RuntimeException {
                 "Workspace access could not be verified. Please try again later.", null);
     }
 
+    /** The project's board data could not be read; nothing was sent to the model. */
+    public static AiApiException projectDataUnavailable() {
+        return new AiApiException(HttpStatus.SERVICE_UNAVAILABLE, "PROJECT_DATA_UNAVAILABLE",
+                "Project data could not be loaded. Please try again later.", null);
+    }
+
     public HttpStatus status() {
         return status;
     }
