@@ -92,7 +92,8 @@ public class WorkspaceInvitationService {
      *
      * <p>Only {@code OWNER}/{@code ADMIN} members may invite, and only the {@code OWNER} may invite admins.
      * The workspace row is locked so the pending quota and the one-open-invitation-per-email rule hold
-     * under concurrency (the partial unique index backs the latter).
+     * under concurrency (the partial unique index backs the latter). The inviter's user row is locked first:
+     * users before workspaces, as account deletion does, so the two cannot deadlock (T-009).
      */
     @Transactional
     public WorkspaceInvitationSummary invite(UUID actorId, UUID workspaceId, CreateInvitationRequest request) {
@@ -108,6 +109,8 @@ public class WorkspaceInvitationService {
 
         String email = InputSanitizer.normalizeEmail(request.email());
         Instant now = clock.instant();
+        userRepository.findByIdForUpdate(actorId)
+                .orElseThrow(() -> new WorkspacePermissionDeniedException(MANAGE_DENIED));
         WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(workspaceId)
                 .orElseThrow(() -> new WorkspacePermissionDeniedException(MANAGE_DENIED));
 

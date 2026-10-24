@@ -26,6 +26,10 @@ public interface WorkspaceRepository extends JpaRepository<WorkspaceEntity, UUID
 
     long countByOwnerId(UUID ownerId);
 
+    /** The owner's id without loading the workspace into the persistence context. */
+    @Query("SELECT w.owner.id FROM WorkspaceEntity w WHERE w.id = :id")
+    Optional<UUID> findOwnerIdById(@Param("id") UUID id);
+
     /**
      * Workspaces owned by a user, row-locked so members cannot be added or removed while the account is deleted.
      */

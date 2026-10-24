@@ -92,8 +92,9 @@ public class WorkspaceService {
      * Hands the workspace to another member (T-009: lets an owner leave or delete their account). The new owner
      * becomes {@code OWNER} and the caller stays on as {@code ADMIN}.
      *
-     * <p>Locks the new owner's user row, then the workspace (users before workspaces, as account deletion does),
-     * so a concurrent deletion of either account cannot leave the workspace without a valid owner.
+     * <p>Locks the new owner's user row, then the workspace (users before workspaces, as every Auth write does),
+     * and only reads the workspace and memberships under those locks: an entity loaded before the lock would not
+     * be refreshed by the locking query, letting two concurrent transfers by the same owner both succeed.
      *
      * @return the workspace as the caller now sees it (role {@code ADMIN})
      * @throws WorkspacePermissionDeniedException the caller is not the owner, or the workspace does not exist
@@ -103,7 +104,8 @@ public class WorkspaceService {
     public WorkspaceSummary transferOwnership(UUID actorId, UUID workspaceId, TransferWorkspaceOwnershipRequest request) {
         rateLimiterService.checkRateLimit(RateLimitProperties.WORKSPACE_TRANSFER, actorId.toString());
         UUID newOwnerId = request.newOwnerId();
-        requireOwner(actorId, workspaceRepository.findById(workspaceId).orElse(null));
+        // Scalar pre-check: loads no entity, so the workspace read under the lock below is the current row.
+        requireOwner(actorId, workspaceRepository.findOwnerIdById(workspaceId).orElse(null));
         if (newOwnerId.equals(actorId)) {
             metrics.workspaceOwnershipTransferred("invalid_target");
             throw new InvalidFieldException("newOwnerId", "You already own this workspace.");
@@ -113,7 +115,7 @@ public class WorkspaceService {
                 .orElseThrow(() -> notAMember());
         WorkspaceEntity workspace = workspaceRepository.findByIdForUpdate(workspaceId).orElse(null);
         // Re-checked under the lock: a concurrent transfer may have moved the workspace already.
-        requireOwner(actorId, workspace);
+        requireOwner(actorId, workspace == null ? null : workspace.getOwner().getId());
         WorkspaceMemberEntity target = workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, newOwnerId)
                 .orElseThrow(() -> notAMember());
         WorkspaceMemberEntity previous = workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, actorId)
@@ -130,8 +132,8 @@ public class WorkspaceService {
     }
 
     /** Same answer for "not the owner" and "no such workspace", so ids cannot be enumerated. */
-    private void requireOwner(UUID actorId, WorkspaceEntity workspace) {
-        if (workspace == null || !workspace.getOwner().getId().equals(actorId)) {
+    private void requireOwner(UUID actorId, UUID ownerId) {
+        if (!actorId.equals(ownerId)) {
             metrics.workspaceOwnershipTransferred("forbidden");
             throw new WorkspacePermissionDeniedException("Only the workspace owner can transfer ownership.");
         }
