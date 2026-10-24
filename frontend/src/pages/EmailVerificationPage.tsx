@@ -4,6 +4,7 @@ import { verifyEmail } from '../api/authApi';
 import { AuthErrorCode, problemCode, retryAfterSeconds } from '../api/problemDetail';
 import { useAuth } from '../auth/AuthProvider';
 import { authErrorMessage } from '../auth/authErrorMessage';
+import { removeTokenFromAddressBar } from '../auth/urlToken';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, SecondaryButton, linkClass } from '../components/auth/FormControls';
 import { ResendVerification } from '../components/auth/ResendVerification';
@@ -50,9 +51,7 @@ export default function EmailVerificationPage() {
 
   useEffect(() => {
     // Remove the token from the address bar and history so it is not bookmarked, shared or leaked by Referer.
-    if (new URLSearchParams(window.location.search).has('token')) {
-      window.history.replaceState(window.history.state, '', window.location.pathname);
-    }
+    removeTokenFromAddressBar();
   }, []);
 
   useEffect(() => {

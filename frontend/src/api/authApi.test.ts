@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../types/board';
-import { login, register, resendVerification, verifyEmail } from './authApi';
+import { forgotPassword, login, register, resendVerification, resetPassword, verifyEmail } from './authApi';
 import { AuthErrorCode, problemCode } from './problemDetail';
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -58,6 +58,39 @@ describe('public auth API', () => {
     fetchMock = mockFetch(jsonResponse(200, { accessToken: 'a', refreshToken: 'r', tokenType: 'Bearer', expiresIn: 900, user: {} }));
     await login('X@Y.dev', 'pw');
     expect(sentRequest(fetchMock)).toMatchObject({ path: '/api/v1/auth/login', body: { email: 'x@y.dev', password: 'pw' } });
+  });
+
+  it('sends forgot-password with a normalised email and reset-password with the password as typed', async () => {
+    let fetchMock = mockFetch(jsonResponse(202, { message: 'If an account exists...' }));
+    await forgotPassword('  An@DevFlow.dev ', 'tt');
+    expect(sentRequest(fetchMock)).toMatchObject({ path: '/api/v1/auth/forgot-password', body: { email: 'an@devflow.dev', turnstileToken: 'tt' } });
+
+    fetchMock = mockFetch(jsonResponse(202, { message: 'If an account exists...' }));
+    await forgotPassword('an@devflow.dev', null);
+    expect(sentRequest(fetchMock).body).toEqual({ email: 'an@devflow.dev', turnstileToken: null });
+
+    fetchMock = mockFetch(jsonResponse(200, { message: 'reset' }));
+    await resetPassword('tok', ' Mật khẩu1 ');
+    const { path, init, body } = sentRequest(fetchMock);
+    expect(path).toBe('/api/v1/auth/reset-password');
+    expect(new Headers(init.headers).has('Authorization')).toBe(false);
+    expect(body).toEqual({ token: 'tok', newPassword: ' Mật khẩu1 ' });
+  });
+
+  it('marks a 2xx reset whose body cannot be read as uncertain, but not an ordinary error', async () => {
+    mockFetch(new Response('<html>portal</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    let reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toBeInstanceOf(ApiError);
+    expect(reason).toMatchObject({ status: 200, uncertain: true });
+
+    mockFetch(new Response('{"message":', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toMatchObject({ status: 200, uncertain: true });
+
+    mockFetch(jsonResponse(400, { status: 400, code: 'RESET_TOKEN_INVALID' }));
+    reason = await resetPassword('tok', 'NewSecret1').catch((error: unknown) => error);
+    expect(reason).toMatchObject({ status: 400, uncertain: false });
+    expect(problemCode(reason)).toBe(AuthErrorCode.ResetTokenInvalid);
   });
 
   it('surfaces EMAIL_NOT_VERIFIED from login as an ApiError', async () => {

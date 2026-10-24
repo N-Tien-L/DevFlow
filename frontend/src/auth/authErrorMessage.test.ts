@@ -13,6 +13,11 @@ describe('authErrorMessage', () => {
     expect(authErrorMessage(error)).toContain('17 giây');
   });
 
+  it('has copy for the password reset token codes', () => {
+    expect(authErrorMessage(new ApiError('x', 400, { status: 400, code: 'RESET_TOKEN_INVALID' }))).toMatch(/không hợp lệ/);
+    expect(authErrorMessage(new ApiError('x', 410, { status: 410, code: 'RESET_TOKEN_EXPIRED' }))).toMatch(/hết hạn/);
+  });
+
   it('covers 409, network and unknown failures', () => {
     expect(authErrorMessage(new ApiError('exists', 409, { status: 409 }))).toMatch(/đã được đăng ký/);
     expect(authErrorMessage(new ApiError('Không kết nối được máy chủ.', 0))).toBe('Không kết nối được máy chủ.');

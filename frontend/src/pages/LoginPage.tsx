@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { AuthErrorCode, problemCode, retryAfterSeconds } from '../api/problemDetail';
 import { useAuth } from '../auth/AuthProvider';
 import { authErrorMessage } from '../auth/authErrorMessage';
+import { emailFromState, loginNoticeFromState } from '../auth/routerState';
 import { EMAIL_MAX_LENGTH, validateLogin, type FieldErrors } from '../auth/validation';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, PasswordField, SubmitButton, TextField, linkClass } from '../components/auth/FormControls';
@@ -13,15 +14,12 @@ import { ApiError } from '../types/board';
 
 type LoginField = 'email' | 'password';
 
-/** Email handed over through router state (register 409, "check your inbox"); never read from storage or the URL. */
-function emailFromState(state: unknown) {
-  return typeof state === 'object' && state !== null && 'email' in state && typeof state.email === 'string' ? state.email : '';
-}
-
 export default function LoginPage() {
   const { signIn, sessionEnd } = useAuth();
   const location = useLocation();
+  // Handed over through router state (register 409, "check your inbox", forgot password); never storage or the URL.
   const [email, setEmail] = useState(() => emailFromState(location.state));
+  const [notice] = useState(() => loginNoticeFromState(location.state));
   const [password, setPassword] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,7 +66,10 @@ export default function LoginPage() {
       description="Đăng nhập để tiếp tục quản lý board của nhóm."
       footer={<>Chưa có tài khoản? <Link className={linkClass} to="/register">Tạo tài khoản</Link></>}
     >
-      {sessionEnd === 'expired' && (
+      {notice === 'passwordReset' && (
+        <FormAlert tone="success" className="mb-5">Mật khẩu đã được đặt lại. Mọi phiên đăng nhập cũ đã bị đăng xuất; hãy đăng nhập bằng mật khẩu mới.</FormAlert>
+      )}
+      {sessionEnd === 'expired' && notice !== 'passwordReset' && (
         <FormAlert tone="warning" className="mb-5">Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.</FormAlert>
       )}
 
@@ -96,6 +97,9 @@ export default function LoginPage() {
           onChange={(event) => setPassword(event.target.value)}
           required
         />
+        <p className="-mt-2 text-right text-sm">
+          <Link className={linkClass} to="/forgot-password" state={{ email: email.trim().toLowerCase() }}>Quên mật khẩu?</Link>
+        </p>
 
         {error && <FormAlert tone="error">{error}</FormAlert>}
 

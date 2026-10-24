@@ -4,6 +4,7 @@ import { acceptInvitation, listWorkspaces } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { captureInvitationToken, clearInvitationToken, invitationFailure, isFinalFailure, type InvitationFailure } from '../auth/invitation';
 import { loginPathWithReturnTo } from '../auth/returnTo';
+import { removeTokenFromAddressBar } from '../auth/urlToken';
 import { workspaceRoleLabel } from '../auth/workspaceRole';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, SecondaryButton, linkClass } from '../components/auth/FormControls';
@@ -51,9 +52,7 @@ export default function InvitationAcceptPage() {
 
   useEffect(() => {
     // Strip the token from the address bar and this history entry before anything else can see it.
-    if (new URLSearchParams(window.location.search).has('token')) {
-      window.history.replaceState(window.history.state, '', window.location.pathname);
-    }
+    removeTokenFromAddressBar();
   }, []);
 
   useEffect(() => {

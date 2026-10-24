@@ -10,6 +10,8 @@ export const AuthErrorCode = {
   EmailDomainUndeliverable: 'EMAIL_DOMAIN_UNDELIVERABLE',
   VerificationTokenInvalid: 'VERIFICATION_TOKEN_INVALID',
   VerificationTokenExpired: 'VERIFICATION_TOKEN_EXPIRED',
+  ResetTokenInvalid: 'RESET_TOKEN_INVALID',
+  ResetTokenExpired: 'RESET_TOKEN_EXPIRED',
   RateLimitExceeded: 'RATE_LIMIT_EXCEEDED',
 } as const;
 

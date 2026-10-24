@@ -22,6 +22,10 @@ export function authErrorMessage(reason: unknown, fallback = FALLBACK): string {
       return 'Liên kết xác minh không hợp lệ hoặc đã được sử dụng.';
     case AuthErrorCode.VerificationTokenExpired:
       return 'Liên kết xác minh đã hết hạn. Hãy gửi lại email xác minh.';
+    case AuthErrorCode.ResetTokenInvalid:
+      return 'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã được sử dụng. Hãy yêu cầu liên kết mới.';
+    case AuthErrorCode.ResetTokenExpired:
+      return 'Liên kết đặt lại mật khẩu đã hết hạn. Hãy yêu cầu liên kết mới.';
     case AuthErrorCode.RateLimitExceeded: {
       const seconds = problem.retryAfterSeconds;
       return seconds ? `Bạn thử quá nhiều lần. Vui lòng đợi ${seconds} giây rồi thử lại.` : 'Bạn thử quá nhiều lần. Vui lòng đợi một lát rồi thử lại.';
