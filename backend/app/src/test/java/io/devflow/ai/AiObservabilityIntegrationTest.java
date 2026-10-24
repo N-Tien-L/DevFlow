@@ -46,10 +46,10 @@ class AiObservabilityIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(scrape)
-                .containsPattern("devflow_ai_requests_total\\{feature=\"project_qa\",result=\"success\"} [1-9]")
-                .containsPattern("devflow_ai_request_latency_seconds_count\\{feature=\"project_qa\",result=\"success\"} [1-9]")
-                .containsPattern("devflow_ai_tokens_total\\{feature=\"project_qa\",type=\"prompt\"} [1-9]")
-                .containsPattern("devflow_ai_tokens_total\\{feature=\"project_qa\",type=\"completion\"} [1-9]");
+                .containsPattern("devflow_ai_requests_total\\{feature=\"qa\",result=\"success\"} [1-9]")
+                .containsPattern("devflow_ai_request_latency_seconds_count\\{feature=\"qa\",result=\"success\"} [1-9]")
+                .containsPattern("devflow_ai_tokens_total\\{feature=\"qa\",type=\"prompt\"} [1-9]")
+                .containsPattern("devflow_ai_tokens_total\\{feature=\"qa\",type=\"completion\"} [1-9]");
     }
 
     @Test

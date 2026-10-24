@@ -39,6 +39,9 @@ public class AiProperties {
     @Valid
     private final Breakdown breakdown = new Breakdown();
 
+    @Valid
+    private final Qa qa = new Qa();
+
     public Chat getChat() {
         return chat;
     }
@@ -57,6 +60,10 @@ public class AiProperties {
 
     public Breakdown getBreakdown() {
         return breakdown;
+    }
+
+    public Qa getQa() {
+        return qa;
     }
 
     /** Per-user token bucket shared by all AI features (each call consumes one token). */
@@ -97,6 +104,90 @@ public class AiProperties {
         @Min(1)
         @Max(3)
         private int maxOutputAttempts = 2;
+
+        public int getMaxOutputTokens() {
+            return maxOutputTokens;
+        }
+
+        public void setMaxOutputTokens(int maxOutputTokens) {
+            this.maxOutputTokens = maxOutputTokens;
+        }
+
+        public int getMaxOutputAttempts() {
+            return maxOutputAttempts;
+        }
+
+        public void setMaxOutputAttempts(int maxOutputAttempts) {
+            this.maxOutputAttempts = maxOutputAttempts;
+        }
+    }
+
+    /**
+     * Grounded project Q&amp;A (T-033). Summary counts always cover every task; these limits only bound
+     * the per-task list given to the model, which also stays within {@code chat.max-prompt-chars}.
+     */
+    public static class Qa {
+
+        /** Most tasks listed one by one in the prompt; unfinished tasks are listed first. */
+        @Min(1)
+        @Max(1000)
+        private int maxTasks = 150;
+
+        /** Task titles longer than this are cut in the prompt. */
+        @Min(20)
+        @Max(255)
+        private int maxTitleChars = 120;
+
+        /** Character budget of the project data block (summary plus task list). */
+        @Min(1000)
+        @Max(400_000)
+        private int maxContextChars = 10_000;
+
+        /** People named in the summary; the rest are counted as one remainder. */
+        @Min(1)
+        @Max(200)
+        private int maxAssignees = 30;
+
+        @Min(64)
+        @Max(4096)
+        private int maxOutputTokens = 512;
+
+        /** Model calls per request when the answer is empty or invalid (1 = no second try). */
+        @Min(1)
+        @Max(3)
+        private int maxOutputAttempts = 2;
+
+        public int getMaxTasks() {
+            return maxTasks;
+        }
+
+        public void setMaxTasks(int maxTasks) {
+            this.maxTasks = maxTasks;
+        }
+
+        public int getMaxTitleChars() {
+            return maxTitleChars;
+        }
+
+        public void setMaxTitleChars(int maxTitleChars) {
+            this.maxTitleChars = maxTitleChars;
+        }
+
+        public int getMaxContextChars() {
+            return maxContextChars;
+        }
+
+        public void setMaxContextChars(int maxContextChars) {
+            this.maxContextChars = maxContextChars;
+        }
+
+        public int getMaxAssignees() {
+            return maxAssignees;
+        }
+
+        public void setMaxAssignees(int maxAssignees) {
+            this.maxAssignees = maxAssignees;
+        }
 
         public int getMaxOutputTokens() {
             return maxOutputTokens;

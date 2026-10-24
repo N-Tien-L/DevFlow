@@ -82,6 +82,38 @@ public class AiChatGateway {
     }
 
     /**
+     * Plain-text call whose answer the feature checks. Unlike {@link #complete}, an empty or blank answer
+     * is unusable output, not a provider failure: like a {@code validator} rejection it surfaces as
+     * {@link AiMalformedOutputException}, outside the circuit breaker and without a transport retry.
+     *
+     * @param maxTokens completion-token cap for this call; {@code null} keeps {@code devflow.ai.chat.max-tokens}
+     * @param validator checks and normalizes the non-blank answer; throws {@link AiMalformedOutputException}
+     *                  to reject it
+     * @throws AiMalformedOutputException    the answer was empty or failed validation
+     * @throws AiPromptRejectedException     prompt empty or too large
+     * @throws AiProviderUnavailableException provider failed after retries, or the circuit is open
+     */
+    public AiCompletion completeText(AiFeature feature, String systemPrompt, String userPrompt, Integer maxTokens,
+            UnaryOperator<String> validator) {
+        Objects.requireNonNull(validator, "validator");
+        Attempt<String> attempt = execute(feature, systemPrompt, userPrompt, maxTokens,
+                request -> {
+                    ChatResponse response = request.call().chatResponse();
+                    String text = response == null || response.getResult() == null
+                            || response.getResult().getOutput() == null
+                            ? null : response.getResult().getOutput().getText();
+                    return new Attempt<>(response, text);
+                },
+                text -> {
+                    if (!StringUtils.hasText(text)) {
+                        throw new AiMalformedOutputException("answer empty");
+                    }
+                    return validator.apply(text);
+                });
+        return new AiCompletion(attempt.value(), attempt.model(), attempt.promptTokens(), attempt.completionTokens());
+    }
+
+    /**
      * Asks for a JSON answer bound to {@code type} through Spring AI structured output.
      *
      * @param maxTokens completion-token cap for this call; {@code null} keeps {@code devflow.ai.chat.max-tokens}

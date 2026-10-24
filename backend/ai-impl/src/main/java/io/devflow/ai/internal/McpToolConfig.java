@@ -1,6 +1,7 @@
 package io.devflow.ai.internal;
 
 import io.devflow.ai.api.AiServiceApi;
+import io.devflow.ai.internal.security.AiActorProvider;
 import java.util.UUID;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.annotation.Tool;
@@ -37,9 +38,11 @@ public class McpToolConfig {
     public static class DevflowMcpTools {
 
         private final AiServiceApi aiService;
+        private final AiActorProvider actorProvider;
 
-        public DevflowMcpTools(AiServiceApi aiService) {
+        public DevflowMcpTools(AiServiceApi aiService, AiActorProvider actorProvider) {
             this.aiService = aiService;
+            this.actorProvider = actorProvider;
         }
 
         @Tool(description = "Ask a natural-language question about the DevFlow project, "
@@ -47,8 +50,11 @@ public class McpToolConfig {
         public String queryProject(
                 @ToolParam(description = "Project UUID") String projectId,
                 @ToolParam(description = "Natural-language question") String question) {
-            // TODO(PRODUCT_SPEC 5.2c): validate access for the calling agent's identity.
-            return aiService.answerProjectQuery(UUID.fromString(projectId), question);
+            // The caller is the PAT/JWT principal of the MCP request (T-038); answerProjectQuery checks
+            // workspace membership and the per-user AI rate limit. TODO(T-035): map AiApiException to
+            // MCP tool errors and verify the principal is visible on the tool-call thread.
+            return aiService.answerProjectQuery(actorProvider.requireUserId(), UUID.fromString(projectId), question)
+                    .answer();
         }
 
         @Tool(description = "Look up a CI/CD pipeline failure and get a short summary of "
