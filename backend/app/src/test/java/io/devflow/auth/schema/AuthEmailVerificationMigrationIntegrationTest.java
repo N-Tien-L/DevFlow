@@ -76,9 +76,25 @@ class AuthEmailVerificationMigrationIntegrationTest {
 
         assertThatThrownBy(() -> jdbc.update(
                 "INSERT INTO " + schema + ".verification_tokens(user_id, token_hash, type, expires_at) "
-                        + "VALUES (?, ?, 'PASSWORD_RESET', ?)",
+                        + "VALUES (?, ?, 'MAGIC_LINK', ?)",
                 user, "b".repeat(64), Timestamp.from(Instant.now().plusSeconds(3600))))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void passwordResetTokensAndPasswordChangeTimestampAreAllowedAfterT008() {
+        String schema = migratedSchema();
+        UUID user = insertUser(schema, "reset");
+
+        jdbc.update("INSERT INTO " + schema + ".verification_tokens(user_id, token_hash, type, expires_at) "
+                        + "VALUES (?, ?, 'PASSWORD_RESET', ?)",
+                user, "c".repeat(64), Timestamp.from(Instant.now().plusSeconds(1800)));
+        jdbc.update("UPDATE " + schema + ".users SET password_changed_at = now() WHERE id = ?", user);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM " + schema + ".verification_tokens "
+                + "WHERE type = 'PASSWORD_RESET'", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT password_changed_at IS NOT NULL FROM " + schema + ".users WHERE id = ?",
+                Boolean.class, user)).isTrue();
     }
 
     private UUID insertUser(String schema, String label) {

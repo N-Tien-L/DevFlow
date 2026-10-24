@@ -24,7 +24,22 @@ import org.springframework.security.core.Authentication;
 class StompAuthenticationInterceptorTest {
 
     private final JwtTokenProvider tokenProvider = mock(JwtTokenProvider.class);
-    private final StompAuthenticationInterceptor interceptor = new StompAuthenticationInterceptor(tokenProvider);
+    private final SessionRevocationService sessionRevocationService = mock(SessionRevocationService.class);
+    private final StompAuthenticationInterceptor interceptor =
+            new StompAuthenticationInterceptor(tokenProvider, sessionRevocationService);
+
+    @Test
+    void rejectsAnAccessTokenRevokedByAPasswordChange() {
+        UUID userId = UUID.randomUUID();
+        mockAccessToken(userId, Instant.now().plusSeconds(60));
+        org.mockito.Mockito.when(sessionRevocationService.isRevoked(
+                org.mockito.ArgumentMatchers.eq(userId), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        StompHeaderAccessor accessor = connectAccessor("valid-token");
+
+        assertThatThrownBy(() -> interceptor.preSend(message(accessor), null))
+                .isInstanceOf(MessageDeliveryException.class)
+                .hasMessageContaining("AUTH_INVALID");
+    }
 
     @Test
     void bindsTheVerifiedAccessTokenIdentityAndExpiryToTheSession() {
