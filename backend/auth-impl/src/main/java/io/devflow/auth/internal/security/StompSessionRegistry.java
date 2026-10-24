@@ -1,6 +1,7 @@
 package io.devflow.auth.internal.security;
 
 import io.devflow.auth.internal.support.LogMasking;
+import io.devflow.common.security.AuthenticatedSession;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
@@ -73,6 +74,24 @@ public class StompSessionRegistry implements WebSocketHandlerDecoratorFactory {
             userBySession.remove(sessionId, userId);
             unbind(userId, sessionId);
         }
+    }
+
+    /** Server-owned credentials of an open, authenticated socket; never trust broker output attributes. */
+    Map<String, Object> authenticatedAttributes(String sessionId) {
+        if (sessionId == null) {
+            return Map.of();
+        }
+        WebSocketSession socket = sessions.get(sessionId);
+        UUID userId = userBySession.get(sessionId);
+        if (socket == null || userId == null || !socket.isOpen()) {
+            return Map.of();
+        }
+        Map<String, Object> attributes = socket.getAttributes();
+        Object identity = attributes.get(AuthenticatedSession.STOMP_SESSION_ATTRIBUTE);
+        if (!(identity instanceof AuthenticatedSession session) || !userId.equals(session.userId())) {
+            return Map.of();
+        }
+        return attributes;
     }
 
     /**

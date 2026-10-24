@@ -96,10 +96,12 @@ Modules publish and subscribe to typed events. This table is the contract; treat
 | `task.created` | Board | AI service, Notification | taskId, projectId (workspace id), boardId, columnId, description, eventId, correlationId, actorId, occurredAt |
 | `task.status_changed` | Board (manual or Git-triggered transition) | Notification, AI service | taskId, boardId, workspaceId, sourceColumnId, destinationColumnId, oldStatus/newStatus (column names), oldStatusCategory/newStatusCategory, cause (manual / git), eventId, correlationId, actorId (nullable for system automation), occurredAt |
 | `git.commit_linked` | Git & CI | Board | task id, commit sha, repo, author |
-| `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo |
+| `git.pr_opened` / `git.pr_merged` | Git & CI | Board, Notification | task id, PR url, repo, occurredAt, actorId (nullable DevFlow user UUID for the opener/merger) |
 | `ci.failure_detected` | Git & CI | AI service | pipeline id, raw log reference, repo, commit sha |
 | `ci.failure_summarized` | AI service | Board, Notification | pipeline id, summary text, related task id (if resolved) |
 | `risk.deadline_flagged` | AI service | Notification | task id or sprint id, reason, severity |
+
+**Git notification attribution:** Notification excludes the event's `actorId` and never infers a Git actor from the request `SecurityContext`. A null `actorId` means the actor is unknown, so self-notification cannot be excluded reliably. Existing Git event constructors remain compatible and set it to null. Follow-up for the Git & CI producer (Xuan): map the Git PR opener/merger to a DevFlow user and populate `actorId`; do not substitute the PR author for the person who merged it.
 
 **Rule:** per the active workspace instructions, cross-module communication uses typed events extending `DevFlowEvent`; modules never import another module's internals or call its public interfaces directly. A synchronous request/decision event must be handled on the publishing thread, return exactly one decision, and fail closed when no valid response is received. Domain notifications remain ordinary typed events.
 
