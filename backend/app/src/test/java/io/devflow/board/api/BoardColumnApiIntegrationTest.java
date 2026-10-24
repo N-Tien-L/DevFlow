@@ -961,6 +961,17 @@ class BoardColumnApiIntegrationTest {
                 .get("id").asText());
     }
 
+    @Test
+    void signedInBoardRequestWithUnacceptableMediaTypeIs406() throws Exception {
+        UUID boardId = createBoard("Content negotiation", memberId);
+        mockMvc.perform(get("/api/v1/boards/{boardId}", boardId)
+                        .header("Authorization", bearer(memberId)).accept("text/plain"))
+                .andExpect(status().isNotAcceptable())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(406));
+    }
+
     private String bearer(UUID userId) {
         return "Bearer " + tokenProvider.generateAccessToken(userId, userId + "@devflow.test");
     }

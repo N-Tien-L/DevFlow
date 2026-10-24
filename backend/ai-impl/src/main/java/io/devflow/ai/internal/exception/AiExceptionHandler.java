@@ -8,6 +8,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -52,9 +53,10 @@ public class AiExceptionHandler {
         return ResponseEntity.badRequest().body(problem(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage(), request));
     }
 
-    static ProblemDetail problem(HttpStatus status, String code, String detail, HttpServletRequest request) {
+    static ProblemDetail problem(HttpStatusCode status, String code, String detail, HttpServletRequest request) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setTitle(status.getReasonPhrase());
+        HttpStatus known = HttpStatus.resolve(status.value());
+        problem.setTitle(known == null ? "Error" : known.getReasonPhrase());
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("code", code);
         String correlationId = MDC.get("correlationId");
