@@ -40,8 +40,13 @@ function loadTurnstileScript() {
   scriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`#${SCRIPT_ID}`);
     const script = existing ?? document.createElement('script');
-    script.addEventListener('load', () => window.turnstile ? resolve() : reject(new Error('Turnstile unavailable')), { once: true });
-    script.addEventListener('error', () => reject(new Error('Turnstile script failed to load')), { once: true });
+    // A failed <script> never fires again; drop it so the next attempt appends a fresh element.
+    const fail = (message: string) => {
+      script.remove();
+      reject(new Error(message));
+    };
+    script.addEventListener('load', () => window.turnstile ? resolve() : fail('Turnstile unavailable'), { once: true });
+    script.addEventListener('error', () => fail('Turnstile script failed to load'), { once: true });
     if (!existing) {
       script.id = SCRIPT_ID;
       script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
