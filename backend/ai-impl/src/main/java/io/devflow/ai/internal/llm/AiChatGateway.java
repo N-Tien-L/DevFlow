@@ -98,13 +98,15 @@ public class AiChatGateway {
         QuietBeanOutputConverter<T> converter = new QuietBeanOutputConverter<>(type);
         Attempt<T> attempt = execute(feature, systemPrompt, userPrompt, maxTokens,
                 request -> {
+                    // No requireAnswer here: an empty or blank answer is unusable output, not a provider
+                    // failure. It converts to a null entity and is rejected below, outside the breaker.
                     ResponseEntity<ChatResponse, T> answer = request.call().responseEntity(converter);
-                    requireAnswer(answer.response());
                     return new Attempt<>(answer.response(), answer.entity());
                 },
                 value -> {
                     if (value == null) {
-                        throw new AiMalformedOutputException("answer did not match " + type.getSimpleName());
+                        throw new AiMalformedOutputException(
+                                "answer empty or did not match " + type.getSimpleName());
                     }
                     return validator.apply(value);
                 });
@@ -163,7 +165,10 @@ public class AiChatGateway {
         return request.user(userPrompt);
     }
 
-    /** Inside the circuit breaker: repeated empty answers count as provider failures. */
+    /**
+     * Plain-text calls only, inside the circuit breaker: an empty answer counts as a provider failure.
+     * Structured calls treat it as malformed output instead (see {@link #completeEntity}).
+     */
     private static void requireAnswer(ChatResponse response) {
         if (response == null || response.getResult() == null
                 || !StringUtils.hasText(response.getResult().getOutput().getText())) {
@@ -206,18 +211,23 @@ public class AiChatGateway {
         }
 
         String model() {
-            String model = response.getMetadata().getModel();
+            String model = response == null || response.getMetadata() == null ? null : response.getMetadata().getModel();
             return StringUtils.hasText(model) ? model : providerInfo.model();
         }
 
         int promptTokens() {
-            Usage usage = response.getMetadata().getUsage();
+            Usage usage = usage();
             return tokens(usage == null ? null : usage.getPromptTokens());
         }
 
         int completionTokens() {
-            Usage usage = response.getMetadata().getUsage();
+            Usage usage = usage();
             return tokens(usage == null ? null : usage.getCompletionTokens());
+        }
+
+        // A structured call may come back without a usable response; it is then rejected as malformed.
+        private Usage usage() {
+            return response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
         }
     }
 

@@ -159,6 +159,36 @@ class TaskBreakdownProviderIntegrationTest {
     }
 
     @Test
+    void retriesOnceAfterEmptyAnswer() throws Exception {
+        PROVIDER.respondInSequence(List.of(
+                OpenAiStubServer.completionWithContent(""),
+                OpenAiStubServer.completionWithContent(json(validProposal(3)))));
+
+        request("Build a notification bell").andExpect(status().isOk())
+                .andExpect(jsonPath("$.subtasks", hasSize(3)));
+
+        assertThat(PROVIDER.requests()).hasSize(2);
+        assertThat(resilience.circuitBreaker().getMetrics().getNumberOfFailedCalls()).isZero();
+    }
+
+    @Test
+    void emptyAnswersTwiceFailWith502WithoutCountingAsProviderFailures() throws Exception {
+        double invalidBefore = breakdownRequests("invalid_output");
+        PROVIDER.respondInSequence(List.of(
+                OpenAiStubServer.completionWithContent("   \n\t "),
+                OpenAiStubServer.completionWithContent(null)));
+
+        request("Build a notification bell")
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("AI_OUTPUT_INVALID"))
+                .andExpect(jsonPath("$.subtasks").doesNotExist());
+
+        assertThat(PROVIDER.requests()).hasSize(2);
+        assertThat(breakdownRequests("invalid_output")).isEqualTo(invalidBefore + 2);
+        assertThat(resilience.circuitBreaker().getMetrics().getNumberOfFailedCalls()).isZero();
+    }
+
+    @Test
     void rejectsAnswersOutsideTheContractInsteadOfReturningThem() throws Exception {
         PROVIDER.respondInSequence(List.of(
                 OpenAiStubServer.completionWithContent(json(validProposal(2))),
