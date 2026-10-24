@@ -24,17 +24,26 @@ public class RateLimitProperties {
     public static final String WORKSPACE_INVITE = "workspace-invite";
     public static final String INVITATION_ACCEPT = "invitation-accept";
     public static final String WORKSPACE_INVITATION_MANAGE = "workspace-invitation-manage";
+    // Personal access tokens (T-038): management per user, MCP usage per token, failed attempts per IP.
+    public static final String PAT_CREATE = "pat-create";
+    public static final String PAT_MANAGE = "pat-manage";
+    public static final String PAT_USE = "pat-use";
+    public static final String PAT_AUTH_FAILURE = "pat-auth-failure";
 
-    private final Map<String, Policy> policies = new LinkedHashMap<>(Map.of(
-            LOGIN, new Policy(5, Duration.ofMinutes(1)),
-            REGISTER, new Policy(3, Duration.ofMinutes(10)),
-            VERIFY_EMAIL, new Policy(10, Duration.ofMinutes(1)),
-            RESEND_VERIFICATION, new Policy(5, Duration.ofHours(1)),
-            RESEND_VERIFICATION_PER_EMAIL, new Policy(3, Duration.ofHours(1)),
-            WORKSPACE_CREATE, new Policy(5, Duration.ofHours(1)),
-            WORKSPACE_INVITE, new Policy(20, Duration.ofHours(1)),
-            INVITATION_ACCEPT, new Policy(10, Duration.ofMinutes(1)),
-            WORKSPACE_INVITATION_MANAGE, new Policy(60, Duration.ofMinutes(1))
+    private final Map<String, Policy> policies = new LinkedHashMap<>(Map.ofEntries(
+            Map.entry(LOGIN, new Policy(5, Duration.ofMinutes(1))),
+            Map.entry(REGISTER, new Policy(3, Duration.ofMinutes(10))),
+            Map.entry(VERIFY_EMAIL, new Policy(10, Duration.ofMinutes(1))),
+            Map.entry(RESEND_VERIFICATION, new Policy(5, Duration.ofHours(1))),
+            Map.entry(RESEND_VERIFICATION_PER_EMAIL, new Policy(3, Duration.ofHours(1))),
+            Map.entry(WORKSPACE_CREATE, new Policy(5, Duration.ofHours(1))),
+            Map.entry(WORKSPACE_INVITE, new Policy(20, Duration.ofHours(1))),
+            Map.entry(INVITATION_ACCEPT, new Policy(10, Duration.ofMinutes(1))),
+            Map.entry(WORKSPACE_INVITATION_MANAGE, new Policy(60, Duration.ofMinutes(1))),
+            Map.entry(PAT_CREATE, new Policy(10, Duration.ofHours(1))),
+            Map.entry(PAT_MANAGE, new Policy(60, Duration.ofMinutes(1))),
+            Map.entry(PAT_USE, new Policy(300, Duration.ofMinutes(1))),
+            Map.entry(PAT_AUTH_FAILURE, new Policy(20, Duration.ofMinutes(1)))
     ));
 
     public Map<String, Policy> getPolicies() {

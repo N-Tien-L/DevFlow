@@ -8,7 +8,7 @@ import io.devflow.auth.internal.entity.WorkspaceMemberEntity;
 import io.devflow.auth.internal.entity.WorkspaceRole;
 import io.devflow.auth.internal.exception.InvalidFieldException;
 import io.devflow.auth.internal.exception.ResourceNotFoundException;
-import io.devflow.auth.internal.exception.WorkspaceConflictException;
+import io.devflow.auth.internal.exception.ConflictException;
 import io.devflow.auth.internal.repository.UserRepository;
 import io.devflow.auth.internal.repository.WorkspaceMemberRepository;
 import io.devflow.auth.internal.repository.WorkspaceRepository;
@@ -73,7 +73,7 @@ public class WorkspaceService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
         if (workspaceRepository.countByOwnerId(actorId) >= properties.getMaxOwnedPerUser()) {
             metrics.workspaceCreated("limit_reached");
-            throw new WorkspaceConflictException("WORKSPACE_LIMIT_REACHED",
+            throw new ConflictException("WORKSPACE_LIMIT_REACHED",
                     "You can own at most " + properties.getMaxOwnedPerUser() + " workspaces.");
         }
 

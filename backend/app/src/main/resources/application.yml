@@ -148,6 +148,17 @@ devflow:
       workspace-invite: { capacity: 20, period: 1h }
       invitation-accept: { capacity: 10, period: 1m }
       workspace-invitation-manage: { capacity: 60, period: 1m }
+      # Personal access tokens (T-038): management per user, MCP usage per token, failed attempts per IP.
+      pat-create: { capacity: 10, period: 1h }
+      pat-manage: { capacity: 60, period: 1m }
+      pat-use: { capacity: 300, period: 1m }
+      pat-auth-failure: { capacity: 20, period: 1m }
+  # Personal access tokens for MCP clients (T-038). Revoked/expired tokens are purged by the nightly
+  # auth cleanup job once older than retention.
+  pat:
+    max-active-per-user: ${PAT_MAX_ACTIVE_PER_USER:10}
+    last-used-update-interval: 5m
+    retention: 30d
   # Workspace quotas and invitation lifetime (T-007). Expired/revoked invitations are purged by the
   # nightly verification cleanup job once older than invitation-retention.
   workspace:

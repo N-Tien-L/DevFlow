@@ -255,6 +255,26 @@ Lời mời tham gia workspace, dùng một lần và có hạn. Chỉ lưu SHA-
 
 ---
 
+#### Bảng `personal_access_tokens` *(V9 tạm, T-038)*
+Token cá nhân dài hạn, thu hồi được, cho coding agent (Cursor, Claude Code) dùng **chỉ** trên endpoint MCP (`/sse`, `/mcp/**`). Token gốc (`dfp_` + 12 hex khoá tra cứu + 43 ký tự bí mật) chỉ hiển thị một lần khi tạo; DB chỉ lưu SHA-256.
+
+| Tên cột | Kiểu dữ liệu | Thuộc tính | Mô tả & Ràng buộc |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | ID token |
+| `user_id` | `UUID` | FK, NOT NULL | Chủ sở hữu; tham chiếu `users(id)` ON DELETE CASCADE |
+| `name` | `VARCHAR(100)` | NOT NULL | Tên do người dùng đặt, đã làm sạch, 1-100 ký tự |
+| `token_prefix` | `VARCHAR(16)` | UK, NOT NULL | Khoá tra cứu công khai `dfp_` + 12 hex; hiển thị trong danh sách |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | SHA-256 dạng hex của toàn bộ token, so sánh constant-time |
+| `expires_at` | `TIMESTAMPTZ` | NULL | Hạn dùng tuỳ chọn (1-365 ngày); NULL = không hết hạn |
+| `last_used_at` | `TIMESTAMPTZ` | NULL | Lần dùng MCP gần nhất, ghi tối đa 5 phút/lần cho mỗi token |
+| `revoked_at` | `TIMESTAMPTZ` | NULL | Ghi khi thu hồi; token bị từ chối ngay request kế tiếp |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Thời gian tạo / cập nhật |
+
+- **Chỉ mục:** `idx_personal_access_tokens_user_live` một phần trên `(user_id) WHERE revoked_at IS NULL` (liệt kê theo chủ sở hữu, giới hạn 10 token còn hiệu lực mỗi user).
+- **Lưu giữ:** job dọn dẹp hằng đêm của auth xoá token đã thu hồi hoặc hết hạn quá 30 ngày.
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 Quản lý vòng đời công việc, bảng Kanban, các cột trạng thái, bình luận và nhãn phân loại.
@@ -655,7 +675,8 @@ V3–V5 đã được triển khai cho board audit, task audit và task version.
    - Bảng triển khai: 5 bảng phân hệ Git & CI.
    - Lưu ý: Cột `task_id` trong `git_commits` và `pull_requests` khai báo `UUID NULL` thuần túy.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` bổ sung `users.status`, `users.email_verified_at` và bảng `verification_tokens`.
-   - Lời mời workspace (T-007): `V8__auth_workspace_invitations.sql` (số tạm, cấp lại khi merge) bổ sung bảng `workspace_invitations`.
+   - Lời mời workspace (T-007): `V8__auth_workspace_invitations.sql` bổ sung bảng `workspace_invitations`.
+   - Token cá nhân cho MCP (T-038): `V9__auth_personal_access_tokens.sql` (số tạm, cấp lại khi merge) bổ sung bảng `personal_access_tokens`.
 4. **Giai đoạn 4 (Milestone M4 — Sprint 5):**
    - File: chọn version chưa được sử dụng (V8+) khi triển khai; không tái sử dụng V4–V7.
    - Bảng triển khai: 2 bảng phân hệ AI và 1 bảng phân hệ Notification.

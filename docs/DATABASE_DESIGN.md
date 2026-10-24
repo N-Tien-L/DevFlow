@@ -252,6 +252,26 @@ Single-use, expiring invitations to join a workspace. Only the SHA-256 digest of
 
 ---
 
+#### Table `personal_access_tokens` *(V9 tentative, T-038)*
+Long-lived, revocable tokens used by AI coding agents (Cursor, Claude Code) on the MCP endpoints (`/sse`, `/mcp/**`) only. The raw token (`dfp_` + 12 hex lookup key + 43-char secret) is shown once at creation; only its SHA-256 digest is stored.
+
+| Column Name | Data Type | Attributes | Description & Constraints |
+|---|---|---|---|
+| `id` | `UUID` | PK, NOT NULL, DEFAULT `gen_random_uuid()` | Token ID |
+| `user_id` | `UUID` | FK, NOT NULL | Owner; references `users(id)` ON DELETE CASCADE |
+| `name` | `VARCHAR(100)` | NOT NULL | Owner-chosen label, sanitised, 1-100 visible chars (`ck_personal_access_tokens_name`) |
+| `token_prefix` | `VARCHAR(16)` | UK, NOT NULL | Public lookup key `dfp_` + 12 hex (`uq_personal_access_tokens_prefix`, `ck_personal_access_tokens_prefix`); shown in listings |
+| `token_hash` | `VARCHAR(64)` | UK, NOT NULL | Hex SHA-256 of the whole raw token, compared in constant time (`uq_personal_access_tokens_hash`) |
+| `expires_at` | `TIMESTAMPTZ` | NULL | Optional expiry (1-365 days); NULL never expires; must be after `created_at` (`ck_personal_access_tokens_expiry`) |
+| `last_used_at` | `TIMESTAMPTZ` | NULL | Last MCP use, written at most once per 5 minutes per token |
+| `revoked_at` | `TIMESTAMPTZ` | NULL | Set on revoke; a revoked token is rejected on the next request |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | NOT NULL | Audit timestamps |
+
+- **Indexes:** `idx_personal_access_tokens_user_live` partial on `(user_id) WHERE revoked_at IS NULL` (owner listing, per-user quota of 10 live tokens).
+- **Retention:** the nightly auth cleanup job deletes tokens revoked or expired more than 30 days ago.
+
+---
+
 ### 3.2. Module 2: Board & Task Management (`board`)
 
 #### Table `boards`
@@ -637,7 +657,8 @@ Phase 4 (M4): next unused version (V8+) for AI & Notification (not yet allocated
    - Tables: 5 Git/CI module tables.
    - Requirement: `git_commits.task_id` and `pull_requests.task_id` MUST be declared as `UUID NULL`.
    - Auth hardening (T-004A): `V7__auth_email_verification.sql` adds `users.status`, `users.email_verified_at` and `verification_tokens`.
-   - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` (number tentative, assigned at merge) adds `workspace_invitations`.
+   - Workspace invitations (T-007): `V8__auth_workspace_invitations.sql` adds `workspace_invitations`.
+   - MCP personal access tokens (T-038): `V9__auth_personal_access_tokens.sql` (number tentative, assigned at merge) adds `personal_access_tokens`.
 4. **Phase 4 (Milestone M4 — Sprint 5):**
    - Script: allocate the next unused version (V8+) when implementing AI/Notification; do not reuse V4-V7.
    - Tables: 2 AI module tables and 1 Notification module table.
