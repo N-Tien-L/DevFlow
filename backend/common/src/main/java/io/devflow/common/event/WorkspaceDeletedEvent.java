@@ -9,14 +9,17 @@ import java.util.UUID;
  * columns, tasks and comments (other modules only hold soft references to the workspace id) -
  * ARCHITECTURE.md Section 4.
  *
- * <p>Delivered after the Auth transaction commits; consumers must be idempotent.
+ * <p>Published inside the Auth transaction, so a consumer can record durable work atomically with the deletion;
+ * consumers must be idempotent.
  *
- * @param workspaceId id of the deleted workspace
+ * @param workspaceId     id of the deleted workspace
+ * @param deletedByUserId the account whose deletion removed it; its in-flight writes must finish before cleanup
  */
-public record WorkspaceDeletedEvent(UUID workspaceId, Instant occurredAt) implements DevFlowEvent {
+public record WorkspaceDeletedEvent(UUID workspaceId, UUID deletedByUserId, Instant occurredAt)
+        implements DevFlowEvent {
 
-    public WorkspaceDeletedEvent(UUID workspaceId) {
-        this(workspaceId, Instant.now());
+    public WorkspaceDeletedEvent(UUID workspaceId, UUID deletedByUserId) {
+        this(workspaceId, deletedByUserId, Instant.now());
     }
 
     @Override

@@ -140,8 +140,10 @@ public class AccountDeletionService {
         auditRepository.save(new AccountDeletionAuditEntity(actorId, now, LogMasking.maskIp(clientIp),
                 soleWorkspaces.size()));
         signOutAfterCommit(actorId);
-        // Delivered to the other modules after commit (they listen AFTER_COMMIT).
-        soleWorkspaces.forEach(workspaceId -> eventPublisher.publishEvent(new WorkspaceDeletedEvent(workspaceId, now)));
+        // Published inside this transaction: consumers record durable cleanup work atomically with the deletion
+        // and do the cleanup itself after commit.
+        soleWorkspaces.forEach(workspaceId ->
+                eventPublisher.publishEvent(new WorkspaceDeletedEvent(workspaceId, actorId, now)));
         eventPublisher.publishEvent(new UserAccountDeletedEvent(actorId, now));
 
         metrics.accountDeleted("success");

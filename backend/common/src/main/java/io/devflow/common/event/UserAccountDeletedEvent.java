@@ -9,8 +9,8 @@ import java.util.UUID;
  * Notification rows go with the user through a foreign key cascade; AI service will subscribe once it stores
  * per-user conversation history.
  *
- * <p>Carries the user id only, never PII. Delivered after the Auth transaction commits; consumers must be
- * idempotent because the in-process bus has no delivery guarantee or de-duplication.
+ * <p>Carries the user id only, never PII. Published inside the Auth transaction, so a consumer can record durable
+ * work atomically with the deletion and act on it after commit; consumers must be idempotent.
  *
  * @param userId id of the deleted account; consumers replace references with {@link DeletedUser#ID}
  */
