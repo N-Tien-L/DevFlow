@@ -17,12 +17,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.devflow.auth.internal.security.RateLimiterService;
 import io.devflow.auth.internal.security.StompSessionRegistry;
+import io.devflow.board.internal.AccountCleanupProcessor;
 import io.devflow.board.internal.AccountDeletionEventListener;
+import io.devflow.board.internal.WorkspaceMembershipPermissionService;
 import io.devflow.common.event.DeletedUser;
 import io.devflow.common.event.UserAccountDeletedEvent;
 import io.devflow.common.event.WorkspaceDeletedEvent;
 import io.devflow.common.security.AuthenticatedActor;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,14 +49,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.socket.CloseStatus;
@@ -73,7 +81,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "spring.ai.model.image=none",
         "spring.ai.model.moderation=none",
         "spring.ai.model.audio.speech=none",
-        "spring.ai.model.audio.transcription=none"
+        "spring.ai.model.audio.transcription=none",
+        // Retries are driven explicitly by the tests.
+        "devflow.board.account-cleanup.retry-delay=PT1H"
 })
 @AutoConfigureMockMvc
 @RecordApplicationEvents
@@ -133,6 +143,18 @@ class AccountDeletionApiIntegrationTest {
     private AccountDeletionEventListener boardListener;
 
     @Autowired
+    private AccountCleanupProcessor cleanupProcessor;
+
+    @Autowired
+    private WorkspaceMembershipPermissionService membershipService;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @MockitoBean
+    private JavaMailSender mailSender;
+
+    @Autowired
     private MeterRegistry meterRegistry;
 
     @Autowired
@@ -143,6 +165,7 @@ class AccountDeletionApiIntegrationTest {
     @BeforeEach
     void setUp() {
         rateLimiterService.clearAll();
+        when(mailSender.createMimeMessage()).thenAnswer(inv -> new MimeMessage((Session) null));
         if (passwordHash == null) {
             passwordHash = passwordEncoder.encode(PASSWORD);
         }
@@ -352,17 +375,119 @@ class AccountDeletionApiIntegrationTest {
         BoardRows solo = boardRows(soleWorkspace, user.id(), user.id());
         String access = login(user).get("accessToken").asText();
         deleteAccount(access, Map.of("password", PASSWORD)).andExpect(status().isNoContent());
+        assertThat(cleanupJobs(user.id(), soleWorkspace)).isZero();
         Map<String, Object> taskAfterFirst = jdbc.queryForMap("SELECT * FROM tasks WHERE id = ?", team.taskId());
+        double failedBefore = counter("devflow.board.account_cleanup", "failed", "kind", "user");
 
-        // Re-delivery (or a manual replay) changes nothing and does not fail.
-        boardListener.on(new UserAccountDeletedEvent(user.id(), Instant.now()));
-        boardListener.on(new WorkspaceDeletedEvent(soleWorkspace, Instant.now()));
+        // Re-delivery of both events records the jobs again and re-runs them: nothing changes, nothing fails.
+        UserAccountDeletedEvent userEvent = new UserAccountDeletedEvent(user.id(), Instant.now());
+        WorkspaceDeletedEvent workspaceEvent = new WorkspaceDeletedEvent(soleWorkspace, user.id(), Instant.now());
+        boardListener.record(userEvent);
+        boardListener.record(workspaceEvent);
+        boardListener.record(userEvent);
+        assertThat(cleanupJobs(user.id(), soleWorkspace)).isEqualTo(2);
+        boardListener.on(userEvent);
+        boardListener.on(workspaceEvent);
 
+        assertThat(cleanupJobs(user.id(), soleWorkspace)).isZero();
         assertThat(jdbc.queryForMap("SELECT * FROM tasks WHERE id = ?", team.taskId())).isEqualTo(taskAfterFirst);
         assertThat(jdbc.queryForObject("SELECT author_id FROM task_comments WHERE id = ?", UUID.class,
                 team.commentId())).isEqualTo(DeletedUser.ID);
         assertThat(countWhere("boards", "id", solo.boardId())).isZero();
-        assertThat(counter("devflow.board.account_cleanup", "failed", "kind", "user")).isZero();
+        assertThat(counter("devflow.board.account_cleanup", "failed", "kind", "user")).isEqualTo(failedBefore);
+    }
+
+    @Test
+    void failedCleanupIsKeptDurablyAndRetriedUntilItSucceeds() throws Exception {
+        TestUser user = user("retried");
+        TestUser teammate = user("retry-teammate");
+        UUID teamWorkspace = workspace(teammate, "Retry team");
+        member(teamWorkspace, user, "MEMBER");
+        BoardRows team = boardRows(teamWorkspace, user.id(), user.id());
+        String access = login(user).get("accessToken").asText();
+        double failedBefore = counter("devflow.board.account_cleanup", "failed", "kind", "user");
+        double successBefore = counter("devflow.board.account_cleanup", "success", "kind", "user");
+        // A real database failure on the first attempt: anonymising this comment is refused.
+        jdbc.execute("CREATE FUNCTION t009_refuse_cleanup() RETURNS trigger LANGUAGE plpgsql AS "
+                + "$$ BEGIN RAISE EXCEPTION 'cleanup refused for test'; END $$");
+        jdbc.execute("CREATE TRIGGER t009_refuse_cleanup BEFORE UPDATE ON task_comments FOR EACH ROW "
+                + "WHEN (OLD.id = '" + team.commentId() + "') EXECUTE FUNCTION t009_refuse_cleanup()");
+        try {
+            // The account deletion itself still succeeds; Board's work is kept for later.
+            deleteAccount(access, Map.of("password", PASSWORD)).andExpect(status().isNoContent());
+            Map<String, Object> job = jdbc.queryForMap(
+                    "SELECT * FROM board_account_cleanup_jobs WHERE kind = 'USER' AND subject_id = ?", user.id());
+            assertThat((Integer) job.get("attempts")).isGreaterThanOrEqualTo(1);
+            assertThat(job.get("last_error")).isNotNull();
+            assertThat(((Timestamp) job.get("next_attempt_at")).toInstant()).isAfter(Instant.now());
+            assertThat(jdbc.queryForObject("SELECT assignee_id FROM tasks WHERE id = ?", UUID.class, team.taskId()))
+                    .as("rolled back with the failed attempt").isEqualTo(user.id());
+            assertThat(counter("devflow.board.account_cleanup", "failed", "kind", "user"))
+                    .isGreaterThan(failedBefore);
+        } finally {
+            jdbc.execute("DROP TRIGGER t009_refuse_cleanup ON task_comments");
+            jdbc.execute("DROP FUNCTION t009_refuse_cleanup()");
+        }
+
+        // Not due yet: a retry pass leaves it alone. Once due, the retry completes it.
+        cleanupProcessor.retryDue();
+        assertThat(cleanupJobs(user.id(), null)).isEqualTo(1);
+        jdbc.update("UPDATE board_account_cleanup_jobs SET next_attempt_at = now() - interval '1 hour' WHERE subject_id = ?", user.id());
+        cleanupProcessor.retryDue();
+
+        assertThat(cleanupJobs(user.id(), null)).isZero();
+        assertThat(jdbc.queryForObject("SELECT assignee_id FROM tasks WHERE id = ?", UUID.class, team.taskId()))
+                .isNull();
+        assertThat(jdbc.queryForObject("SELECT author_id FROM task_comments WHERE id = ?", UUID.class,
+                team.commentId())).isEqualTo(DeletedUser.ID);
+        assertThat(counter("devflow.board.account_cleanup", "success", "kind", "user")).isEqualTo(successBefore + 1);
+    }
+
+    @Test
+    void boardWriteAlreadyPastItsMembershipCheckIsAnonymisedToo() throws Exception {
+        TestUser user = user("late-writer");
+        TestUser teammate = user("late-teammate");
+        UUID teamWorkspace = workspace(teammate, "Late team");
+        member(teamWorkspace, user, "MEMBER");
+        BoardRows team = boardRows(teamWorkspace, teammate.id(), teammate.id());
+        String access = login(user).get("accessToken").asText();
+        CountDownLatch checked = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        UUID lateComment = UUID.randomUUID();
+        UUID lateAudit = UUID.randomUUID();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            // A Board write (comment + audit) that passes its membership check, then stalls before inserting.
+            Future<?> writer = pool.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                assertThat(membershipService.isMember(user.id(), teamWorkspace)).isTrue();
+                checked.countDown();
+                await(resume);
+                jdbc.update("INSERT INTO task_comments(id, task_id, author_id, content) VALUES (?, ?, ?, 'late')",
+                        lateComment, team.taskId(), user.id());
+                jdbc.update("INSERT INTO board_audit_events(id, actor_id, action, resource_type, resource_id, "
+                        + "workspace_id, correlation_id, client_ip, changed_fields) "
+                        + "VALUES (?, ?, 'UPDATE', 'TASK', ?, ?, ?, '203.0.113.99', 'comments')",
+                        lateAudit, user.id(), team.taskId(), teamWorkspace, UUID.randomUUID());
+            }));
+            await(checked);
+            // Meanwhile the account is deleted; Board's cleanup must wait for the write instead of running first.
+            Future<Integer> deletion = pool.submit(() -> statusOf(deleteAccount(access, Map.of("password", PASSWORD))));
+            awaitAdvisoryLockWaiter();
+            resume.countDown();
+            writer.get(30, TimeUnit.SECONDS);
+            assertThat(deletion.get(30, TimeUnit.SECONDS)).isEqualTo(204);
+        } finally {
+            resume.countDown();
+            pool.shutdownNow();
+        }
+
+        assertThat(jdbc.queryForObject("SELECT author_id FROM task_comments WHERE id = ?", UUID.class, lateComment))
+                .isEqualTo(DeletedUser.ID);
+        Map<String, Object> audit = jdbc.queryForMap("SELECT actor_id, client_ip FROM board_audit_events WHERE id = ?",
+                lateAudit);
+        assertThat(audit.get("actor_id")).isEqualTo(DeletedUser.ID);
+        assertThat(audit.get("client_ip")).isNull();
+        assertThat(cleanupJobs(user.id(), null)).isZero();
     }
 
     // --- Concurrency ---
@@ -394,6 +519,70 @@ class AccountDeletionApiIntegrationTest {
                 assertThat(statuses).as("round %d", round).containsExactly(409, 200);
                 assertThat(userCount(owner.id())).isEqualTo(1);
             }
+        }
+    }
+
+    @Test
+    void concurrentOwnershipTransfersToDifferentMembersLetExactlyOneWin() throws Exception {
+        for (int round = 0; round < 8; round++) {
+            TestUser owner = user("transfer-owner-" + round);
+            TestUser first = user("transfer-b-" + round);
+            TestUser second = user("transfer-c-" + round);
+            UUID workspace = workspace(owner, "Transfer " + round);
+            member(workspace, first, "MEMBER");
+            member(workspace, second, "MEMBER");
+            String ownerAccess = login(owner).get("accessToken").asText();
+
+            List<Integer> statuses = concurrently(List.of(
+                    () -> statusOf(transfer(ownerAccess, workspace, first.id())),
+                    () -> statusOf(transfer(ownerAccess, workspace, second.id()))));
+
+            assertThat(statuses).as("round %d", round).containsExactlyInAnyOrder(200, 403);
+            UUID winner = statuses.get(0) == 200 ? first.id() : second.id();
+            assertThat(jdbc.queryForObject("SELECT owner_id FROM workspaces WHERE id = ?", UUID.class, workspace))
+                    .isEqualTo(winner);
+            assertThat(jdbc.queryForList("SELECT user_id FROM workspace_members WHERE workspace_id = ? "
+                    + "AND role = 'OWNER'", UUID.class, workspace)).containsExactly(winner);
+            assertThat(role(workspace, owner.id())).isEqualTo("ADMIN");
+        }
+    }
+
+    @Test
+    void deletionDuringTheSameOwnersInvitationNeverDeadlocks() throws Exception {
+        // Holds an invitation request inside its transaction, just before the insert (whose foreign key check
+        // locks the inviter's user row). Deletion then arrives in the middle of it: with workspace-before-user
+        // order in invite, each request waited for the other's lock and PostgreSQL aborted one (500).
+        jdbc.execute("CREATE FUNCTION t009_slow_invite() RETURNS trigger LANGUAGE plpgsql AS "
+                + "$$ BEGIN PERFORM pg_sleep(0.5); RETURN NEW; END $$");
+        jdbc.execute("CREATE TRIGGER t009_slow_invite BEFORE INSERT ON workspace_invitations FOR EACH ROW "
+                + "WHEN (NEW.email LIKE 'slow-invite-%') EXECUTE FUNCTION t009_slow_invite()");
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            for (int round = 0; round < 3; round++) {
+                TestUser owner = user("invite-race-" + round);
+                UUID workspace = workspace(owner, "Invite race " + round);
+                String ownerAccess = login(owner).get("accessToken").asText();
+                String invitee = "slow-invite-" + round + "-" + UUID.randomUUID() + "@devflow.test";
+
+                Future<Integer> invite = pool.submit(() -> statusOf(mockMvc.perform(
+                        post("/api/v1/auth/workspaces/{id}/invitations", workspace)
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerAccess)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(json(Map.of("email", invitee, "role", "MEMBER"))))));
+                awaitSessionSleeping();
+                int deletion = statusOf(deleteAccount(ownerAccess, Map.of("password", PASSWORD)));
+
+                assertThat(invite.get(30, TimeUnit.SECONDS)).as("invite, round %d", round).isEqualTo(201);
+                assertThat(deletion).as("delete, round %d", round).isEqualTo(204);
+                // The pending invitation does not make the workspace shared; it went with it.
+                assertThat(countWhere("workspaces", "id", workspace)).isZero();
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM workspace_invitations WHERE email = ?",
+                        Long.class, invitee)).isZero();
+            }
+        } finally {
+            pool.shutdownNow();
+            jdbc.execute("DROP TRIGGER t009_slow_invite ON workspace_invitations");
+            jdbc.execute("DROP FUNCTION t009_slow_invite()");
         }
     }
 
@@ -497,6 +686,49 @@ class AccountDeletionApiIntegrationTest {
             }
         }
         return hits;
+    }
+
+    /** Pending Board cleanup jobs for this user and, when given, this workspace. */
+    private long cleanupJobs(UUID userId, UUID workspaceId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM board_account_cleanup_jobs WHERE subject_id IN (?, ?)",
+                Long.class, userId, workspaceId == null ? userId : workspaceId);
+    }
+
+    /** Waits until some session is blocked on an advisory lock (Board's cleanup waiting for a write). */
+    private void awaitAdvisoryLockWaiter() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < deadline) {
+            Long waiting = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", Long.class);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Board cleanup never waited for the in-flight write");
+    }
+
+    /** Waits until some session is inside {@code pg_sleep} (the held invitation request). */
+    private void awaitSessionSleeping() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < deadline) {
+            Long sleeping = jdbc.queryForObject("SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event = 'PgSleep'",
+                    Long.class);
+            if (sleeping != null && sleeping > 0) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("The invitation request never reached its insert");
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertThat(latch.await(30, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     private long userCount(UUID id) {
