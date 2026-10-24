@@ -17,20 +17,18 @@ spring:
     locations: classpath:db/migration
   ai:
     model:
-      # "none" keeps the app bootable without a provider key. Set to "openai" and
-      # provide OPENAI_API_KEY to enable the LLM client in the AI service module.
-      chat: ${AI_MODEL_CHAT:none}
+      # Always "none": the AI module builds its own ChatModel (OpenAI or a deterministic
+      # fallback) from devflow.ai.* so it controls timeouts and retries (T-030).
+      chat: none
       # The OpenAI starter enables every supported model type by default. DevFlow
       # currently uses chat only, so keep the unused clients disabled; otherwise
-      # they require an API key even while chat is set to "none".
+      # they require an API key.
       embedding: none
       image: none
       moderation: none
       audio:
         speech: none
         transcription: none
-    openai:
-      api-key: ${OPENAI_API_KEY:}
     mcp:
       server:
         name: devflow
@@ -76,6 +74,8 @@ management:
 logging:
   level:
     root: info
+    # Spring AI logs the full prompt at WARN when OpenAI returns no choices; prompts may hold user data.
+    org.springframework.ai.openai.OpenAiChatModel: error
 
 devflow:
   websocket:
@@ -112,6 +112,29 @@ devflow:
       mx-check-enabled: ${REGISTRATION_MX_CHECK_ENABLED:true}
       mx-lookup-timeout: 2s
       mx-cache-ttl: 1h
+  # LLM client (T-030). AI_MODEL_CHAT=none or an empty OPENAI_API_KEY selects the deterministic
+  # fallback model, so the app boots and CI runs without a key. Retry covers only transient failures
+  # (timeouts, 408/429/5xx); worst case per call is max-attempts x read-timeout plus backoff.
+  ai:
+    chat:
+      model: ${AI_MODEL_CHAT:gpt-4o-mini}
+      max-tokens: ${AI_MAX_TOKENS:1024}
+      temperature: 0.2
+      max-prompt-chars: 16000
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      connect-timeout: 5s
+      read-timeout: 20s
+    resilience:
+      max-attempts: 3
+      initial-backoff: 500ms
+      backoff-multiplier: 2
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 30s
+      permitted-number-of-calls-in-half-open-state: 3
   # Token-bucket policies per client key (capacity requests per period).
   rate-limit:
     policies:
