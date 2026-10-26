@@ -29,6 +29,11 @@ public class StompAuthenticationConfiguration implements WebSocketMessageBrokerC
         registration.interceptors(authenticationInterceptor);
     }
 
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(authenticationInterceptor);
+    }
+
     /**
      * Tracks open sessions so a password reset can close them.
      */
