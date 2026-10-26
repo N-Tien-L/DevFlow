@@ -7,19 +7,27 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
-/** Calls the Auth-owned membership check through the synchronous typed event contract. */
+/**
+ * Calls the Auth-owned membership check through the synchronous typed event contract.
+ *
+ * <p>Takes the checked user's {@link UserWriteLock} shared first and keeps it for the rest of the transaction, so
+ * an account-deletion cleanup waits for Board writes that already passed this check (T-009).
+ */
 @Service
 public class WorkspaceMembershipPermissionService {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceMembershipPermissionService.class);
 
     private final ApplicationEventPublisher eventPublisher;
+    private final UserWriteLock userWriteLock;
 
-    public WorkspaceMembershipPermissionService(ApplicationEventPublisher eventPublisher) {
+    public WorkspaceMembershipPermissionService(ApplicationEventPublisher eventPublisher, UserWriteLock userWriteLock) {
         this.eventPublisher = eventPublisher;
+        this.userWriteLock = userWriteLock;
     }
 
     public boolean isMember(UUID userId, UUID workspaceId) {
+        userWriteLock.lockShared(userId);
         UUID correlationId = BoardRequestContext.correlationId();
         WorkspaceMembershipCheckRequestedEvent event =
                 new WorkspaceMembershipCheckRequestedEvent(correlationId, userId, workspaceId);

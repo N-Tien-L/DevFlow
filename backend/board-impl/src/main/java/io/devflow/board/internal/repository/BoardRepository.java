@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -33,4 +34,12 @@ public interface BoardRepository extends JpaRepository<BoardEntity, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select board from BoardEntity board where board.id = :boardId")
     Optional<BoardEntity> findByIdForUpdate(@Param("boardId") UUID boardId);
+
+    /**
+     * Deletes every board of a deleted workspace (T-009); columns, tasks, comments and tags go with them through
+     * {@code ON DELETE CASCADE}.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from BoardEntity board where board.workspaceId = :workspaceId")
+    int deleteByWorkspaceId(@Param("workspaceId") UUID workspaceId);
 }

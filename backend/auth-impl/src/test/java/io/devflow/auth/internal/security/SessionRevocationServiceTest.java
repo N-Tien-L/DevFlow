@@ -29,11 +29,11 @@ class SessionRevocationServiceTest {
     }
 
     @Test
-    void unknownUserIsLeftToTheCaller() {
+    void tokensOfADeletedAccountAreRevoked() {
         UUID userId = UUID.randomUUID();
         when(userRepository.findTokenVersion(userId)).thenReturn(Optional.empty());
 
-        assertThat(service.isRevoked(userId, 0)).isFalse();
+        assertThat(service.isRevoked(userId, 0)).isTrue();
     }
 
     @Test
