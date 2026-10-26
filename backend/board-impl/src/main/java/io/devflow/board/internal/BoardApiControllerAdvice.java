@@ -14,10 +14,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -78,8 +80,7 @@ public class BoardApiControllerAdvice {
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<ProblemDetail> handleUnsupportedMediaType(
             HttpMediaTypeNotSupportedException exception, HttpServletRequest request) {
-        return response(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_MEDIA_TYPE",
-                "Content-Type must be application/json.", request);
+        return frameworkResponse(exception, request);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -99,6 +100,9 @@ public class BoardApiControllerAdvice {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleUnexpected(Exception exception, HttpServletRequest request) {
+        if (exception instanceof ErrorResponse error) {
+            return frameworkResponse(error, request);
+        }
         log.error("Unexpected Board API error; correlationId={}, exceptionType={}",
                 BoardRequestContext.correlationId(), exception.getClass().getSimpleName());
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
@@ -111,14 +115,35 @@ public class BoardApiControllerAdvice {
     }
 
     private static ProblemDetail problem(
-            HttpStatus status, String code, String detail, HttpServletRequest request) {
+            HttpStatusCode status, String code, String detail, HttpServletRequest request) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setType(URI.create("https://devflow.local/problems/" + code.toLowerCase().replace('_', '-')));
-        problem.setTitle(status.getReasonPhrase());
+        HttpStatus known = HttpStatus.resolve(status.value());
+        problem.setTitle(known == null ? "Error" : known.getReasonPhrase());
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("code", code);
         problem.setProperty("correlationId", BoardRequestContext.correlationId());
         problem.setProperty("timestamp", Instant.now().toString());
         return problem;
+    }
+
+    /** Preserve Spring's request status/headers without echoing its exception message or body. */
+    private static ResponseEntity<ProblemDetail> frameworkResponse(ErrorResponse error, HttpServletRequest request) {
+        HttpStatusCode status = error.getStatusCode();
+        HttpStatus known = HttpStatus.resolve(status.value());
+        if (status.is5xxServerError()) {
+            log.error("Board framework request failed status={} exceptionType={}", status.value(),
+                    error.getClass().getSimpleName());
+        }
+        String detail = switch (status.value()) {
+            case 404 -> "The requested resource does not exist.";
+            case 405 -> "The request method is not supported for this resource.";
+            case 406 -> "The requested response media type is not supported.";
+            case 415 -> "The request content type is not supported.";
+            default -> status.is4xxClientError() ? "The request is invalid."
+                    : "An unexpected internal error occurred. Please try again later.";
+        };
+        return ResponseEntity.status(status).headers(error.getHeaders()).body(
+                problem(status, known == null ? "REQUEST_FAILED" : known.name(), detail, request));
     }
 }
