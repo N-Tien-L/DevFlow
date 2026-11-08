@@ -7,6 +7,8 @@ package io.devflow.common.event;
  * (ARCHITECTURE.md Section 8).
  */
 public final class EventTypes {
+    public static final String TASK_REFERENCES_RESOLVE_REQUESTED = "task.references_resolve_requested";
+    public static final String TASK_REFERENCES_REMOVED = "task.references_removed";
 
     /** Synchronous Auth decision request; publisher must fail closed without exactly one response. */
     public static final String WORKSPACE_MEMBERSHIP_CHECK_REQUESTED = "workspace.membership_check_requested";

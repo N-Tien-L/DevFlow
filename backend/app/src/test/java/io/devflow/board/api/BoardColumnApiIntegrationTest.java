@@ -161,6 +161,7 @@ class BoardColumnApiIntegrationTest {
                         .contentType("application/json")
                         .content(json(Map.of("title", "Created for event", "description", "safe description"))))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.taskKey").value("T-001"))
                 .andReturn();
         UUID taskId = UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString())
                 .get("id").asText());
@@ -339,12 +340,40 @@ class BoardColumnApiIntegrationTest {
         verify(notificationEventListeners, never()).on(org.mockito.ArgumentMatchers.any(TaskCreatedEvent.class));
     }
 
+    @Test
+    void returnsExplicitTaskKeyExhaustionWithoutCreatingTask() throws Exception {
+        UUID board = createBoard("Exhausted key namespace", memberId);
+        UUID column = createColumn(board, "To do", "TODO");
+        jdbc.update("INSERT INTO board_task_key_counters(workspace_id,last_number) VALUES (?,9999)",workspaceId);
+        mockMvc.perform(post("/api/v1/columns/{columnId}/tasks",column)
+                        .header("Authorization",bearer(memberId)).contentType("application/json")
+                        .content(json(Map.of("title","Cannot allocate"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("TASK_KEY_RANGE_EXHAUSTED"));
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("SELECT count(*) FROM tasks WHERE column_id=?",Integer.class,column)).isZero();
+    }
+
+    private UUID insertGitLink(UUID taskId) {
+        UUID repo = jdbc.queryForObject("INSERT INTO repositories(workspace_id,provider,remote_repo_id,name,repository_url,webhook_secret_ref) "
+                + "VALUES (?,'GITHUB',?,'fixture','https://github.com/test/repo','test:cleanup') RETURNING id",
+                UUID.class, workspaceId, UUID.randomUUID().toString());
+        UUID commit = jdbc.queryForObject("INSERT INTO git_commits(repository_id,sha,message,task_id,committed_at) "
+                + "VALUES (?,?,'fixture',?,CURRENT_TIMESTAMP) RETURNING id", UUID.class, repo, "f".repeat(40), taskId);
+        jdbc.update("INSERT INTO git_commit_task_links(commit_id,task_id,source_kind) VALUES (?,?,'MESSAGE')",commit,taskId);
+        return commit;
+    }
+
+    private void assertGitLinkRemoved(UUID commit) {
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("SELECT count(*) FROM git_commit_task_links WHERE commit_id=?",Integer.class,commit)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("SELECT task_id FROM git_commits WHERE id=?",UUID.class,commit)).isNull();
+    }
+
     @AfterEach
     void removeWorkspaceFixtures() {
         if (workspaceId == null) {
             return;
         }
         jdbc.update("DELETE FROM board_audit_events WHERE workspace_id IN (?, ?)", workspaceId, otherWorkspaceId);
+        jdbc.update("DELETE FROM repositories WHERE workspace_id IN (?, ?)", workspaceId, otherWorkspaceId);
         jdbc.update("DELETE FROM boards WHERE workspace_id IN (?, ?)", workspaceId, otherWorkspaceId);
         jdbc.update("DELETE FROM workspaces WHERE id IN (?, ?)", workspaceId, otherWorkspaceId);
         jdbc.update("DELETE FROM users WHERE id IN (?, ?)", memberId, outsiderId);
@@ -526,8 +555,10 @@ class BoardColumnApiIntegrationTest {
                 .andExpect(jsonPath("$.name").value("Renamed lifecycle"))
                 .andExpect(jsonPath("$.description").value("safe"));
 
+        UUID linkedCommit = insertGitLink(taskId);
         mockMvc.perform(delete("/api/v1/boards/{boardId}", boardId).header("Authorization", bearer(memberId)))
                 .andExpect(status().isNoContent());
+        assertGitLinkRemoved(linkedCommit);
         org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM task_comments WHERE id = ?", Long.class, commentId)).isZero();
         org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
@@ -706,8 +737,10 @@ class BoardColumnApiIntegrationTest {
         jdbc.update("INSERT INTO task_tag_mappings(task_id, tag_id) VALUES (?, ?)", first, tagId);
         jdbc.update("INSERT INTO task_tag_mappings(task_id, tag_id) VALUES (?, ?)", survivor, tagId);
 
+        UUID linkedCommit = insertGitLink(first);
         mockMvc.perform(delete("/api/v1/tasks/{taskId}", first).header("Authorization", bearer(memberId)))
                 .andExpect(status().isNoContent());
+        assertGitLinkRemoved(linkedCommit);
         mockMvc.perform(get("/api/v1/tasks/{taskId}", first).header("Authorization", bearer(memberId)))
                 .andExpect(status().isNotFound());
 

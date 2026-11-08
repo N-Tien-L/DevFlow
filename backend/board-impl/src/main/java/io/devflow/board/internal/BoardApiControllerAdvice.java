@@ -86,6 +86,13 @@ public class BoardApiControllerAdvice {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ProblemDetail> handleConstraintFailure(
             DataIntegrityViolationException exception, HttpServletRequest request) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLException sql && "23514".equals(sql.getSQLState())
+                    && sql.getMessage() != null && sql.getMessage().contains("TASK_KEY_RANGE_EXHAUSTED")) {
+                return response(HttpStatus.CONFLICT, "TASK_KEY_RANGE_EXHAUSTED",
+                        "This workspace has allocated all 9999 task keys.", request);
+            }
+        }
         return response(HttpStatus.CONFLICT, "DATA_CONFLICT",
                 "The requested change conflicts with the current board data.", request);
     }
