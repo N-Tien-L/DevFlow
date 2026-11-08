@@ -58,6 +58,9 @@ public class RequestBodySizeLimitFilter extends OncePerRequestFilter {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         return !BODY_METHODS.contains(request.getMethod())
                 || !path.startsWith("/api/")
+                // This exact callback bounds raw/chunked bytes after its in-flight/quota guards.
+                // The ordinary API's 64 KiB limit would otherwise reject valid 64 KiB commit messages plus JSON.
+                || ("POST".equals(request.getMethod()) && "/api/v1/gitci/webhook/github".equals(path))
                 || excludedPathPrefixes.stream().anyMatch(path::startsWith);
     }
 

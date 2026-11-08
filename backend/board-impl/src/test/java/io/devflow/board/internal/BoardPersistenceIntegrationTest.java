@@ -140,9 +140,11 @@ class BoardPersistenceIntegrationTest {
     @Test
     void storesNullableFieldsAndAllowsSoftReferencesToAuthIds() {
         TaskEntity task = taskRepository.saveAndFlush(new TaskEntity(todo, "No optional values", 2));
+        assertThat(task.getTaskKey()).matches("T-[0-9]{3,4}");
         entityManager.clear();
 
         TaskEntity reloaded = taskRepository.findById(task.getId()).orElseThrow();
+        assertThat(reloaded.getTaskKey()).isEqualTo(task.getTaskKey());
         assertThat(reloaded.getDescription()).isNull();
         assertThat(reloaded.getAssigneeId()).isNull();
         assertThat(reloaded.getDueDate()).isNull();
