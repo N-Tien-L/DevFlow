@@ -52,6 +52,7 @@ public class TaskManagementService {
     private final BoardAuditService auditService;
     private final TaskEventPublisher taskEventPublisher;
     private final BoardRealtimePublisher realtimePublisher;
+    private final TaskReferenceLifecycle taskReferences;
     private final int maxTasksPerColumn;
 
     public TaskManagementService(
@@ -63,10 +64,12 @@ public class TaskManagementService {
             BoardAuditService auditService,
             TaskEventPublisher taskEventPublisher,
             BoardRealtimePublisher realtimePublisher,
+            TaskReferenceLifecycle taskReferences,
             @Value("${devflow.board.tasks.max-per-column:1000}") int maxTasksPerColumn) {
         if (maxTasksPerColumn < 1) {
             throw new IllegalArgumentException("Maximum tasks per column must be positive");
         }
+        this.taskReferences = taskReferences;
         this.taskRepository = taskRepository;
         this.columnRepository = columnRepository;
         this.boardRepository = boardRepository;
@@ -228,6 +231,7 @@ public class TaskManagementService {
         int fromPosition = task.getPosition();
         List<TaskEntity> tasks = taskRepository.findByColumn_IdOrderByPositionAscIdAsc(columnId);
         task.getColumn().removeTask(task);
+        taskReferences.removeTask(taskId);
         taskRepository.delete(task);
         tasks.removeIf(candidate -> candidate.getId().equals(taskId));
         normalizePositions(tasks);
@@ -425,7 +429,7 @@ public class TaskManagementService {
     private static TaskResponse toResponse(TaskEntity task, BoardEntity board) {
         ColumnEntity column = task.getColumn();
         return new TaskResponse(
-                task.getId(), column.getId(), board.getId(), board.getWorkspaceId(), task.getTitle(),
+                task.getId(), task.getTaskKey(), column.getId(), board.getId(), board.getWorkspaceId(), task.getTitle(),
                 task.getDescription(), toApiPriority(task.getPriority()), task.getAssigneeId(), task.getDueDate(),
                 task.getPosition(), ColumnStatusCategory.valueOf(column.getStatusCategory().name()),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getVersion());
@@ -434,7 +438,7 @@ public class TaskManagementService {
     private static TaskListItem toListItem(TaskEntity task) {
         ColumnEntity column = task.getColumn();
         return new TaskListItem(
-                task.getId(), column.getId(), task.getTitle(), toApiPriority(task.getPriority()),
+                task.getId(), task.getTaskKey(), column.getId(), task.getTitle(), toApiPriority(task.getPriority()),
                 task.getAssigneeId(), task.getDueDate(), task.getPosition(),
                 ColumnStatusCategory.valueOf(column.getStatusCategory().name()), task.getUpdatedAt());
     }

@@ -415,7 +415,7 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
     className="m-auto max-h-[min(92dvh,900px)] w-[min(900px,calc(100vw-24px))] max-w-none overflow-hidden rounded-2xl bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/55">
     <div className="flex max-h-[92dvh] flex-col">
       <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-7">
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Chi tiết công việc</p><h2 id="task-detail-title" className="mt-1 text-lg font-bold">{task?.title ?? 'Task'}</h2></div>
+        <div><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Chi tiết công việc{task?.taskKey ? ` · ${task.taskKey}` : ''}</p><h2 id="task-detail-title" className="mt-1 text-lg font-bold">{task?.title ?? 'Task'}</h2></div>
         <button type="button" onClick={requestClose} className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Đóng cửa sổ chi tiết">×</button>
       </header>
 
