@@ -1,0 +1,313 @@
+{
+  "date": "2026-11-09",
+  "timezone": "Asia/Saigon",
+  "baseline_commit": "191d6a5",
+  "source": "uncommitted feature/T-023-git-domain-events working tree",
+  "environment": "isolated PostgreSQL 17 + two Spring Boot backend processes",
+  "input": "synthetic HMAC-signed HTTP, not GitHub deliveries",
+  "github_mutations_performed": false,
+  "public_tunnel_stopped": true,
+  "jar_sha256": "b3ead8fd3369459444aa1a5d9b6b2f6c18e76a569a957c1f9d25ee5b77616c87",
+  "snapshots": [
+    {
+      "step": "paused",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PENDING",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PENDING",
+          "count": 1
+        }
+      ],
+      "notifications": 0,
+      "notification_types": [],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "OPEN"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "after-restart-paused",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PENDING",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PENDING",
+          "count": 1
+        }
+      ],
+      "notifications": 0,
+      "notification_types": [],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "OPEN"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "recovered",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PUBLISHED",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PUBLISHED",
+          "count": 1
+        }
+      ],
+      "notifications": 1,
+      "notification_types": [
+        {
+          "type": "git.pr_opened",
+          "count": 1
+        }
+      ],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "OPEN"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "lifecycle",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PUBLISHED",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_merged",
+          "status": "PUBLISHED",
+          "count": 1
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PUBLISHED",
+          "count": 2
+        }
+      ],
+      "notifications": 3,
+      "notification_types": [
+        {
+          "type": "git.pr_merged",
+          "count": 1
+        },
+        {
+          "type": "git.pr_opened",
+          "count": 2
+        }
+      ],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "MERGED"
+        },
+        {
+          "pr_number": 24,
+          "status": "CLOSED"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "replay",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PUBLISHED",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_merged",
+          "status": "PUBLISHED",
+          "count": 1
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PUBLISHED",
+          "count": 2
+        }
+      ],
+      "notifications": 3,
+      "notification_types": [
+        {
+          "type": "git.pr_merged",
+          "count": 1
+        },
+        {
+          "type": "git.pr_opened",
+          "count": 2
+        }
+      ],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "MERGED"
+        },
+        {
+          "pr_number": 24,
+          "status": "CLOSED"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "two-replicas",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PENDING",
+          "count": 1
+        },
+        {
+          "event_type": "git.commit_linked",
+          "status": "PUBLISHED",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_merged",
+          "status": "PENDING",
+          "count": 1
+        },
+        {
+          "event_type": "git.pr_merged",
+          "status": "PUBLISHED",
+          "count": 1
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PUBLISHED",
+          "count": 2
+        }
+      ],
+      "notifications": 3,
+      "notification_types": [
+        {
+          "type": "git.pr_merged",
+          "count": 1
+        },
+        {
+          "type": "git.pr_opened",
+          "count": 2
+        }
+      ],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "MERGED"
+        },
+        {
+          "pr_number": 24,
+          "status": "CLOSED"
+        },
+        {
+          "pr_number": 25,
+          "status": "MERGED"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    },
+    {
+      "step": "two-replicas-published",
+      "outbox": [
+        {
+          "event_type": "git.commit_linked",
+          "status": "PUBLISHED",
+          "count": 3
+        },
+        {
+          "event_type": "git.pr_merged",
+          "status": "PUBLISHED",
+          "count": 2
+        },
+        {
+          "event_type": "git.pr_opened",
+          "status": "PUBLISHED",
+          "count": 2
+        }
+      ],
+      "notifications": 4,
+      "notification_types": [
+        {
+          "type": "git.pr_merged",
+          "count": 2
+        },
+        {
+          "type": "git.pr_opened",
+          "count": 2
+        }
+      ],
+      "prs": [
+        {
+          "pr_number": 23,
+          "status": "MERGED"
+        },
+        {
+          "pr_number": 24,
+          "status": "CLOSED"
+        },
+        {
+          "pr_number": 25,
+          "status": "MERGED"
+        }
+      ],
+      "task_versions": [
+        0,
+        0
+      ],
+      "tasks_unchanged": true,
+      "incomplete_receipts": 0
+    }
+  ],
+  "staging_containers_stopped": true,
+  "evidence_scope": "Synthetic HTTP tests before GitHub demo; real GitHub results are in 13_phat_su_kien_git_github_actual.json"
+}

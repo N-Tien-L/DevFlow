@@ -80,6 +80,12 @@ logging:
     org.springframework.ai.converter.BeanOutputConverter: off
 
 devflow:
+  gitci:
+    outbox:
+      # Pause delivery without stopping durable enqueue from authenticated webhooks.
+      worker-enabled: ${GIT_OUTBOX_WORKER_ENABLED:true}
+      poll-interval-ms: ${GIT_OUTBOX_POLL_INTERVAL_MS:1000}
+      cleanup-cron: "0 15 4 * * *"
   websocket:
     # Explicit browser origins are required in production. Comma-separated origins are supported.
     allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
