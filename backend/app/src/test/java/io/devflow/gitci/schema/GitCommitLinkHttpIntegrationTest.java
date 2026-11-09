@@ -35,7 +35,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "devflow.gitci.outbox.worker-enabled=false")
 class GitCommitLinkHttpIntegrationTest {
     static final UUID REPO = UUID.fromString("c199e15a-7a6a-4e56-bc4b-625f47645555");
     static final String KEY = "test-only-t022-secret-0123456789-abcdef";
