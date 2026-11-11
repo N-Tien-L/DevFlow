@@ -1,226 +1,353 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import clsx from 'clsx';
-import { useNotificationStore } from '../stores/notificationStore';
-import {
-  GitBranchIcon,
-  KanbanIcon,
-  LayoutGridIcon,
-  PlusIcon,
-  SendIcon,
-  SparklesIcon,
-  XIcon,
-} from './common/Icons';
-import { Badge } from './common/UiPrimitives';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { getBoard, listBoards, listColumns, listWorkspaces } from '../api/boardApi';
+import { useAuth } from '../auth/AuthProvider';
+import { useChatWebSocket } from '../hooks/useChatWebSocket';
+import { ChatHeader } from './chat/ChatHeader';
+import { ChatInput } from './chat/ChatInput';
+import { MessageList } from './chat/MessageList';
+import type { ColumnResponse, WorkspaceSummary } from '../types/board';
+import type { ChatMessage, ProposedTask } from '../types/chat';
+
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function formatTime(date: Date = new Date()): string {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 export default function ChatPanel() {
   const [isOpen, setIsOpen] = useState(false);
-  const launcherRef = useRef<HTMLButtonElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const location = useLocation();
-  const setDropdownOpen = useNotificationStore((state) => state.setDropdownOpen);
-  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string>(() => generateUuid());
+  const [isStreaming, setIsStreaming] = useState(false);
 
+  const { boardId: urlBoardId } = useParams();
+  const searchParams = useSearchParams()[0];
+  const requestedWorkspaceId = searchParams.get('workspace');
+
+  const { user, request, getValidAccessToken } = useAuth();
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('');
+  const [columns, setColumns] = useState<ColumnResponse[]>([]);
+
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // 1. Load workspaces to determine workspace context
   useEffect(() => {
-    if (!isOpen) return;
-    requestAnimationFrame(() => closeButtonRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setIsOpen(false);
-        launcherRef.current?.focus();
-      }
+    if (!user) return;
+    let active = true;
+    listWorkspaces(request)
+      .then((data) => {
+        if (!active) return;
+        setWorkspaces(data);
+        if (data.length > 0) {
+          const match = requestedWorkspaceId
+            ? data.find((w) => w.id === requestedWorkspaceId)
+            : data[0];
+          setActiveWorkspaceId(match ? match.id : data[0].id);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [user, request, requestedWorkspaceId]);
 
-  const closePanel = () => {
-    setIsOpen(false);
-    requestAnimationFrame(() => launcherRef.current?.focus());
+  // 2. Load columns when on a board or when workspace changes
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+
+    if (urlBoardId) {
+      listColumns(request, urlBoardId)
+        .then((cols) => {
+          if (active) setColumns(cols);
+        })
+        .catch(() => {});
+    } else if (activeWorkspaceId) {
+      // Find the first board of this workspace to load columns
+      listBoards(request, activeWorkspaceId)
+        .then((boardPage) => {
+          if (!active || boardPage.items.length === 0) return;
+          const firstBoard = boardPage.items[0];
+          return getBoard(request, firstBoard.id).then((b) => {
+            if (active && b) setColumns(b.columns);
+          });
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [user, request, urlBoardId, activeWorkspaceId]);
+
+  // 3. WebSocket Callbacks
+  const handleChunk = useCallback((text: string) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') {
+        return [
+          ...prev,
+          {
+            id: generateUuid(),
+            role: 'assistant',
+            content: text,
+            timestamp: formatTime(),
+            isStreaming: true,
+          },
+        ];
+      }
+      return [
+        ...prev.slice(0, -1),
+        {
+          ...last,
+          content: last.content + text,
+          isStreaming: true,
+        },
+      ];
+    });
+  }, []);
+
+  const handleProposal = useCallback((proposals: ProposedTask[]) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') {
+        return [
+          ...prev,
+          {
+            id: generateUuid(),
+            role: 'assistant',
+            content: 'Dưới đây là gợi ý chia các task cần làm:',
+            timestamp: formatTime(),
+            proposals,
+            isStreaming: false,
+          },
+        ];
+      }
+      return [
+        ...prev.slice(0, -1),
+        {
+          ...last,
+          proposals,
+          isStreaming: false,
+        },
+      ];
+    });
+  }, []);
+
+  const handleEnd = useCallback(() => {
+    setIsStreaming(false);
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant') {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, isStreaming: false },
+        ];
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleError = useCallback((errorMsg: string) => {
+    setIsStreaming(false);
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant' && !last.content) {
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            content: errorMsg,
+            isError: true,
+            isStreaming: false,
+          },
+        ];
+      }
+      return [
+        ...prev,
+        {
+          id: generateUuid(),
+          role: 'assistant',
+          content: errorMsg,
+          timestamp: formatTime(),
+          isError: true,
+          isStreaming: false,
+        },
+      ];
+    });
+  }, []);
+
+  // 4. WebSocket Hook integration
+  const { status: connectionStatus, sendMessage, cancelStream } = useChatWebSocket({
+    enabled: Boolean(user && isOpen),
+    getValidAccessToken,
+    onChunk: handleChunk,
+    onProposal: handleProposal,
+    onEnd: handleEnd,
+    onError: handleError,
+  });
+
+  // 5. Send message action
+  const handleSend = (text: string) => {
+    if (!activeWorkspaceId) {
+      handleError('Vui lòng chọn một workspace trước khi gửi tin nhắn.');
+      return;
+    }
+
+    const userMsg: ChatMessage = {
+      id: generateUuid(),
+      role: 'user',
+      content: text,
+      timestamp: formatTime(),
+    };
+
+    const assistantPlaceholder: ChatMessage = {
+      id: generateUuid(),
+      role: 'assistant',
+      content: '',
+      timestamp: formatTime(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
+    setIsStreaming(true);
+
+    const sent = sendMessage({
+      conversationId,
+      workspaceId: activeWorkspaceId,
+      message: text,
+    });
+
+    if (!sent) {
+      setIsStreaming(false);
+      handleError('Không thể gửi tin nhắn. Đang mất kết nối tới máy chủ.');
+    }
   };
 
-  const onBoardRoute = location.pathname.startsWith('/boards');
+  const handleCancel = () => {
+    cancelStream(conversationId);
+    setIsStreaming(false);
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant') {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, isStreaming: false },
+        ];
+      }
+      return prev;
+    });
+  };
+
+  const handleNewConversation = () => {
+    if (isStreaming) {
+      cancelStream(conversationId);
+      setIsStreaming(false);
+    }
+    setConversationId(generateUuid());
+    setMessages([]);
+  };
+
+  // 6. Keyboard Shortcuts: Esc to close, Ctrl+Shift+C to toggle
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (e.key === 'C' || e.key === 'c')
+      ) {
+        e.preventDefault();
+        setIsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  const activeWorkspaceName = useMemo(() => {
+    return workspaces.find((w) => w.id === activeWorkspaceId)?.name;
+  }, [workspaces, activeWorkspaceId]);
 
   return (
     <>
-      <button
-        ref={launcherRef}
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        aria-expanded={isOpen}
-        aria-controls="devflow-ai-chat-panel"
-        aria-label={isOpen ? 'Đóng khung trợ lý AI DevFlow' : 'Mở khung trợ lý AI DevFlow'}
-        className={clsx(
-          'fixed bottom-4 right-4 z-40 inline-flex min-h-11 items-center justify-center gap-2 rounded-full border shadow-lg transition focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/30 sm:bottom-5 sm:right-5',
-          isOpen
-            ? 'size-11 border-slate-300 bg-white text-slate-700 shadow-slate-900/12 hover:bg-slate-50 sm:w-auto sm:px-4'
-            : 'size-11 border-indigo-500/30 bg-slate-900 text-white shadow-slate-900/25 hover:bg-indigo-600 sm:w-auto sm:px-4',
-        )}
-      >
-        {isOpen ? (
-          <>
-            <XIcon className="size-4" />
-            <span className="hidden text-xs font-semibold sm:inline">Đóng</span>
-          </>
-        ) : (
-          <>
-            <span className="relative inline-flex items-center justify-center">
-              <SparklesIcon className="size-4 text-indigo-300" />
-              <span className="absolute -right-1 -top-1 size-2 rounded-full bg-amber-400 ring-2 ring-slate-900" aria-hidden="true" />
-            </span>
-            <span className="hidden text-xs font-semibold sm:inline">Trợ lý AI</span>
-          </>
-        )}
-      </button>
-
-      {isOpen && (
-        <section
-          id="devflow-ai-chat-panel"
-          role="dialog"
-          aria-labelledby="devflow-chat-title"
-          aria-describedby="devflow-chat-status"
-          className="fixed inset-x-3 bottom-16 z-40 flex max-h-[min(76dvh,540px)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xl shadow-slate-950/15 sm:inset-x-auto sm:bottom-20 sm:right-5 sm:w-[376px]"
+      {/* Floating Chat Trigger Button */}
+      {!isOpen && (
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex h-13 w-13 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-600/30 hover:scale-105 hover:shadow-indigo-600/50 active:scale-95 transition-all group"
+          aria-label="Mở trợ lý DevFlow AI (Ctrl+Shift+C)"
+          title="DevFlow AI (Ctrl+Shift+C)"
         >
-          {/* Header */}
-          <header className="flex items-center justify-between gap-2 border-b border-slate-200/80 bg-slate-50/90 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-2xs">
-                <SparklesIcon className="size-4" />
-              </span>
-              <div className="min-w-0">
-                <h2 id="devflow-chat-title" className="truncate text-sm font-bold text-slate-950">
-                  Trợ lý AI DevFlow
-                </h2>
-                <div className="mt-0.5 flex items-center gap-1.5">
-                  <Badge tone="warning" className="px-2 py-0 text-[10px]">
-                    <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                    <span>Chưa kết nối dịch vụ AI</span>
-                  </Badge>
-                </div>
-              </div>
-            </div>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={closePanel}
-              aria-label="Đóng bảng trợ lý AI"
-              className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-200/70 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-            >
-              <XIcon className="size-4" />
-            </button>
-          </header>
-
-          {/* Body */}
-          <div className="devflow-scroll flex-1 space-y-3.5 overflow-y-auto p-4">
-            <div
-              id="devflow-chat-status"
-              className="rounded-xl border border-amber-200/90 bg-amber-50/80 p-3 text-xs leading-5 text-amber-950"
-              role="status"
-            >
-              <p className="font-semibold">Dịch vụ hội thoại AI đang chờ kết nối</p>
-              <p className="mt-1 text-amber-900/90">
-                Luồng chat streaming, phân rã công việc và hỏi đáp dự án sẽ kích hoạt khi tích hợp hoàn tất dịch vụ AI (T-036).
-              </p>
-            </div>
-
-            <div>
-              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Thao tác khả dụng ngay
-              </p>
-              <div className="grid grid-cols-1 gap-2">
-                {onBoardRoute && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsOpen(false);
-                      setDropdownOpen(true);
-                    }}
-                    className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-800 transition hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  >
-                    <span>Xem thông báo realtime & cảnh báo CI</span>
-                    <Badge tone={unreadCount > 0 ? 'danger' : 'neutral'}>
-                      {unreadCount > 0 ? `${unreadCount} mới` : 'Mở'}
-                    </Badge>
-                  </button>
-                )}
-
-                <Link
-                  to="/workspaces"
-                  onClick={() => setIsOpen(false)}
-                  className="flex min-h-10 items-center gap-2.5 rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-xs font-semibold text-slate-800 transition hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                  <LayoutGridIcon className="size-4 text-slate-500" />
-                  <span>Chuyển workspace khác</span>
-                </Link>
-
-                <Link
-                  to="/workspaces/new"
-                  onClick={() => setIsOpen(false)}
-                  className="flex min-h-10 items-center gap-2.5 rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-xs font-semibold text-slate-800 transition hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                  <PlusIcon className="size-4 text-indigo-600" />
-                  <span>Tạo workspace mới</span>
-                </Link>
-
-                {!onBoardRoute && (
-                  <Link
-                    to="/boards"
-                    onClick={() => setIsOpen(false)}
-                    className="flex min-h-10 items-center gap-2.5 rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-xs font-semibold text-slate-800 transition hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  >
-                    <KanbanIcon className="size-4 text-indigo-600" />
-                    <span>Đi tới bảng Kanban</span>
-                  </Link>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Điểm tích hợp sẵn sàng
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge tone="brand">
-                  <SparklesIcon className="size-3" />
-                  <span>T-036 Chat streaming</span>
-                </Badge>
-                <Badge tone="success">
-                  <span>T-040B Thông báo realtime</span>
-                </Badge>
-                <Badge tone="neutral">
-                  <GitBranchIcon className="size-3" />
-                  <span>T-026 Git/CI badge</span>
-                </Badge>
-              </div>
-            </div>
-          </div>
-
-          {/* Disabled Composer with Clear Status */}
-          <div className="border-t border-slate-200/80 bg-slate-50/70 p-3">
-            <div className="flex items-center gap-2">
-              <label className="sr-only" htmlFor="devflow-chat-input">
-                Nhập câu hỏi cho trợ lý AI (tạm khóa khi chưa kết nối dịch vụ AI)
-              </label>
-              <input
-                id="devflow-chat-input"
-                type="text"
-                disabled
-                placeholder="Chat AI tạm khóa (chờ kết nối T-036)…"
-                className="min-h-10 min-w-0 flex-1 cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-500 placeholder:text-slate-400"
-              />
-              <button
-                type="button"
-                disabled
-                aria-label="Gửi tin nhắn (chưa khả dụng)"
-                className="grid size-10 shrink-0 cursor-not-allowed place-items-center rounded-xl bg-slate-200 text-slate-400"
-              >
-                <SendIcon className="size-4" />
-              </button>
-            </div>
-          </div>
-        </section>
+          <svg
+            className="h-6 w-6 transition-transform group-hover:rotate-12"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+            />
+          </svg>
+        </button>
       )}
+
+      {/* Backdrop for mobile */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs transition-opacity sm:hidden"
+          onClick={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Slide-over Drawer */}
+      <div
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Trợ lý DevFlow AI"
+        className={`fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:w-96 sm:max-w-md dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        <ChatHeader
+          workspaceName={activeWorkspaceName}
+          connectionStatus={connectionStatus}
+          onNewConversation={handleNewConversation}
+          onClose={() => setIsOpen(false)}
+        />
+
+        <MessageList
+          messages={messages}
+          columns={columns}
+          request={request}
+          onSelectPrompt={handleSend}
+        />
+
+        <ChatInput
+          onSend={handleSend}
+          onCancel={handleCancel}
+          isStreaming={isStreaming}
+          disabled={!activeWorkspaceId}
+        />
+      </div>
     </>
   );
 }
