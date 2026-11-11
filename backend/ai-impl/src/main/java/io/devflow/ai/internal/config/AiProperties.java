@@ -303,6 +303,11 @@ public class AiProperties {
         @Max(500_000)
         private int maxPromptChars = 16_000;
 
+        /** Artificial delay in milliseconds between emitted chunks; set to 0 in tests for fast execution. */
+        @Min(0)
+        @Max(1000)
+        private long streamDelayMs = 20;
+
         public String getModel() {
             return model;
         }
@@ -333,6 +338,14 @@ public class AiProperties {
 
         public void setMaxPromptChars(int maxPromptChars) {
             this.maxPromptChars = maxPromptChars;
+        }
+
+        public long getStreamDelayMs() {
+            return streamDelayMs;
+        }
+
+        public void setStreamDelayMs(long streamDelayMs) {
+            this.streamDelayMs = streamDelayMs;
         }
     }
 
