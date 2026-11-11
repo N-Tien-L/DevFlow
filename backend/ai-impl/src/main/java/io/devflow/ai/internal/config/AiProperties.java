@@ -8,6 +8,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
@@ -42,6 +44,9 @@ public class AiProperties {
     @Valid
     private final Qa qa = new Qa();
 
+    @Valid
+    private final CiSummary ciSummary = new CiSummary();
+
     public Chat getChat() {
         return chat;
     }
@@ -64,6 +69,10 @@ public class AiProperties {
 
     public Qa getQa() {
         return qa;
+    }
+
+    public CiSummary getCiSummary() {
+        return ciSummary;
     }
 
     /** Per-user token bucket shared by all AI features (each call consumes one token). */
@@ -119,6 +128,60 @@ public class AiProperties {
 
         public void setMaxOutputAttempts(int maxOutputAttempts) {
             this.maxOutputAttempts = maxOutputAttempts;
+        }
+    }
+
+    /** CI failure log summarization (T-031). */
+    public static class CiSummary {
+
+        /** Maximum raw CI log window in KB around errors sent to LLM. */
+        @Min(1)
+        @Max(1024)
+        private int maxLogSizeKb = 32;
+
+        /** Upper bound on word count for CI failure summary. */
+        @Min(10)
+        @Max(500)
+        private int maxSummaryWords = 100;
+
+        /** Completion token budget for CI summary. */
+        @Min(64)
+        @Max(4096)
+        private int maxOutputTokens = 512;
+
+        /** Additional regex patterns to redact sensitive secrets from CI logs. */
+        private List<String> secretPatterns = new ArrayList<>();
+
+        public int getMaxLogSizeKb() {
+            return maxLogSizeKb;
+        }
+
+        public void setMaxLogSizeKb(int maxLogSizeKb) {
+            this.maxLogSizeKb = maxLogSizeKb;
+        }
+
+        public int getMaxSummaryWords() {
+            return maxSummaryWords;
+        }
+
+        public void setMaxSummaryWords(int maxSummaryWords) {
+            this.maxSummaryWords = maxSummaryWords;
+        }
+
+        public int getMaxOutputTokens() {
+            return maxOutputTokens;
+        }
+
+        public void setMaxOutputTokens(int maxOutputTokens) {
+            this.maxOutputTokens = maxOutputTokens;
+        }
+
+        public List<String> getSecretPatterns() {
+            return secretPatterns;
+        }
+
+        public void setSecretPatterns(List<String> secretPatterns) {
+            this.secretPatterns = secretPatterns != null ? new ArrayList<>(secretPatterns) : new ArrayList<>();
         }
     }
 
