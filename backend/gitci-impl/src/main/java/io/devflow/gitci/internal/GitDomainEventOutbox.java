@@ -34,12 +34,12 @@ public class GitDomainEventOutbox {
     private final boolean workerEnabled;
 
     public record Entry(UUID id, UUID taskId, String type, String key, String repo, String url,
-                        String author, Instant occurredAt, UUID token, int attempts) {
+                        String author, Instant occurredAt, UUID token, int attempts, UUID repositoryId, UUID workspaceId) {
         DevFlowEvent event() {
             return switch (type) {
-                case EventTypes.GIT_COMMIT_LINKED -> new GitCommitLinkedEvent(taskId, key, repo, author, occurredAt);
-                case EventTypes.GIT_PR_OPENED -> new GitPrOpenedEvent(taskId, url, repo, null, occurredAt);
-                case EventTypes.GIT_PR_MERGED -> new GitPrMergedEvent(taskId, url, repo, null, occurredAt);
+                case EventTypes.GIT_COMMIT_LINKED -> new GitCommitLinkedEvent(taskId, key, repo, author, occurredAt, id, repositoryId, workspaceId);
+                case EventTypes.GIT_PR_OPENED -> new GitPrOpenedEvent(taskId, url, repo, null, occurredAt, id, repositoryId, workspaceId);
+                case EventTypes.GIT_PR_MERGED -> new GitPrMergedEvent(taskId, url, repo, null, occurredAt, id, repositoryId, workspaceId);
                 default -> throw new IllegalStateException("Unsupported Git event type");
             };
         }
@@ -70,12 +70,12 @@ public class GitDomainEventOutbox {
         if (!TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException("Git outbox requires a transaction");
         int[][] counts = jdbc.batchUpdate("""
-                INSERT INTO git_domain_event_outbox(id,repository_id,task_id,event_type,git_object_key,repo,pr_url,author,occurred_at)
-                VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(repository_id,event_type,git_object_key,task_id) DO NOTHING
+                INSERT INTO git_domain_event_outbox(id,repository_id,task_id,event_type,git_object_key,repo,pr_url,author,occurred_at,workspace_id)
+                SELECT ?,?,?,?,?,?,?,?,?,workspace_id FROM repositories WHERE id=? ON CONFLICT(repository_id,event_type,git_object_key,task_id) DO NOTHING
                 """, pending, 200, (ps, row) -> {
             ps.setObject(1, UUID.randomUUID()); ps.setObject(2, row.repository()); ps.setObject(3, row.task());
             ps.setString(4, row.type()); ps.setString(5, row.key()); ps.setString(6, row.repo());
-            ps.setString(7, row.url()); ps.setString(8, row.author()); ps.setTimestamp(9, Timestamp.from(row.occurredAt()));
+            ps.setString(7, row.url()); ps.setString(8, row.author()); ps.setTimestamp(9, Timestamp.from(row.occurredAt())); ps.setObject(10, row.repository());
         });
         var inserted = new java.util.HashMap<String, Integer>();
         int index = 0;
@@ -130,7 +130,7 @@ public class GitDomainEventOutbox {
                     """, (rs, n) -> new Entry(rs.getObject("id", UUID.class), rs.getObject("task_id", UUID.class),
                     rs.getString("event_type"), rs.getString("git_object_key"), rs.getString("repo"), rs.getString("pr_url"),
                     rs.getString("author"), rs.getTimestamp("occurred_at").toInstant(), rs.getObject("claim_token", UUID.class),
-                    rs.getInt("attempts")), UUID.randomUUID(), BATCH_SIZE);
+                    rs.getInt("attempts"), rs.getObject("repository_id", UUID.class), rs.getObject("workspace_id", UUID.class)), UUID.randomUUID(), BATCH_SIZE);
         });
     }
 
@@ -142,6 +142,7 @@ public class GitDomainEventOutbox {
         Integer owned = jdbc.queryForObject("""
                 SELECT count(*) FROM git_domain_event_outbox WHERE id=? AND status='PROCESSING'
                     AND claim_token=? AND lease_until>CURRENT_TIMESTAMP
+                    AND EXISTS (SELECT 1 FROM repositories r WHERE r.id=repository_id AND r.workspace_id=git_domain_event_outbox.workspace_id)
                 """, Integer.class, entry.id(), entry.token());
         if (owned == null || owned == 0) return; // Deleted, expired or reclaimed; do not publish stale claims.
         long start = System.nanoTime();

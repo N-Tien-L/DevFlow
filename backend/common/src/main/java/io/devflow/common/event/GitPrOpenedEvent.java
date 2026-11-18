@@ -13,8 +13,14 @@ import java.util.UUID;
  * @param repo   repository the PR targets
  * @param actorId DevFlow user who opened the PR; null when the producer cannot map the Git author
  */
-public record GitPrOpenedEvent(UUID taskId, String prUrl, String repo, UUID actorId, Instant occurredAt)
+public record GitPrOpenedEvent(UUID taskId, String prUrl, String repo, UUID actorId, Instant occurredAt,
+        UUID eventId, UUID repositoryId, UUID workspaceId)
         implements DevFlowEvent {
+
+    /** Legacy callers remain readable, but cannot authorize an automated Board mutation. */
+    public GitPrOpenedEvent(UUID taskId, String prUrl, String repo, UUID actorId, Instant occurredAt) {
+        this(taskId, prUrl, repo, actorId, occurredAt, null, null, null);
+    }
 
     public GitPrOpenedEvent(UUID taskId, String prUrl, String repo) {
         this(taskId, prUrl, repo, null, Instant.now());
