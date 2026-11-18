@@ -52,6 +52,8 @@ public class TaskManagementService {
     private final BoardAuditService auditService;
     private final TaskEventPublisher taskEventPublisher;
     private final BoardRealtimePublisher realtimePublisher;
+    private final TaskReferenceLifecycle taskReferences;
+    private final TaskMoveExecutor moveExecutor;
     private final int maxTasksPerColumn;
 
     public TaskManagementService(
@@ -63,10 +65,14 @@ public class TaskManagementService {
             BoardAuditService auditService,
             TaskEventPublisher taskEventPublisher,
             BoardRealtimePublisher realtimePublisher,
+            TaskReferenceLifecycle taskReferences,
+            TaskMoveExecutor moveExecutor,
             @Value("${devflow.board.tasks.max-per-column:1000}") int maxTasksPerColumn) {
         if (maxTasksPerColumn < 1) {
             throw new IllegalArgumentException("Maximum tasks per column must be positive");
         }
+        this.taskReferences = taskReferences;
+        this.moveExecutor = moveExecutor;
         this.taskRepository = taskRepository;
         this.columnRepository = columnRepository;
         this.boardRepository = boardRepository;
@@ -228,6 +234,7 @@ public class TaskManagementService {
         int fromPosition = task.getPosition();
         List<TaskEntity> tasks = taskRepository.findByColumn_IdOrderByPositionAscIdAsc(columnId);
         task.getColumn().removeTask(task);
+        taskReferences.removeTask(taskId);
         taskRepository.delete(task);
         tasks.removeIf(candidate -> candidate.getId().equals(taskId));
         normalizePositions(tasks);
@@ -253,83 +260,12 @@ public class TaskManagementService {
         if (request == null || request.columnId() == null || request.position() == null) {
             throw BoardApiException.badRequest("INVALID_MOVE", "columnId and position are required.");
         }
-        UUID sourceColumnId = task.getColumn().getId();
-        int fromPosition = task.getPosition();
-        ColumnEntity sourceColumn = task.getColumn();
         ColumnEntity destination = columnRepository.findByIdAndBoard_Id(request.columnId(), boardId)
                 .orElseThrow(BoardApiException::notFound);
-        UUID destinationColumnId = destination.getId();
-        List<TaskEntity> sourceTasks = taskRepository.findByColumn_IdOrderByPositionAscIdAsc(sourceColumnId);
-        List<TaskEntity> sourceRemaining = sourceTasks.stream()
-                .filter(candidate -> !candidate.getId().equals(taskId))
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-        List<TaskEntity> destinationTasks = sourceColumnId.equals(destinationColumnId)
-                ? new ArrayList<>(sourceTasks)
-                : taskRepository.findByColumn_IdOrderByPositionAscIdAsc(destinationColumnId);
-        List<TaskEntity> destinationWithoutTask = destinationTasks.stream()
-                .filter(candidate -> !candidate.getId().equals(taskId))
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-        requireCapacity(destinationWithoutTask.size());
-        int targetPosition = request.position();
-        if (targetPosition > destinationWithoutTask.size()) {
-            throw BoardApiException.badRequest("INVALID_POSITION",
-                    "position must be between 0 and " + destinationWithoutTask.size() + ".");
-        }
-
-        List<TaskEntity> reorderedDestination = new ArrayList<>(destinationWithoutTask);
-        reorderedDestination.add(targetPosition, task);
-        boolean sameColumn = sourceColumnId.equals(destinationColumnId);
-        boolean changed = !sameColumn || !sameOrder(sourceTasks, reorderedDestination);
-
-        if (!sameColumn) {
-            task.moveTo(destination);
-            normalizePositions(sourceRemaining);
-        }
-        normalizePositions(reorderedDestination);
-        if (changed) {
-            taskRepository.flush();
-            if (sameColumn) {
-                auditService.record(actorId, "REORDER", "TASK", taskId, board.getWorkspaceId(),
-                        List.of("position"));
-            } else {
-                auditService.recordTaskMove(
-                        actorId, taskId, board.getWorkspaceId(), sourceColumnId, destinationColumnId);
-            }
-        }
-        if (!sameColumn) {
-            taskEventPublisher.publishStatusChanged(
-                    taskId,
-                    board.getId(),
-                    board.getWorkspaceId(),
-                    sourceColumnId,
-                    destinationColumnId,
-                    sourceColumn.getName(),
-                    destination.getName(),
-                    sourceColumn.getStatusCategory().name(),
-                    destination.getStatusCategory().name(),
-                    TaskStatusChangedEvent.StatusChangeCause.MANUAL,
-                    actorId);
-        }
-        if (changed) {
-            BoardMutationType type = sameColumn ? BoardMutationType.CARD_REORDERED : BoardMutationType.CARD_MOVED;
-            List<UUID> affectedColumns = sameColumn
-                    ? List.of(sourceColumnId)
-                    : List.of(sourceColumnId, destinationColumnId);
-            List<String> changedFields = sameColumn
-                    ? List.of("position")
-                    : List.of("columnId", "position");
-            realtimePublisher.publish(board.getId(), type,
-                    new BoardMutationData(taskId,
-                            sameColumn ? sourceColumnId : null,
-                            sourceColumnId,
-                            destinationColumnId,
-                            fromPosition,
-                            task.getPosition(),
-                            affectedColumns,
-                            changedFields,
-                            List.of(BoardRefreshTarget.TASK_LISTS, BoardRefreshTarget.TASK_DETAIL)), actorId);
-        }
-        return new TaskMoveResponse(toResponse(task, board), sourceColumnId, destinationColumnId);
+        UUID sourceColumnId = task.getColumn().getId();
+        moveExecutor.move(task, board, destination, request.position(),
+                TaskStatusChangedEvent.StatusChangeCause.MANUAL, actorId, null);
+        return new TaskMoveResponse(toResponse(task, board), sourceColumnId, destination.getId());
     }
 
     private BoardEntity lockAccessibleBoard(UUID boardId, UUID actorId) {
@@ -425,7 +361,7 @@ public class TaskManagementService {
     private static TaskResponse toResponse(TaskEntity task, BoardEntity board) {
         ColumnEntity column = task.getColumn();
         return new TaskResponse(
-                task.getId(), column.getId(), board.getId(), board.getWorkspaceId(), task.getTitle(),
+                task.getId(), task.getTaskKey(), column.getId(), board.getId(), board.getWorkspaceId(), task.getTitle(),
                 task.getDescription(), toApiPriority(task.getPriority()), task.getAssigneeId(), task.getDueDate(),
                 task.getPosition(), ColumnStatusCategory.valueOf(column.getStatusCategory().name()),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getVersion());
@@ -434,7 +370,7 @@ public class TaskManagementService {
     private static TaskListItem toListItem(TaskEntity task) {
         ColumnEntity column = task.getColumn();
         return new TaskListItem(
-                task.getId(), column.getId(), task.getTitle(), toApiPriority(task.getPriority()),
+                task.getId(), task.getTaskKey(), column.getId(), task.getTitle(), toApiPriority(task.getPriority()),
                 task.getAssigneeId(), task.getDueDate(), task.getPosition(),
                 ColumnStatusCategory.valueOf(column.getStatusCategory().name()), task.getUpdatedAt());
     }
@@ -445,16 +381,4 @@ public class TaskManagementService {
         }
     }
 
-    private static boolean sameOrder(List<TaskEntity> existing, List<TaskEntity> requested) {
-        if (existing.size() != requested.size()) {
-            return false;
-        }
-        for (int index = 0; index < existing.size(); index++) {
-            if (!existing.get(index).getId().equals(requested.get(index).getId())
-                    || existing.get(index).getPosition() != index) {
-                return false;
-            }
-        }
-        return true;
-    }
 }

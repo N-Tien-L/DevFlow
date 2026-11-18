@@ -51,6 +51,7 @@ public class BoardManagementService {
     private final BoardRealtimePublisher realtimePublisher;
     private final JdbcTemplate jdbcTemplate;
     private final EntityManager entityManager;
+    private final TaskReferenceLifecycle taskReferences;
 
     public BoardManagementService(
             BoardRepository boardRepository,
@@ -62,7 +63,8 @@ public class BoardManagementService {
             BoardAuditService auditService,
             BoardRealtimePublisher realtimePublisher,
             JdbcTemplate jdbcTemplate,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            TaskReferenceLifecycle taskReferences) {
         this.boardRepository = boardRepository;
         this.columnRepository = columnRepository;
         this.taskRepository = taskRepository;
@@ -73,6 +75,7 @@ public class BoardManagementService {
         this.realtimePublisher = realtimePublisher;
         this.jdbcTemplate = jdbcTemplate;
         this.entityManager = entityManager;
+        this.taskReferences = taskReferences;
     }
 
     @Transactional
@@ -190,6 +193,7 @@ public class BoardManagementService {
         realtimePublisher.publish(boardId, BoardMutationType.BOARD_DELETED,
                 new BoardMutationData(null, null, null, null, null, null, List.of(), List.of("deleted"),
                         List.of(BoardRefreshTarget.BOARD)), actorId);
+        taskReferences.removeBoard(boardId);
         int deleted = jdbcTemplate.update("DELETE FROM boards WHERE id = ?", boardId);
         if (deleted != 1) {
             throw BoardApiException.notFound();

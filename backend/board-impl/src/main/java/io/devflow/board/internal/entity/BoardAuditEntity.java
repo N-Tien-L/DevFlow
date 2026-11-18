@@ -11,7 +11,7 @@ import java.util.UUID;
 @Table(name = "board_audit_events")
 public class BoardAuditEntity extends BaseEntity {
 
-    @Column(name = "actor_id", nullable = false)
+    @Column(name = "actor_id")
     private UUID actorId;
 
     @Column(name = "action", nullable = false, length = 32)
@@ -41,6 +41,16 @@ public class BoardAuditEntity extends BaseEntity {
 
     @Column(name = "destination_column_id")
     private UUID destinationColumnId;
+
+    @Column(name = "cause", nullable = false, length = 16)
+    private String cause = "MANUAL";
+
+    @Column(name = "source_event_id")
+    private UUID sourceEventId;
+
+    public void markGitMove(UUID eventId) { cause = "GIT"; sourceEventId = eventId; }
+    public String getCause() { return cause; }
+    public UUID getSourceEventId() { return sourceEventId; }
 
     protected BoardAuditEntity() {
         // Required by JPA.

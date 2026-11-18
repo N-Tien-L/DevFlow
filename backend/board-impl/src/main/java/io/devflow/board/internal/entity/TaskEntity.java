@@ -45,6 +45,21 @@ public class TaskEntity extends BaseEntity {
     @Column(name = "due_date")
     private Instant dueDate;
 
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
+    @Column(name = "task_number", insertable = false, updatable = false)
+    private Integer taskNumber;
+
+    public String getTaskKey() {
+        return taskNumber == null ? null : String.format(java.util.Locale.ROOT, "T-%03d", taskNumber);
+    }
+
+    @Column(name = "last_manual_status_changed_at")
+    private Instant lastManualStatusChangedAt;
+
+    public Instant getLastManualStatusChangedAt() { return lastManualStatusChangedAt; }
+
+    public void setLastManualStatusChangedAt(Instant value) { lastManualStatusChangedAt = value; }
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;

@@ -37,6 +37,7 @@ export interface ColumnResponse {
 
 export interface TaskListItem {
   id: string;
+  taskKey: string;
   columnId: string;
   title: string;
   priority: TaskPriority;

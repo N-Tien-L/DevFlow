@@ -6,6 +6,7 @@ import java.util.UUID;
 /** Stable REST representation of one task without its comments or tag graph. */
 public record TaskResponse(
         UUID id,
+        String taskKey,
         UUID columnId,
         UUID boardId,
         UUID workspaceId,

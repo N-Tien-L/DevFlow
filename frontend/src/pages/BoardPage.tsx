@@ -964,7 +964,7 @@ function TaskCard({ task, column, columns, index, disabled, onMoveTask, onOpenTa
   return (
       <article id={`task-drop-${task.id}`} ref={ref} className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isDragging ? 'opacity-35' : ''} ${isDropTarget ? 'border-indigo-400 ring-2 ring-indigo-100' : ''}`}>
       <div className="mb-3 flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-800"><button type="button" onClick={() => onOpenTask(task.id)} className="text-left hover:text-indigo-700 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Mở chi tiết ${task.title}`}>{task.title}</button></h3>
+        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-800"><button type="button" onClick={() => onOpenTask(task.id)} className="text-left hover:text-indigo-700 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Mở chi tiết ${task.title}`}><span className="mr-2 font-mono text-xs text-slate-500">{task.taskKey}</span>{task.title}</button></h3>
         <button ref={handleRef} type="button" disabled={disabled} className="grid size-7 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default" aria-label={`Kéo để di chuyển ${task.title}`} title={disabled ? 'Xóa bộ lọc và tải đủ cột để sắp xếp' : 'Kéo để di chuyển'}>⠿</button>
       </div>
       <div className="flex flex-wrap items-center gap-2">

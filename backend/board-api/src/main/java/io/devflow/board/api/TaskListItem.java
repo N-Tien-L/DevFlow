@@ -6,6 +6,7 @@ import java.util.UUID;
 /** Compact Kanban card representation for paged task lists. */
 public record TaskListItem(
         UUID id,
+        String taskKey,
         UUID columnId,
         String title,
         TaskPriority priority,

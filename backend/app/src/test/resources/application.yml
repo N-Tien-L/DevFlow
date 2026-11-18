@@ -22,6 +22,9 @@ spring:
         version: 0.0.1-SNAPSHOT
 
 devflow:
+  gitci:
+    outbox:
+      worker-enabled: false
   # Tests never call a real provider: force the deterministic fallback ChatModel.
   ai:
     chat:
