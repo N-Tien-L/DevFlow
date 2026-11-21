@@ -19,6 +19,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.http.HttpMethod;
 
 /**
  * Spring Security 6 configuration owned by the Auth module (ARCHITECTURE.md Section 3 & 9.1).
@@ -76,6 +77,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
                         // Module health checks
                         .requestMatchers("/api/v1/*/health").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/gitci/webhook/github").permitAll()
                         // Specific protected endpoints within auth module (for T-004)
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/workspaces/**", "/api/v1/auth/workspaces",
                                 "/api/v1/auth/invitations/**", "/api/v1/auth/tokens", "/api/v1/auth/tokens/**")
