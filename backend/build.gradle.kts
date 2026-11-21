@@ -26,6 +26,7 @@ subprojects {
     // Spring 6.1+ resolves unnamed @PathVariable/@RequestParam arguments only from -parameters
     // metadata. The Boot plugin adds it for :app alone, so every module needs it explicitly.
     tasks.withType<JavaCompile> {
+        options.encoding = "UTF-8"
         options.compilerArgs.add("-parameters")
     }
 
