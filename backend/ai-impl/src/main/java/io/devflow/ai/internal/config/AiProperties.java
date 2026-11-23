@@ -152,6 +152,13 @@ public class AiProperties {
         /** Additional regex patterns to redact sensitive secrets from CI logs. */
         private List<String> secretPatterns = new ArrayList<>();
 
+        /** HTTPS hostnames allowed when fetching external CI logs (SSRF protection). */
+        private List<String> allowedLogHosts = new ArrayList<>(List.of(
+                "api.github.com",
+                "pipelines.actions.githubusercontent.com",
+                "objects.githubusercontent.com"
+        ));
+
         public int getMaxLogSizeKb() {
             return maxLogSizeKb;
         }
@@ -182,6 +189,14 @@ public class AiProperties {
 
         public void setSecretPatterns(List<String> secretPatterns) {
             this.secretPatterns = secretPatterns != null ? new ArrayList<>(secretPatterns) : new ArrayList<>();
+        }
+
+        public List<String> getAllowedLogHosts() {
+            return allowedLogHosts;
+        }
+
+        public void setAllowedLogHosts(List<String> allowedLogHosts) {
+            this.allowedLogHosts = allowedLogHosts != null ? new ArrayList<>(allowedLogHosts) : new ArrayList<>();
         }
     }
 

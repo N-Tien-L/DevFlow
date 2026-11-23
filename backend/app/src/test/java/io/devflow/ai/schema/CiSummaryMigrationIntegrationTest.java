@@ -19,7 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Verifies the T-031 ai_ci_summaries migration on PostgreSQL 17 (schema, constraints, indexes).
  */
 @Testcontainers
-@DisplayName("V13 ai_ci_summaries Migration Integration Test")
+@DisplayName("V14 ai_ci_summaries Migration Integration Test")
 class CiSummaryMigrationIntegrationTest {
 
     @Container

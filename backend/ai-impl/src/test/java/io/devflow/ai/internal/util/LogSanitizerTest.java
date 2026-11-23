@@ -96,6 +96,25 @@ class LogSanitizerTest {
     }
 
     @Test
+    void redactsQuotedKeyValueSecrets() {
+        String log = """
+                env:
+                  password="my secret with spaces"
+                  api_key: 'single-quoted-key-123'
+                  access_token="tok_abc_999"
+                """;
+
+        String sanitized = sanitizer.sanitize(log);
+
+        assertThat(sanitized).doesNotContain("my secret with spaces");
+        assertThat(sanitized).doesNotContain("single-quoted-key-123");
+        assertThat(sanitized).doesNotContain("tok_abc_999");
+        assertThat(sanitized).contains("password=[REDACTED]");
+        assertThat(sanitized).contains("api_key: [REDACTED]");
+        assertThat(sanitized).contains("access_token=[REDACTED]");
+    }
+
+    @Test
     void redactsStandardApiTokens() {
         String log = "Github token: ghp_123456789012345678901234567890123456, AWS: AKIAIOSFODNN7EXAMPLE";
 

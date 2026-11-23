@@ -101,5 +101,10 @@ class CiFailureSummarizerIntegrationTest {
 
         assertThat(repository.count()).isEqualTo(1);
         assertThat(repository.findByPipelineId(pipelineId).get().getSummaryMarkdown()).isEqualTo(initialSummary);
+
+        long eventCount = applicationEvents.stream(CiFailureSummarizedEvent.class)
+                .filter(e -> pipelineId.equals(e.pipelineId()))
+                .count();
+        assertThat(eventCount).isEqualTo(1);
     }
 }

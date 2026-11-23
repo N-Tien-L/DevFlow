@@ -1,7 +1,9 @@
 package io.devflow.ai.internal.ci;
 
+import io.devflow.ai.internal.config.AiProperties;
 import io.devflow.ai.internal.llm.AiMalformedOutputException;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -16,8 +18,9 @@ public class CiSummaryValidator {
 
     private final int maxWords;
 
-    public CiSummaryValidator() {
-        this(DEFAULT_MAX_WORDS);
+    @Autowired
+    public CiSummaryValidator(AiProperties properties) {
+        this(properties != null ? properties.getCiSummary().getMaxSummaryWords() : DEFAULT_MAX_WORDS);
     }
 
     public CiSummaryValidator(int maxWords) {

@@ -45,13 +45,13 @@ public class AiEventListeners {
     public void on(CiFailureDetectedEvent event) {
         log.info("[{}] pipeline={} repo={} sha={}",
                 event.eventType(), event.pipelineId(), event.repo(), event.commitSha());
-        aiExecutor.submit(() -> {
+        boolean submitted = aiExecutor.submit(() -> {
             try {
-                String summary = ciFailureSummarizerService.summarize(
+                CiFailureSummarizerService.CiSummaryResult result = ciFailureSummarizerService.summarizeForEvent(
                         event.pipelineId(), event.rawLogReference(), event.repo(), event.commitSha());
-                if (summary != null) {
+                if (result.newlyCreated() && result.summaryMarkdown() != null) {
                     eventPublisher.publishEvent(new CiFailureSummarizedEvent(
-                            event.pipelineId(), summary, null, Instant.now()));
+                            event.pipelineId(), result.summaryMarkdown(), null, Instant.now()));
                 }
                 recordConsumeMetric(event.eventType(), "success");
             } catch (Exception e) {
@@ -59,6 +59,10 @@ public class AiEventListeners {
                 recordConsumeMetric(event.eventType(), "failure");
             }
         });
+        if (!submitted) {
+            log.warn("Rejected CI failure summarization task (executor saturated) pipeline={}", event.pipelineId());
+            recordConsumeMetric(event.eventType(), "rejected");
+        }
     }
 
     @EventListener

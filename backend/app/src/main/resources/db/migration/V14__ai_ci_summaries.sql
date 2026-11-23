@@ -12,5 +12,3 @@ CREATE TABLE ai_ci_summaries (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_ai_ci_summaries_source CHECK (source IN ('LLM', 'FALLBACK'))
 );
-
-CREATE INDEX idx_ai_ci_summaries_pipeline ON ai_ci_summaries(pipeline_id);

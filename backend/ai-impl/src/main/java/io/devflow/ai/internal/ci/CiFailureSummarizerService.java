@@ -72,15 +72,29 @@ public class CiFailureSummarizerService {
     }
 
     /**
+     * Outcome of a summarization request, distinguishing newly persisted summaries from cached
+     * duplicates so event listeners only publish {@code ci.failure_summarized} once per pipeline.
+     */
+    public record CiSummaryResult(String summaryMarkdown, boolean newlyCreated) {
+    }
+
+    /**
      * Summarizes a CI pipeline failure log. Guaranteed to be idempotent per {@code pipelineId}.
      *
      * @param pipelineId      unique identifier of the failed pipeline
-     * @param rawLogReference reference (URL, path, or text) to the raw CI log
+     * @param rawLogReference reference (allowlisted HTTPS URL or inline text) to the raw CI log
      * @param repo            source repository name
      * @param commitSha       failing commit SHA
      * @return 3-bullet markdown summary
      */
     public String summarize(String pipelineId, String rawLogReference, String repo, String commitSha) {
+        return summarizeForEvent(pipelineId, rawLogReference, repo, commitSha).summaryMarkdown();
+    }
+
+    /**
+     * Summarizes a CI pipeline failure log and reports whether a new summary row was created.
+     */
+    public CiSummaryResult summarizeForEvent(String pipelineId, String rawLogReference, String repo, String commitSha) {
         if (!StringUtils.hasText(pipelineId)) {
             throw new IllegalArgumentException("pipelineId must not be blank");
         }
@@ -90,7 +104,7 @@ public class CiFailureSummarizerService {
         if (existing.isPresent()) {
             log.info("CI failure summary already exists for pipeline={}, returning cached result", pipelineId);
             metrics.ciSummary("skipped_duplicate");
-            return existing.get().getSummaryMarkdown();
+            return new CiSummaryResult(existing.get().getSummaryMarkdown(), false);
         }
 
         // 2. Fetch raw log
@@ -167,19 +181,20 @@ public class CiFailureSummarizerService {
         return summarize(info.pipelineId(), info.rawLogReference(), info.repo(), info.commitSha());
     }
 
-    private String persistSummary(String pipelineId, String repo, String commitSha,
+    private CiSummaryResult persistSummary(String pipelineId, String repo, String commitSha,
             String summaryMarkdown, CiSummarySource source, String metricResult) {
         try {
             CiSummaryEntity entity = new CiSummaryEntity(pipelineId, repo, commitSha, summaryMarkdown, source);
             repository.save(entity);
             metrics.ciSummary(metricResult);
-            return summaryMarkdown;
+            return new CiSummaryResult(summaryMarkdown, true);
         } catch (DataIntegrityViolationException concurrent) {
             log.info("Concurrent insert detected for pipeline={}, returning existing entry", pipelineId);
             metrics.ciSummary("skipped_duplicate");
-            return repository.findByPipelineId(pipelineId)
+            String existingSummary = repository.findByPipelineId(pipelineId)
                     .map(CiSummaryEntity::getSummaryMarkdown)
                     .orElse(summaryMarkdown);
+            return new CiSummaryResult(existingSummary, false);
         }
     }
 }

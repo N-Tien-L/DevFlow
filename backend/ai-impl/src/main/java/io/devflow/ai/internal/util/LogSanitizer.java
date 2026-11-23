@@ -36,9 +36,9 @@ public class LogSanitizer {
     private static final Pattern URI_CREDENTIALS_PATTERN = Pattern.compile(
             "(?i)((?:jdbc:[a-z0-9]+|postgresql|postgres|mysql|mongodb|redis)://)([^/\\s:]*):([^\\s]+)@([^@/\\s]+(?::\\d+)?(?:/[^\\s]*)?)");
 
-    // 5. Key-value secrets: password=..., secret=..., api_key: ...
+    // 5. Key-value secrets: password=..., secret="...", api_key: '...'
     private static final Pattern KEY_VALUE_SECRET_PATTERN = Pattern.compile(
-            "(?i)\\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|private[_-]?key)\\b(\\s*[:=]\\s*)[^\\s,;'\"]+");
+            "(?i)\\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|private[_-]?key)\\b(\\s*[:=]\\s*)(?:\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'|[^\\s,;'\"]+)");
 
     // 6. Well-known API key formats
     private static final Pattern API_KEYS_PATTERN = Pattern.compile(
