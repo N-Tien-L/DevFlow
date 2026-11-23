@@ -148,4 +148,109 @@ describe('NotificationBell Component', () => {
 
     expect(useNotificationStore.getState().isDropdownOpen).toBe(false);
   });
+
+  it('fetches notifications only once when API returns empty list', async () => {
+    mockRequest.mockResolvedValue({
+      content: [],
+      page: 0,
+      size: 20,
+      hasNext: false,
+    });
+
+    useNotificationStore.setState({ isDropdownOpen: true });
+
+    await act(async () => {
+      root?.render(<NotificationBell />);
+    });
+
+    // Wait a microtask flush to ensure no re-fetch loop occurs
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    expect(container?.textContent).toContain('Bạn chưa có thông báo nào');
+  });
+
+  it('does not loop fetches when API returns an error', async () => {
+    mockRequest.mockRejectedValue(new Error('Network down'));
+
+    useNotificationStore.setState({ isDropdownOpen: true });
+
+    await act(async () => {
+      root?.render(<NotificationBell />);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    expect(container?.textContent).toContain('Network down');
+  });
+
+  it('closes dropdown cleanly when bell button is clicked while open (no double-toggle)', async () => {
+    useNotificationStore.setState({
+      notifications: [sampleNotification],
+      hasLoaded: true,
+      unreadCount: 1,
+      isDropdownOpen: true,
+    });
+
+    await act(async () => {
+      root?.render(<NotificationBell />);
+    });
+
+    const button = container?.querySelector('#notification-bell-button') as HTMLButtonElement;
+    expect(container?.querySelector('[role="region"]')).not.toBeNull();
+
+    // Simulate real browser sequence: mousedown on button, then click on button
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      button.click();
+    });
+
+    expect(useNotificationStore.getState().isDropdownOpen).toBe(false);
+    expect(container?.querySelector('[role="region"]')).toBeNull();
+  });
+
+  it('invokes onSelectTask only for valid UUID referenceIds', async () => {
+    const onSelectTask = vi.fn();
+    const taskUuid = '11111111-2222-3333-4444-555555555555';
+    const linkedNotif: NotificationResponse = {
+      ...sampleNotification,
+      id: 'notif-uuid',
+      referenceId: taskUuid,
+      isRead: true,
+    };
+    const nonUuidNotif: NotificationResponse = {
+      ...sampleNotification,
+      id: 'notif-pipe',
+      title: 'Pipeline alert',
+      referenceId: 'pipe-999',
+      isRead: true,
+    };
+
+    useNotificationStore.setState({
+      notifications: [nonUuidNotif, linkedNotif],
+      hasLoaded: true,
+      unreadCount: 0,
+      isDropdownOpen: true,
+    });
+
+    await act(async () => {
+      root?.render(<NotificationBell onSelectTask={onSelectTask} />);
+    });
+
+    const items = container?.querySelectorAll('[role="button"]') ?? [];
+    await act(async () => {
+      (items[0] as HTMLElement).click();
+    });
+    expect(onSelectTask).not.toHaveBeenCalled();
+
+    await act(async () => {
+      (items[1] as HTMLElement).click();
+    });
+    expect(onSelectTask).toHaveBeenCalledWith(taskUuid);
+  });
 });

@@ -1,7 +1,10 @@
+import { useRef } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { useNotificationStore } from '../../stores/notificationStore';
 import type { NotificationResponse } from '../../types/notification';
 import { NotificationDropdown } from './NotificationDropdown';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface NotificationBellProps {
   onSelectTask?: (taskId: string) => void;
@@ -9,6 +12,7 @@ interface NotificationBellProps {
 
 export function NotificationBell({ onSelectTask }: NotificationBellProps) {
   const { request } = useAuth();
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const {
     unreadCount,
     isDropdownOpen,
@@ -17,7 +21,7 @@ export function NotificationBell({ onSelectTask }: NotificationBellProps) {
   } = useNotificationStore();
 
   const handleSelectNotification = (notification: NotificationResponse) => {
-    if (notification.referenceId && onSelectTask) {
+    if (notification.referenceId && UUID_PATTERN.test(notification.referenceId) && onSelectTask) {
       onSelectTask(notification.referenceId);
       closeDropdown();
     }
@@ -28,6 +32,7 @@ export function NotificationBell({ onSelectTask }: NotificationBellProps) {
   return (
     <div className="relative inline-block text-left">
       <button
+        ref={buttonRef}
         type="button"
         id="notification-bell-button"
         onClick={toggleDropdown}
@@ -73,6 +78,7 @@ export function NotificationBell({ onSelectTask }: NotificationBellProps) {
       {isDropdownOpen && (
         <NotificationDropdown
           request={request}
+          triggerRef={buttonRef}
           onClose={closeDropdown}
           onSelectNotification={handleSelectNotification}
         />

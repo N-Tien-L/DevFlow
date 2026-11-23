@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { ApiRequest } from '../../api/boardApi';
 import { useNotificationStore } from '../../stores/notificationStore';
 import type { NotificationResponse } from '../../types/notification';
@@ -6,18 +6,21 @@ import { NotificationItem } from './NotificationItem';
 
 interface NotificationDropdownProps {
   request: ApiRequest;
+  triggerRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onSelectNotification?: (notification: NotificationResponse) => void;
 }
 
 export function NotificationDropdown({
   request,
+  triggerRef,
   onClose,
   onSelectNotification,
 }: NotificationDropdownProps) {
   const {
     notifications,
     unreadCount,
+    hasLoaded,
     isLoading,
     isLoadingMore,
     hasMore,
@@ -29,13 +32,15 @@ export function NotificationDropdown({
   } = useNotificationStore();
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const didAttemptFetchRef = useRef(false);
 
-  // Lazy load notifications on first open if empty
+  // Lazy load notifications once on open when not yet loaded (guards against infinite loop on empty/error)
   useEffect(() => {
-    if (notifications.length === 0 && !isLoading) {
+    if (!didAttemptFetchRef.current && !hasLoaded && !isLoading && !error) {
+      didAttemptFetchRef.current = true;
       void fetchNotifications(request, 0);
     }
-  }, [fetchNotifications, isLoading, notifications.length, request]);
+  }, [error, fetchNotifications, hasLoaded, isLoading, request]);
 
   // Click outside and Escape key listeners
   useEffect(() => {
@@ -46,10 +51,11 @@ export function NotificationDropdown({
     }
 
     function handlePointerDown(event: MouseEvent | TouchEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      if (triggerRef?.current && triggerRef.current.contains(target)) {
+        return;
+      }
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         onClose();
       }
     }
@@ -63,14 +69,14 @@ export function NotificationDropdown({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('touchstart', handlePointerDown);
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   const handleMarkAll = () => {
-    void markAllAsRead(request);
+    void markAllAsRead(request).catch(() => {});
   };
 
   const handleMarkItemRead = (id: string) => {
-    void markAsRead(request, id);
+    void markAsRead(request, id).catch(() => {});
   };
 
   return (

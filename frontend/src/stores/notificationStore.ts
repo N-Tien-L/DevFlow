@@ -11,6 +11,7 @@ import type { NotificationResponse } from '../types/notification';
 export interface NotificationState {
   notifications: NotificationResponse[];
   unreadCount: number;
+  hasLoaded: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -25,6 +26,7 @@ export interface NotificationState {
   markAsRead: (request: ApiRequest, id: string) => Promise<void>;
   markAllAsRead: (request: ApiRequest) => Promise<void>;
   addRealtimeNotification: (notification: NotificationResponse) => void;
+  markStale: () => void;
   toggleDropdown: () => void;
   closeDropdown: () => void;
   setDropdownOpen: (open: boolean) => void;
@@ -34,6 +36,7 @@ export interface NotificationState {
 const initialState = {
   notifications: [] as NotificationResponse[],
   unreadCount: 0,
+  hasLoaded: false,
   isLoading: false,
   isLoadingMore: false,
   hasMore: false,
@@ -69,6 +72,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
           notifications: res.content,
           currentPage: res.page,
           hasMore: res.hasNext,
+          hasLoaded: true,
           isLoading: false,
         });
       } else {
@@ -173,6 +177,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       notifications: [notification, ...notifications],
       unreadCount: notification.isRead ? unreadCount : unreadCount + 1,
     });
+  },
+
+  markStale: () => {
+    set({ hasLoaded: false });
   },
 
   toggleDropdown: () => {

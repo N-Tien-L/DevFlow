@@ -37,11 +37,14 @@ export function useNotificationSync(enabled = true) {
     addRealtimeNotification,
     fetchUnreadCount,
     fetchNotifications,
+    markStale,
+    reset,
   } = useNotificationStore();
 
   const [status, setStatus] = useState<NotificationConnectionStatus>('idle');
   const [retryCount, setRetryCount] = useState(0);
   const clientRef = useRef<Client | null>(null);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const requestRef = useRef(request);
   requestRef.current = request;
@@ -49,6 +52,15 @@ export function useNotificationSync(enabled = true) {
   const retry = useCallback(() => {
     setRetryCount((prev) => prev + 1);
   }, []);
+
+  // Reset cached notifications on logout or account switch so data never leaks across users
+  useEffect(() => {
+    const currentUserId = user?.id ?? null;
+    if (lastUserIdRef.current !== null && lastUserIdRef.current !== currentUserId) {
+      reset();
+    }
+    lastUserIdRef.current = currentUserId;
+  }, [user?.id, reset]);
 
   useEffect(() => {
     if (!enabled || !user) {
@@ -118,9 +130,13 @@ export function useNotificationSync(enabled = true) {
         // Always fetch unread count on connect / reconnect to ensure freshness
         void fetchUnreadCount(requestRef.current);
 
-        // If reconnecting and dropdown is open, refresh first page
-        if (reconnected && useNotificationStore.getState().isDropdownOpen) {
-          void fetchNotifications(requestRef.current, 0);
+        // On reconnect: refresh first page if dropdown is open, otherwise mark stale for next open
+        if (reconnected) {
+          if (useNotificationStore.getState().isDropdownOpen) {
+            void fetchNotifications(requestRef.current, 0);
+          } else {
+            markStale();
+          }
         }
 
         // Schedule proactive token renewal
@@ -204,6 +220,7 @@ export function useNotificationSync(enabled = true) {
     addRealtimeNotification,
     fetchUnreadCount,
     fetchNotifications,
+    markStale,
   ]);
 
   return { status, retry };
