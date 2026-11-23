@@ -1,43 +1,68 @@
 package io.devflow.ai.internal;
 
+import io.devflow.ai.internal.ci.AiCiExecutor;
+import io.devflow.ai.internal.ci.CiFailureSummarizerService;
 import io.devflow.common.event.CiFailureDetectedEvent;
+import io.devflow.common.event.CiFailureSummarizedEvent;
 import io.devflow.common.event.TaskCreatedEvent;
 import io.devflow.common.event.TaskStatusChangedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
  * AI service's subscriptions on the event bus (ARCHITECTURE.md Section 4).
  *
- * <p>TODO(PRODUCT_SPEC Section 5.2):
- * <ul>
- *   <li>On {@code ci.failure_detected}: summarize the failure and publish
- *       {@code CiFailureSummarizedEvent} for Board and Notification</li>
- *   <li>On {@code task.created} / {@code task.status_changed}: track completion pace vs.
- *       plan and publish {@code RiskDeadlineFlaggedEvent} when a deadline is at risk
- *       (proactive deadline risk alerts)</li>
- * </ul>
+ * <p>Listens for {@code ci.failure_detected} and asynchronously summarizes the failure
+ * off the webhook thread, then publishes {@code ci.failure_summarized}.
  */
 @Component
 public class AiEventListeners {
 
     private static final Logger log = LoggerFactory.getLogger(AiEventListeners.class);
     private final ObjectProvider<MeterRegistry> meterRegistryProvider;
+    private final CiFailureSummarizerService ciFailureSummarizerService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final AiCiExecutor aiExecutor;
 
-    public AiEventListeners(ObjectProvider<MeterRegistry> meterRegistryProvider) {
+    public AiEventListeners(
+            ObjectProvider<MeterRegistry> meterRegistryProvider,
+            CiFailureSummarizerService ciFailureSummarizerService,
+            ApplicationEventPublisher eventPublisher,
+            AiCiExecutor aiExecutor) {
         this.meterRegistryProvider = meterRegistryProvider;
+        this.ciFailureSummarizerService = ciFailureSummarizerService;
+        this.eventPublisher = eventPublisher;
+        this.aiExecutor = aiExecutor;
     }
 
     @EventListener
     public void on(CiFailureDetectedEvent event) {
         log.info("[{}] pipeline={} repo={} sha={}",
                 event.eventType(), event.pipelineId(), event.repo(), event.commitSha());
-        // TODO(PRODUCT_SPEC 5.2a): summarize via AiService, then publish
-        //   CiFailureSummarizedEvent(pipelineId, summary, relatedTaskId).
+        boolean submitted = aiExecutor.submit(() -> {
+            try {
+                CiFailureSummarizerService.CiSummaryResult result = ciFailureSummarizerService.summarizeForEvent(
+                        event.pipelineId(), event.rawLogReference(), event.repo(), event.commitSha());
+                if (result.newlyCreated() && result.summaryMarkdown() != null) {
+                    eventPublisher.publishEvent(new CiFailureSummarizedEvent(
+                            event.pipelineId(), result.summaryMarkdown(), null, Instant.now()));
+                }
+                recordConsumeMetric(event.eventType(), "success");
+            } catch (Exception e) {
+                log.error("Failed to summarize CI failure for pipeline={}", event.pipelineId(), e);
+                recordConsumeMetric(event.eventType(), "failure");
+            }
+        });
+        if (!submitted) {
+            log.warn("Rejected CI failure summarization task (executor saturated) pipeline={}", event.pipelineId());
+            recordConsumeMetric(event.eventType(), "rejected");
+        }
     }
 
     @EventListener

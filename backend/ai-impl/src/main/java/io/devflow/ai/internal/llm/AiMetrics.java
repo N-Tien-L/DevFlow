@@ -37,4 +37,8 @@ public class AiMetrics {
         registry.counter("devflow.ai.tokens", "feature", feature.tag(), "type", "completion")
                 .increment(completionTokens);
     }
+
+    public void ciSummary(String result) {
+        registry.counter("devflow.ai.ci_summary", "result", result).increment();
+    }
 }

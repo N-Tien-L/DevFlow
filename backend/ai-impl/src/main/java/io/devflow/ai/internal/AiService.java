@@ -4,6 +4,7 @@ import io.devflow.ai.api.AiServiceApi;
 import io.devflow.ai.api.ProjectQueryAnswer;
 import io.devflow.ai.api.TaskBreakdownProposal;
 import io.devflow.ai.internal.breakdown.TaskBreakdownService;
+import io.devflow.ai.internal.ci.CiFailureSummarizerService;
 import io.devflow.ai.internal.qa.ProjectQueryService;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -13,27 +14,25 @@ import org.springframework.stereotype.Service;
  * Q&amp;A, and CI/CD failure summarization. Task breakdown (T-032) lives in
  * {@link TaskBreakdownService}: a proposal only, never written to the board. Project Q&amp;A (T-033) lives in
  * {@link ProjectQueryService}: membership first, then answers grounded in Board data read through
- * {@code BoardApi} (never Board's internals — Section 10). Consumed by the
- * chat WebSocket gateway ({@link ChatGatewayController}) and the MCP server ({@link McpToolConfig}) — both are
- * thin adapters and must contain no AI logic of their own.
- *
- * <p>TODO(PRODUCT_SPEC Section 5.2): call the LLM through
- * {@link io.devflow.ai.internal.llm.AiChatGateway} (shared {@code ChatClient} with timeouts, retry,
- * circuit breaker and metrics; deterministic fallback when no provider is configured) and implement:
- * <ul>
- *   <li>{@link #summarizeCiFailure} — fetch the failure via {@code GitCiApi}, summarize,
- *       then publish {@code CiFailureSummarizedEvent}</li>
- * </ul>
+ * {@code BoardApi} (never Board's internals — Section 10). CI failure summarization (T-031) lives in
+ * {@link CiFailureSummarizerService}: redacts secrets, summarizes to 3 bullets under 100 words, and publishes
+ * {@code CiFailureSummarizedEvent}. Consumed by the chat WebSocket gateway ({@link ChatGatewayController})
+ * and the MCP server ({@link McpToolConfig}) — both are thin adapters and must contain no AI logic of their own.
  */
 @Service
 public class AiService implements AiServiceApi {
 
     private final TaskBreakdownService taskBreakdownService;
     private final ProjectQueryService projectQueryService;
+    private final CiFailureSummarizerService ciFailureSummarizerService;
 
-    public AiService(TaskBreakdownService taskBreakdownService, ProjectQueryService projectQueryService) {
+    public AiService(
+            TaskBreakdownService taskBreakdownService,
+            ProjectQueryService projectQueryService,
+            CiFailureSummarizerService ciFailureSummarizerService) {
         this.taskBreakdownService = taskBreakdownService;
         this.projectQueryService = projectQueryService;
+        this.ciFailureSummarizerService = ciFailureSummarizerService;
     }
 
     @Override
@@ -48,7 +47,6 @@ public class AiService implements AiServiceApi {
 
     @Override
     public String summarizeCiFailure(String pipelineId) {
-        // TODO(PRODUCT_SPEC 5.2a): fetch log via GitCiApi and summarize with the LLM.
-        return "CI failure summarization is not implemented yet (pipeline " + pipelineId + ").";
+        return ciFailureSummarizerService.summarizeFromApi(pipelineId);
     }
 }

@@ -8,9 +8,11 @@ dependencies {
     // Project Q&A (T-033) reads tasks through BoardApi and assignee display names through AuthApi.
     implementation(project(":board-api"))
     implementation(project(":auth-api"))
+    implementation(project(":gitci-api"))
 
     api("org.springframework.boot:spring-boot-starter-web")
     api("org.springframework.boot:spring-boot-starter-websocket")
+    api("org.springframework.boot:spring-boot-starter-data-jpa")
 
     // LLM client — provider-agnostic ChatClient. The OpenAI ChatModel is built by
     // AiChatClientConfig (not the starter's auto-config) so timeouts, retries and the
@@ -32,6 +34,7 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.awaitility:awaitility")
+    testImplementation("com.h2database:h2")
     // Resilience4j's Boot auto-config references actuator auto-config once spring-boot-actuator is present.
     testImplementation("org.springframework.boot:spring-boot-starter-actuator")
 }

@@ -154,6 +154,11 @@ devflow:
       max-output-tokens: 512
       # One extra model call when the answer is empty or too long.
       max-output-attempts: 2
+    # CI failure summarization (T-031): summarizes failure log into 3 bullet points <= 100 words.
+    ci-summary:
+      max-log-size-kb: ${AI_CI_MAX_LOG_SIZE_KB:32}
+      max-summary-words: 100
+      max-output-tokens: 512
   # Token-bucket policies per client key (capacity requests per period).
   rate-limit:
     policies:

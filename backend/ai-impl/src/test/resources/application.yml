@@ -1,5 +1,13 @@
-# ai-impl slice tests: no database, no real LLM provider.
+# ai-impl slice tests: in-memory H2, no real LLM provider.
 spring:
+  datasource:
+    url: jdbc:h2:mem:ai-test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
   ai:
     model:
       # The AI module builds its own ChatModel (AiChatClientConfig); keep every starter client off.
