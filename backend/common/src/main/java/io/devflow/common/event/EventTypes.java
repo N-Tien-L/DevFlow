@@ -30,6 +30,7 @@ public final class EventTypes {
 
     /** Published by Git &amp; CI. Consumed by AI service. */
     public static final String CI_FAILURE_DETECTED = "ci.failure_detected";
+    public static final String CI_FAILURE_LOG_READ_REQUESTED = "ci.failure_log_read_requested";
 
     /** Published by AI service. Consumed by Board, Notification. */
     public static final String CI_FAILURE_SUMMARIZED = "ci.failure_summarized";

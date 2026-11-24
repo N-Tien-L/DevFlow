@@ -150,7 +150,7 @@ gantt
      - Timeouts, Resilience4j retry + circuit breaker, `max-tokens` limits and request/latency/token metrics on every LLM call.
      - Structured prompt templates for Project Q&A, CI Failure Triage, and Task Decomposition.
   2. **Core AI Capabilities:**
-     - **CI Failure Summarization (`summarizeCiFailure`):** Consumes `CiFailureDetectedEvent` asynchronously, fetches the log via `GitCiApi`, **redacts secrets and truncates** it before calling the LLM, generates a 3-bullet remediation summary (idempotent per pipeline), and publishes `CiFailureSummarizedEvent`.
+     - **CI Failure Summarization (`summarizeCiFailure`):** Consumes `CiFailureDetectedEvent`, deduplicates by event ID and attempt, and requests the bounded, sanitized excerpt via the synchronous `CiFailureLogReadRequestedEvent`. It applies its own redaction and truncation before calling the LLM, generates a 3-bullet remediation summary, and publishes `CiFailureSummarizedEvent`.
      - **Task Breakdown (`proposeTaskBreakdown`):** Structured output (`TaskBreakdownProposal`) with 3–5 validated subtasks; a proposal only, never auto-created.
      - **Natural Language Q&A (`answerProjectQuery(userId, projectId, question)`):** Checks workspace membership first, then answers only from `BoardApi` data (grounded; task content is treated as data, not instructions).
      - **Deadline Risk Detection (`risk.deadline_flagged`):** Scans approaching due dates and flags slipping tasks.

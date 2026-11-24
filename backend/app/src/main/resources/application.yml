@@ -78,6 +78,9 @@ logging:
     org.springframework.ai.openai.OpenAiChatModel: error
     # BeanOutputConverter logs the raw model answer at ERROR when structured output fails to parse.
     org.springframework.ai.converter.BeanOutputConverter: off
+    # GitHub protocol diagnostics would include credentials or signed archive URLs.
+    org.apache.hc.client5.http.wire: off
+    org.apache.hc.client5.http.headers: off
 
 devflow:
   board:
@@ -85,6 +88,10 @@ devflow:
       # Enable only after V17, producer/consumer rollout and board-category preflight.
       auto-transition-enabled: ${BOARD_GIT_AUTO_TRANSITION_ENABLED:false}
   gitci:
+    ci:
+      fetch-enabled: ${CI_LOG_FETCH_ENABLED:false}
+      publish-enabled: ${CI_FAILURE_PUBLISH_ENABLED:false}
+      retention-enabled: ${CI_LOG_RETENTION_ENABLED:false}
     outbox:
       # Pause delivery without stopping durable enqueue from authenticated webhooks.
       worker-enabled: ${GIT_OUTBOX_WORKER_ENABLED:true}
