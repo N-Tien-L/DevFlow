@@ -1,24 +1,25 @@
 package io.devflow.common.event;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
- * {@code ci.failure_detected} — published by Git &amp; CI when a pipeline run fails.
- * Consumed by AI service, which summarizes the raw log into a likely cause
- * (PRODUCT_SPEC.md Section 5.2a, ARCHITECTURE.md Section 4).
- *
- * @param pipelineId      id of the failed pipeline/run
- * @param rawLogReference reference to the full raw log (e.g. storage key or URL) — not the
- *                        log itself, to keep event payloads small
- * @param repo            repository whose pipeline failed
- * @param commitSha       commit the failed pipeline ran against
+ * Emitted after the sanitized excerpt for a failed attempt has committed. For persisted
+ * events, pipelineId is the internal attempt UUID and rawLogReference is an opaque
+ * ci-log reference. Consumers deduplicate by eventId. Legacy events have no provenance
+ * and cannot authorize a log lookup.
  */
 public record CiFailureDetectedEvent(
-        String pipelineId, String rawLogReference, String repo, String commitSha, Instant occurredAt)
+        String pipelineId, String rawLogReference, String repo, String commitSha, Instant occurredAt,
+        UUID eventId, UUID repositoryId, UUID workspaceId, String providerRunId, int runAttempt)
         implements DevFlowEvent {
 
     public CiFailureDetectedEvent(String pipelineId, String rawLogReference, String repo, String commitSha) {
         this(pipelineId, rawLogReference, repo, commitSha, Instant.now());
+    }
+
+    public CiFailureDetectedEvent(String pipelineId, String rawLogReference, String repo, String commitSha, Instant occurredAt) {
+        this(pipelineId, rawLogReference, repo, commitSha, occurredAt, null, null, null, null, 0);
     }
 
     @Override

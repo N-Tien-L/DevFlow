@@ -146,7 +146,7 @@ gantt
      - Kỹ thuật xây dựng Prompt (Prompt Engineering):
        - Context-aware System Prompt: Đưa thông tin danh sách task, tiến độ board vào prompt để trả lời chính xác.
   2. **Nghiệp vụ AI Cốt lõi:**
-     - **Tóm tắt lỗi CI/CD (`summarizeCiFailure`):** Lắng nghe `CiFailureDetectedEvent` bất đồng bộ, lấy log qua `GitCiApi`, **che secret và cắt ngắn log** trước khi gửi LLM (idempotent theo pipeline), phân tích nguyên nhân gốc (root cause) từ raw log (Stacktrace, NullPointerException, thiếu biến môi trường...), sinh tóm tắt ngắn gọn và phát `CiFailureSummarizedEvent`.
+     - **Tóm tắt lỗi CI/CD (`summarizeCiFailure`):** Nhận `CiFailureDetectedEvent`, chống xử lý lặp theo event ID và attempt, rồi đọc đoạn log đã lọc qua `CiFailureLogReadRequestedEvent` đồng bộ. AI tiếp tục lọc và giới hạn đầu vào trước khi gọi LLM, sinh tóm tắt ngắn gọn và phát `CiFailureSummarizedEvent`.
      - **Phân rã công việc (`proposeTaskBreakdown`):** Nhận văn bản mô tả tính năng/bug → bóc tách thành danh sách 3–5 subtasks kèm ước lượng sơ bộ.
      - **Hỏi đáp dự án (`answerProjectQuery(userId, projectId, question)`):** Kiểm tra membership trước, chỉ trả lời từ dữ liệu `BoardApi` (nội dung task là dữ liệu, không phải lệnh). Trả lời các câu hỏi tự nhiên về trạng thái dự án ("Ai đang làm module auth?", "Còn bao nhiêu task chưa xong?").
      - **Cảnh báo trễ hạn (`risk.deadline_flagged`):** Phân tích các task gần due date mà chưa vào `In Review`/`Done` để phát cảnh báo.

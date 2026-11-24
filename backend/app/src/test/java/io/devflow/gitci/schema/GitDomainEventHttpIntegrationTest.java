@@ -410,7 +410,7 @@ class GitDomainEventHttpIntegrationTest {
         var ignored=prPayload("opened","T-001",0,false); ignored.put("action","labeled");
         assertThat(send(json.writeValueAsString(ignored),"pull_request").statusCode()).isEqualTo(204);
         assertThat(send("{\"zen\":\"test\",\"hook_id\":1,\"repository\":{\"id\":123}}","ping").statusCode()).isEqualTo(200);
-        assertThat(send("{\"action\":\"completed\",\"workflow_run\":{},\"repository\":{\"id\":123}}","workflow_run").statusCode()).isEqualTo(503);
+        assertThat(send("{\"action\":\"completed\",\"workflow_run\":{},\"repository\":{\"id\":123}}","workflow_run").statusCode()).isEqualTo(400);
         outbox.dispatch(); assertThat(probe.received).isEmpty(); assertThat(count("git_domain_event_outbox")).isZero();
     }
 

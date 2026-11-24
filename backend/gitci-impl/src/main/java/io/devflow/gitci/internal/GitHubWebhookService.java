@@ -30,9 +30,12 @@ class GitHubWebhookService {
     private final GitHubIntegrationQuota quota = new GitHubIntegrationQuota();
     private final ObjectMapper mapper;
     private final GitWebhookIngestion ingestion;
+    private final CiWorkflowIngestion workflows;
 
-    GitHubWebhookService(JdbcTemplate jdbc, PlatformTransactionManager manager, GitHubWebhookProperties properties, GitWebhookIngestion ingestion) {
+    GitHubWebhookService(JdbcTemplate jdbc, PlatformTransactionManager manager, GitHubWebhookProperties properties,
+                         GitWebhookIngestion ingestion, CiWorkflowIngestion workflows) {
         this.ingestion = ingestion;
+        this.workflows = workflows;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(manager);
         this.properties = properties;
@@ -76,13 +79,14 @@ class GitHubWebhookService {
                 case "pull_request", "workflow_run" -> {
                     if (!root.path("action").isTextual() || !root.path(event).isObject())
                         throw new WebhookFailure(400, "WEBHOOK_INVALID_PAYLOAD");
-                    if (event.equals("workflow_run")) throw new WebhookFailure(503, "WEBHOOK_HANDLER_NOT_READY");
                 }
                 default -> { return 204; }
             }
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body));
-            GitWebhookIngestion.Plan plan = ingestion.prepare(event, root, binding.remoteId());
-            return transactions.execute(status -> storeWebhook(id, binding, delivery, digest, event, plan));
+            boolean workflow = event.equals("workflow_run");
+            GitWebhookIngestion.Plan plan = workflow ? null : ingestion.prepare(event, root, binding.remoteId());
+            CiWorkflowIngestion.Attempt attempt = workflow ? workflows.prepare(root, binding.remoteId()) : null;
+            return transactions.execute(status -> storeWebhook(id, binding, delivery, digest, event, plan, attempt));
         } catch (WebhookFailure ex) {
             throw ex;
         } catch (org.springframework.transaction.TransactionException | DataAccessException ex) {
@@ -92,7 +96,8 @@ class GitHubWebhookService {
         }
     }
 
-    private int storeWebhook(UUID id, Binding expected, String delivery, String digest, String event, GitWebhookIngestion.Plan plan) {
+    private int storeWebhook(UUID id, Binding expected, String delivery, String digest, String event,
+                             GitWebhookIngestion.Plan plan, CiWorkflowIngestion.Attempt attempt) {
         jdbc.execute("SET LOCAL lock_timeout = '2s'");
         jdbc.execute("SET LOCAL statement_timeout = '4s'");
         List<Binding> rows = jdbc.query("SELECT workspace_id, provider, remote_repo_id, webhook_secret_ref, repository_url "
@@ -112,7 +117,8 @@ class GitHubWebhookService {
             if (completed == null || completed != 1) throw new WebhookFailure(503, "WEBHOOK_UNAVAILABLE");
             return 204;
         }
-        ingestion.persist(id, expected.workspaceId(), expected.url(), plan);
+        if (event.equals("workflow_run")) workflows.persist(id, attempt);
+        else ingestion.persist(id, expected.workspaceId(), expected.url(), plan);
         jdbc.update("UPDATE github_webhook_receipts SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, "
                 + "updated_at = CURRENT_TIMESTAMP WHERE repository_id = ? AND delivery_id = ?", id, delivery);
         return event.equals("ping") ? 200 : 204;
