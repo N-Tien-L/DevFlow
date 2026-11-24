@@ -41,14 +41,14 @@ public class GitTaskTransitionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 6)
     public String apply(GitTaskTransition event) {
+        StatusCategory target = event.eventType() == null ? null : event.target();
         if (event.eventId() == null || event.repositoryId() == null || event.workspaceId() == null
-                || event.taskId() == null || event.occurredAt() == null || event.eventType() == null
+                || event.taskId() == null || event.occurredAt() == null || target == null
                 || event.objectKey() == null || event.objectKey().isBlank()
                 || event.repo() == null || event.repo().isBlank()) {
-            throw new GitTransitionException("INVALID_EVENT");
+            return "INVALID_EVENT";
         }
-        StatusCategory target = event.target();
-        if (!enabled) throw new GitTransitionException("DISABLED");
+        if (!enabled) return "DISABLED";
         Instant receivedAt = Instant.now();
         jdbc.execute("SET LOCAL lock_timeout = '2s'");
         jdbc.execute("SET LOCAL statement_timeout = '4s'");
@@ -67,7 +67,7 @@ public class GitTaskTransitionService {
         if (task == null) return "MISSING";
         if (!task.getColumn().getBoard().getId().equals(boardId)
                 || !board.getWorkspaceId().equals(event.workspaceId())) {
-            throw new GitTransitionException("TENANT_MISMATCH");
+            return "TENANT_MISMATCH";
         }
         String fingerprint = fingerprint(event);
         var receipts = jdbc.queryForList("SELECT fingerprint FROM board_git_event_receipts WHERE event_id=?",
@@ -84,16 +84,18 @@ public class GitTaskTransitionService {
         else {
             var destinations = columns.findByBoard_IdOrderByPositionAscIdAsc(boardId).stream()
                     .filter(column -> column.getStatusCategory() == target).toList();
-            if (destinations.isEmpty()) throw new GitTransitionException("TARGET_MISSING");
-            if (destinations.size() != 1) throw new GitTransitionException("TARGET_AMBIGUOUS");
-            try {
-                moves.move(task, board, destinations.get(0), null,
-                        TaskStatusChangedEvent.StatusChangeCause.GIT, null, event.eventId());
-            } catch (BoardApiException exception) {
-                if (!"TASK_LIMIT_REACHED".equals(exception.code())) throw exception;
-                throw new GitTransitionException("TARGET_FULL");
+            if (destinations.isEmpty()) outcome = "SKIPPED_TARGET_MISSING";
+            else if (destinations.size() != 1) outcome = "SKIPPED_TARGET_AMBIGUOUS";
+            else {
+                try {
+                    moves.move(task, board, destinations.get(0), null,
+                            TaskStatusChangedEvent.StatusChangeCause.GIT, null, event.eventId());
+                } catch (BoardApiException exception) {
+                    if (!"TASK_LIMIT_REACHED".equals(exception.code())) throw exception;
+                    throw new GitTransitionException("TARGET_FULL");
+                }
+                outcome = "APPLIED";
             }
-            outcome = "APPLIED";
         }
         jdbc.update("""
                 INSERT INTO board_git_event_receipts(event_id,task_id,repository_id,workspace_id,

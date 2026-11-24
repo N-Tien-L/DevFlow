@@ -1,8 +1,9 @@
--- GitCI snapshot: retries retain the original tenant and stable V16 event ID.
+-- GitCI snapshot: retries retain the original tenant and stable V17 event ID.
 ALTER TABLE git_domain_event_outbox ADD COLUMN workspace_id UUID;
 UPDATE git_domain_event_outbox o SET workspace_id = r.workspace_id
 FROM repositories r WHERE r.id = o.repository_id;
 ALTER TABLE git_domain_event_outbox ALTER COLUMN workspace_id SET NOT NULL;
+CREATE INDEX ix_git_outbox_claim_token ON git_domain_event_outbox(claim_token) WHERE status = 'PROCESSING';
 
 -- Board owns the manual watermark and receipts; no cross-module foreign keys.
 ALTER TABLE tasks ADD COLUMN last_manual_status_changed_at TIMESTAMPTZ;
@@ -15,7 +16,9 @@ CREATE TABLE board_git_event_receipts (
     workspace_id UUID NOT NULL,
     event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('git.commit_linked','git.pr_opened','git.pr_merged')),
     fingerprint VARCHAR(64) NOT NULL,
-    outcome VARCHAR(24) NOT NULL CHECK (outcome IN ('APPLIED','NOOP','STALE_MANUAL','ARCHIVED')),
+    outcome VARCHAR(32) NOT NULL CHECK (outcome IN (
+        'APPLIED','NOOP','STALE_MANUAL','ARCHIVED','SKIPPED_TARGET_MISSING','SKIPPED_TARGET_AMBIGUOUS'
+    )),
     received_at TIMESTAMPTZ NOT NULL,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

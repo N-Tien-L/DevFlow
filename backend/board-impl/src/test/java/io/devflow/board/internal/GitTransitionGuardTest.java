@@ -39,14 +39,14 @@ class GitTransitionGuardTest {
 
     @ParameterizedTest @MethodSource("invalid")
     void missingProvenanceNeverReachesPersistence(GitTaskTransition event) {
-        assertThatThrownBy(() -> service(true).apply(event)).hasMessage("INVALID_EVENT");
+        assertThat(service(true).apply(event)).isEqualTo("INVALID_EVENT");
         verifyNoInteractions(jdbc,boards,tasks,columns,moves);
     }
 
-    @Test void disabledConsumerDefersInsteadOfAcknowledging() {
+    @Test void disabledConsumerSkipsWithoutThrowingOrWritingReceipt() {
         UUID id=UUID.randomUUID();
         var request=new GitTaskTransition(id,id,id,id,EventTypes.GIT_COMMIT_LINKED,Instant.now(),"sha","repo",null,null);
-        assertThatThrownBy(() -> service(false).apply(request)).hasMessage("DISABLED");
+        assertThat(service(false).apply(request)).isEqualTo("DISABLED");
         verifyNoInteractions(jdbc,boards,tasks,columns,moves);
     }
 
@@ -59,7 +59,7 @@ class GitTransitionGuardTest {
             assertThat(org.slf4j.MDC.get("userId")).isNull();
             assertThat(org.slf4j.MDC.get("boardClientIp")).isNull();
             assertThat(org.slf4j.MDC.get("correlationId")).isNotEqualTo("parent");
-            if(reject) throw new GitTransitionException("TARGET_MISSING");
+            if(reject) throw new GitTransitionException("TARGET_FULL");
             return "APPLIED";
         });
         var listener=new GitActivityEventListener(service,metrics);
@@ -70,7 +70,7 @@ class GitTransitionGuardTest {
         org.slf4j.MDC.put("boardClientIp","127.0.0.1");
         var previous=org.slf4j.MDC.getCopyOfContextMap();
         try {
-            if(reject) assertThatThrownBy(()->listener.on(event)).hasMessage("TARGET_MISSING");
+            if(reject) assertThatThrownBy(()->listener.on(event)).hasMessage("TARGET_FULL");
             else assertThatCode(()->listener.on(event)).doesNotThrowAnyException();
             assertThat(org.slf4j.MDC.getCopyOfContextMap()).isEqualTo(previous);
         } finally { org.slf4j.MDC.clear(); }

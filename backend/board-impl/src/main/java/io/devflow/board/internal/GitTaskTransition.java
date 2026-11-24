@@ -13,7 +13,7 @@ record GitTaskTransition(UUID eventId, UUID repositoryId, UUID workspaceId, UUID
             case EventTypes.GIT_COMMIT_LINKED -> StatusCategory.IN_PROGRESS;
             case EventTypes.GIT_PR_OPENED -> StatusCategory.IN_REVIEW;
             case EventTypes.GIT_PR_MERGED -> StatusCategory.DONE;
-            default -> throw new GitTransitionException("INVALID_EVENT");
+            default -> null;
         };
     }
 

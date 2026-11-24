@@ -1,6 +1,6 @@
 # T-024 — Vận hành tự động chuyển cột task
 
-Áp dụng V17 và code producer/consumer T-024 cùng nhau. [Kế hoạch](14_tu_dong_chuyen_trang_thai_task_plan.md) · [Kết quả kiểm chứng](14_tu_dong_chuyen_trang_thai_task_results.md) · [Git outbox T-023](13_phat_su_kien_git_operations.md).
+Áp dụng V18 và code producer/consumer T-024 cùng nhau. [Kế hoạch](14_tu_dong_chuyen_trang_thai_task_plan.md) · [Kết quả kiểm chứng](14_tu_dong_chuyen_trang_thai_task_results.md) · [Git outbox T-023](13_phat_su_kien_git_operations.md).
 
 ## Hành vi đã triển khai
 
@@ -13,12 +13,10 @@ Task event và CARD_MOVED được phát **best effort sau commit** theo baselin
 ## Rollout
 
 1. Sao lưu DB theo quy trình môi trường; pause worker bằng `GIT_OUTBOX_WORKER_ENABLED=false`, restart backend để áp dụng. Webhook vẫn enqueue; thông báo Git cũng bị trì hoãn.
-2. Deploy code producer + consumer và migration V17. Không sửa checksum V1–V16. V17 snapshot workspace từ repository cho outbox cũ; backfill manual watermark bằng `tasks.updated_at` cho task cũ. Đây là chính sách bảo thủ: Git cũ có thể bị bỏ qua dù updated_at chỉ đến từ chỉnh nội dung.
+2. Deploy code producer + consumer và migration V18. Không sửa checksum V1–V17. V18 snapshot workspace từ repository cho outbox cũ, tạo index `ix_git_outbox_claim_token` để gia hạn lease theo batch trước mỗi row phát đi, và backfill manual watermark bằng `tasks.updated_at` cho task cũ. Đây là chính sách bảo thủ: Git cũ có thể bị bỏ qua dù updated_at chỉ đến từ chỉnh nội dung.
 3. Kiểm tra Flyway/Hibernate validate và cấu hình cột. Mỗi board cần đúng một đích IN_PROGRESS, IN_REVIEW, DONE cho các bước muốn tự động hóa. Không ép unique toàn bộ category vì nhiều cột cùng nhóm vẫn là tính năng hợp lệ.
-4. Đặt `BOARD_GIT_AUTO_TRANSITION_ENABLED=true` **trước khi resume worker**. Sau đó đặt `GIT_OUTBOX_WORKER_ENABLED=true`, restart, chạy smoke và theo dõi backlog/FAILED/metric. Compose đã truyền hai biến này từ `.env`; mặc định automation tắt.
-5. Kiểm tra và requeue FAILED do DISABLED/cấu hình cũ sau khi đã sửa nguyên nhân; giữ nguyên event ID và payload.
-
-Khi consumer tắt mà worker vẫn chạy, listener ném DISABLED; outbox retry rồi có thể FAILED sau 8 attempts. Không có đường tắt trả thành công làm mất event. Các switch đọc lúc khởi động, không phải hot reload.
+4. Khi `BOARD_GIT_AUTO_TRANSITION_ENABLED=false` (mặc định), consumer trả về `DISABLED` (không ném lỗi, không ghi receipt) để không làm hỏng outbox hay chặn Notification. Đặt `BOARD_GIT_AUTO_TRANSITION_ENABLED=true` khi sẵn sàng kích hoạt tự động chuyển cột cho các event mới. Các switch đọc lúc khởi động, không phải hot reload.
+5. Kiểm tra và requeue các row FAILED do lỗi tạm thời (`TARGET_FULL`, lock/DB) sau khi đã xử lý nguyên nhân; giữ nguyên event ID và payload.
 
 ## Chẩn đoán và khôi phục
 
@@ -50,10 +48,11 @@ WHERE source_event_id = '<event-uuid>'::uuid;
 
 | Reason | Xử lý |
 |---|---|
-| TARGET_MISSING / TARGET_AMBIGUOUS | Sửa category/cột qua Board UI theo quyền hiện có. Không đoán đích, không tự tạo cột trong consumer. |
-| TARGET_FULL | Giải phóng chỗ hoặc điều chỉnh cấu hình capacity theo quy trình vận hành, rồi retry/requeue. |
-| DISABLED | Bật consumer, xác nhận cùng phiên bản producer/V17, rồi resume/requeue. |
-| INVALID_EVENT / TENANT_MISMATCH / EVENT_CONFLICT | Điều tra producer/phiên bản/trust boundary. Không sửa tenant, timestamp hoặc ID để vượt guard. |
+| SKIPPED_TARGET_MISSING / SKIPPED_TARGET_AMBIGUOUS | Ghi terminal receipt và trả về không ném lỗi (không đốt retry outbox, không chặn Notification). Sửa category/cột qua Board UI cho các sự kiện sau; không đoán đích, không tự tạo cột trong consumer. |
+| TARGET_FULL | Lỗi tạm thời: ném lỗi về retry queue T-023. Giải phóng chỗ hoặc điều chỉnh cấu hình capacity theo quy trình vận hành, rồi retry/requeue. |
+| DISABLED | Consumer đang tắt cờ: trả về bình thường (outcome=SKIPPED, không ghi receipt) để outbox/Notification chạy bình thường. Bật `BOARD_GIT_AUTO_TRANSITION_ENABLED=true` và restart để áp dụng cho sự kiện mới. |
+| INVALID_EVENT / TENANT_MISMATCH | Bỏ qua (outcome=SKIPPED, không ghi receipt, không chặn listener khác). Điều tra producer/trust boundary; không sửa tenant, timestamp hoặc ID để vượt guard. |
+| EVENT_CONFLICT | Trùng `event_id` nhưng khác fingerprint payload: fail-closed (ném lỗi). Điều tra ngay producer/corruption. |
 | DATABASE_OR_CONSUMER | Xem DB/lock/optimistic/audit và log an toàn; lỗi rollback đi tới retry T-023. |
 | STALE_MANUAL | Quyết định cuối: Git occurredAt <= mốc đổi cột tay. Dùng thao tác tay nếu cần, không backdate watermark. |
 | NOOP / ARCHIVED / DUPLICATE / MISSING | Không có move; không tạo audit/task event/frame thừa. MISSING không tạo receipt FK giả. |

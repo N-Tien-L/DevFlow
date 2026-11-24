@@ -145,6 +145,11 @@ public class GitDomainEventOutbox {
                     AND EXISTS (SELECT 1 FROM repositories r WHERE r.id=repository_id AND r.workspace_id=git_domain_event_outbox.workspace_id)
                 """, Integer.class, entry.id(), entry.token());
         if (owned == null || owned == 0) return; // Deleted, expired or reclaimed; do not publish stale claims.
+        int renewed = jdbc.update("""
+                UPDATE git_domain_event_outbox SET lease_until=CURRENT_TIMESTAMP + INTERVAL '60 seconds'
+                WHERE status='PROCESSING' AND claim_token=? AND lease_until>CURRENT_TIMESTAMP
+                """, entry.token());
+        if (renewed == 0) return; // Lease expired before renewal; do not publish stale claims.
         long start = System.nanoTime();
         try {
             publisher.publishEvent(entry.event());

@@ -4,6 +4,7 @@ import io.devflow.common.event.GitCommitLinkedEvent;
 import io.devflow.common.event.GitPrMergedEvent;
 import io.devflow.common.event.GitPrOpenedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -12,10 +13,12 @@ import org.slf4j.MDC;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-/** Synchronous adapters: the worker observes transaction failure and retries the same event ID. */
+/** Synchronous adapters: transient failures escape to GitCI's bounded retry queue; permanent skips do not block sibling listeners. */
 @Component
 public class GitActivityEventListener {
     private static final Logger log = LoggerFactory.getLogger(GitActivityEventListener.class);
+    private static final Set<String> SKIPPED_REASONS = Set.of(
+            "DISABLED", "INVALID_EVENT", "TENANT_MISMATCH", "SKIPPED_TARGET_MISSING", "SKIPPED_TARGET_AMBIGUOUS");
     private final GitTaskTransitionService transitions;
     private final MeterRegistry metrics;
 
@@ -46,6 +49,7 @@ public class GitActivityEventListener {
         var previous = MDC.getCopyOfContextMap();
         String outcome = "ERROR";
         String reason = "DATABASE_OR_CONSUMER";
+        String eventType = event.eventType() == null ? "unknown" : event.eventType();
         long start = System.nanoTime();
         try {
             MDC.clear();
@@ -53,17 +57,17 @@ public class GitActivityEventListener {
             MDC.put("sourceEventId", String.valueOf(event.eventId()));
             // Keep context alive through the transactional proxy's commit and afterCommit dispatch.
             reason = transitions.apply(event);
-            outcome = "SUCCESS";
+            outcome = SKIPPED_REASONS.contains(reason) ? "SKIPPED" : "SUCCESS";
         } catch (RuntimeException exception) {
             if (exception instanceof GitTransitionException rejected) reason = rejected.reason();
             throw exception;
         } finally {
             log.info("Board Git transition eventId={} taskId={} type={} outcome={} reason={}",
-                    event.eventId(), event.taskId(), event.eventType(), outcome, reason);
+                    event.eventId(), event.taskId(), eventType, outcome, reason);
             try {
-                metrics.counter("devflow.board.git.transitions", "eventType", event.eventType(),
+                metrics.counter("devflow.board.git.transitions", "eventType", eventType,
                         "outcome", outcome, "reason", reason).increment();
-                metrics.timer("devflow.board.git.transition.duration", "eventType", event.eventType())
+                metrics.timer("devflow.board.git.transition.duration", "eventType", eventType)
                         .record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
             } catch (RuntimeException ignored) {
                 log.warn("Board Git transition metric unavailable");

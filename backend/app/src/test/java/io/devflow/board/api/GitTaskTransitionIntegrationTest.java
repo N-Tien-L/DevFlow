@@ -98,6 +98,7 @@ class GitTaskTransitionIntegrationTest {
 
     @BeforeEach void fixtures() {
         jdbc.update("DELETE FROM repositories");
+        jdbc.update("DELETE FROM notifications");
         jdbc.update("DELETE FROM boards");
         jdbc.update("DELETE FROM board_audit_events");
         probe.rejectStatus=false;
@@ -180,14 +181,29 @@ class GitTaskTransitionIntegrationTest {
     }
 
     @Test void categoryAmbiguityMissingAndCapacityRollbackThenRecover() {
-        var event=event(0,UUID.randomUUID(),TIME);
-        UUID extra=column("IN_PROGRESS"); reject(event,"TARGET_AMBIGUOUS");
+        var before=row();
+        var ambiguousEvent=event(0,UUID.randomUUID(),TIME);
+        UUID extra=column("IN_PROGRESS");
+        events.publishEvent(ambiguousEvent);
+        assertThat(row()).isEqualTo(before);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM board_git_event_receipts WHERE event_id=?",String.class,id(ambiguousEvent))).isEqualTo("SKIPPED_TARGET_AMBIGUOUS");
+        events.publishEvent(ambiguousEvent);
+        assertThat(count("board_git_event_receipts")).isEqualTo(1);
         jdbc.update("DELETE FROM columns WHERE id IN (?,?)",extra,columns.get("IN_PROGRESS"));
-        reject(event,"TARGET_MISSING");
+        var missingEvent=event(0,UUID.randomUUID(),TIME);
+        events.publishEvent(missingEvent);
+        assertThat(row()).isEqualTo(before);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM board_git_event_receipts WHERE event_id=?",String.class,id(missingEvent))).isEqualTo("SKIPPED_TARGET_MISSING");
+        assertThat(count("board_audit_events")).isZero(); assertThat(probe.statuses).isEmpty();
         UUID destination=column("IN_PROGRESS"); columns.put("IN_PROGRESS",destination);
         UUID a=task(destination,0),b=task(destination,1),c=task(destination,2);
-        reject(event,"TARGET_FULL"); jdbc.update("DELETE FROM tasks WHERE id=?",c);
-        events.publishEvent(event); assertThat(row().get("position")).isEqualTo(2);
+        var fullEvent=event(0,UUID.randomUUID(),TIME);
+        assertThatThrownBy(() -> events.publishEvent(fullEvent)).hasMessageContaining("TARGET_FULL");
+        assertThat(row()).isEqualTo(before);
+        assertThat(count("board_git_event_receipts")).isEqualTo(2);
+        assertThat(count("board_audit_events")).isZero(); assertThat(probe.statuses).isEmpty();
+        jdbc.update("DELETE FROM tasks WHERE id=?",c);
+        events.publishEvent(fullEvent); assertThat(row().get("position")).isEqualTo(2);
         assertThat(row().get("column_id")).isEqualTo(destination);
         assertThat(jdbc.queryForList("SELECT position FROM tasks WHERE column_id=? ORDER BY position",Integer.class,destination)).containsExactly(0,1,2);
     }
@@ -198,8 +214,8 @@ class GitTaskTransitionIntegrationTest {
     }
 
     @Test void archivedMissingForeignAndLegacyEventsFailClosed() {
-        reject(new GitCommitLinkedEvent(task,"a".repeat(40),"test/repo",null,TIME),"INVALID_EVENT");
-        reject(new GitCommitLinkedEvent(task,"a".repeat(40),"test/repo",null,TIME,UUID.randomUUID(),REPO,UUID.randomUUID()),"TENANT_MISMATCH");
+        skipWithoutReceipt(new GitCommitLinkedEvent(task,"a".repeat(40),"test/repo",null,TIME),"INVALID_EVENT");
+        skipWithoutReceipt(new GitCommitLinkedEvent(task,"a".repeat(40),"test/repo",null,TIME,UUID.randomUUID(),REPO,UUID.randomUUID()),"TENANT_MISMATCH");
         jdbc.update("UPDATE boards SET is_archived=true WHERE id=?",board);
         events.publishEvent(event(2,UUID.randomUUID(),TIME));
         assertThat(row().get("column_id")).isEqualTo(columns.get("TODO"));
@@ -299,14 +315,15 @@ class GitTaskTransitionIntegrationTest {
     }
 
     @Test void workerFailureExhaustionAndRequeuePreserveIdAndSnapshot() throws Exception {
-        jdbc.update("DELETE FROM columns WHERE id=?",columns.get("IN_PROGRESS"));
+        UUID destination=columns.get("IN_PROGRESS");
+        task(destination,0); task(destination,1); UUID filler=task(destination,2);
         assertThat(webhook(0)).isEqualTo(204);
         UUID eventId=jdbc.queryForObject("SELECT id FROM git_domain_event_outbox",UUID.class);
         for(int i=0;i<8;i++) { jdbc.update("UPDATE git_domain_event_outbox SET next_attempt_at=CURRENT_TIMESTAMP"); outbox.dispatch(); }
         assertThat(jdbc.queryForObject("SELECT status FROM git_domain_event_outbox",String.class)).isEqualTo("FAILED");
         assertThat(count("board_git_event_receipts")).isZero();
-        UUID fixed=column("IN_PROGRESS"); assertThat(outbox.requeue(eventId)).isTrue(); outbox.dispatch();
-        assertThat(row().get("column_id")).isEqualTo(fixed);
+        jdbc.update("DELETE FROM tasks WHERE id=?",filler); assertThat(outbox.requeue(eventId)).isTrue(); outbox.dispatch();
+        assertThat(row().get("column_id")).isEqualTo(destination);
         assertThat(jdbc.queryForObject("SELECT event_id FROM board_git_event_receipts",UUID.class)).isEqualTo(eventId);
         assertThat(jdbc.queryForObject("SELECT workspace_id FROM git_domain_event_outbox",UUID.class)).isEqualTo(workspace);
     }
@@ -339,10 +356,15 @@ class GitTaskTransitionIntegrationTest {
     }
 
     @Test void targetOnAnotherBoardIsNeverUsed() {
+        var before=row();
         jdbc.update("DELETE FROM columns WHERE id=?",columns.get("IN_PROGRESS"));
         UUID other=jdbc.queryForObject("INSERT INTO boards(workspace_id,name) VALUES (?,'other') RETURNING id",UUID.class,workspace);
         jdbc.update("INSERT INTO columns(board_id,name,position,status_category) VALUES (?,'other target',0,'IN_PROGRESS')",other);
-        reject(event(0,UUID.randomUUID(),TIME),"TARGET_MISSING");
+        var event=event(0,UUID.randomUUID(),TIME);
+        events.publishEvent(event);
+        assertThat(row()).isEqualTo(before);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM board_git_event_receipts WHERE event_id=?",String.class,id(event))).isEqualTo("SKIPPED_TARGET_MISSING");
+        assertThat(count("board_audit_events")).isZero(); assertThat(probe.statuses).isEmpty();
     }
 
     @ParameterizedTest @ValueSource(ints={0,1,2})
@@ -473,11 +495,13 @@ class GitTaskTransitionIntegrationTest {
                 git[0]=pool.submit(()->events.publishEvent(event(0,UUID.randomUUID(),TIME)));
                 awaitBlocked(pid);
             });
-            if(action.equals("deleteTarget")||action.equals("recategorize"))
-                assertThatThrownBy(()->git[0].get(10,TimeUnit.SECONDS)).hasCauseInstanceOf(RuntimeException.class).hasMessageContaining("TARGET_MISSING");
-            else git[0].get(10,TimeUnit.SECONDS);
+            git[0].get(10,TimeUnit.SECONDS);
             assertThat(count("board_audit_events")).isZero(); assertThat(probe.statuses).isEmpty();
-            assertThat(count("board_git_event_receipts")).isEqualTo(action.equals("archive")?1:0);
+            boolean expectsReceipt = action.equals("archive") || action.equals("deleteTarget") || action.equals("recategorize");
+            assertThat(count("board_git_event_receipts")).isEqualTo(expectsReceipt?1:0);
+            if(action.equals("deleteTarget")||action.equals("recategorize")) {
+                assertThat(jdbc.queryForObject("SELECT outcome FROM board_git_event_receipts",String.class)).isEqualTo("SKIPPED_TARGET_MISSING");
+            }
         } finally { pool.shutdownNow(); }
     }
 
@@ -596,9 +620,46 @@ class GitTaskTransitionIntegrationTest {
                 changed.equals("task")?otherTask:task,changed.equals("objectKey")?"b".repeat(40):initial.commitSha(),initial.repo(),
                 changed.equals("author")?"different-author":null,changed.equals("timestamp")?TIME.plusSeconds(1):TIME,eventId,
                 changed.equals("repository")?UUID.randomUUID():REPO,changed.equals("workspace")?UUID.randomUUID():workspace);
-        assertThatThrownBy(()->events.publishEvent(conflict)).hasMessageContaining(changed.equals("workspace")?"TENANT_MISMATCH":"EVENT_CONFLICT");
+        if(changed.equals("workspace")) {
+            double beforeSkip=metrics.counter("devflow.board.git.transitions","eventType",EventTypes.GIT_COMMIT_LINKED,"outcome","SKIPPED","reason","TENANT_MISMATCH").count();
+            events.publishEvent(conflict);
+            assertThat(metrics.counter("devflow.board.git.transitions","eventType",EventTypes.GIT_COMMIT_LINKED,"outcome","SKIPPED","reason","TENANT_MISMATCH").count()).isEqualTo(beforeSkip+1);
+        } else {
+            assertThatThrownBy(()->events.publishEvent(conflict)).hasMessageContaining("EVENT_CONFLICT");
+        }
         assertThat(row()).isEqualTo(before); assertThat(jdbc.queryForMap("SELECT * FROM tasks WHERE id=?",otherTask)).isEqualTo(otherBefore);
         assertThat(count("board_git_event_receipts")).isEqualTo(1); assertThat(count("board_audit_events")).isEqualTo(1);
+    }
+
+    @Test void missingAndAmbiguousTargetsPublishOutboxAndStillDeliverPrNotification() throws Exception {
+        jdbc.update("UPDATE tasks SET assignee_id=? WHERE id=?",secondMember,task);
+        jdbc.update("DELETE FROM columns WHERE id=?",columns.get("IN_REVIEW"));
+        column("DONE"); // Create ambiguous DONE columns
+        assertThat(webhook(1)).isEqualTo(204);
+        assertThat(webhook(2)).isEqualTo(204);
+        outbox.dispatch();
+        assertThat(jdbc.queryForList("SELECT status FROM git_domain_event_outbox",String.class)).containsOnly("PUBLISHED");
+        assertThat(jdbc.queryForList("SELECT outcome FROM board_git_event_receipts ORDER BY event_type",String.class))
+                .containsExactlyInAnyOrder("SKIPPED_TARGET_MISSING","SKIPPED_TARGET_AMBIGUOUS");
+        assertThat(row().get("column_id")).isEqualTo(columns.get("TODO"));
+        assertThat(count("board_audit_events")).isZero();
+        assertThat(jdbc.queryForList("SELECT type FROM notifications WHERE recipient_id=? AND reference_id=? ORDER BY type",
+                String.class,secondMember,task)).containsExactly("git.pr_merged","git.pr_opened");
+    }
+
+    @Test void batchLeaseRenewsBeforeEachRowAndRejectsExpiredLease() {
+        UUID secondTask=task(columns.get("TODO"),1);
+        jdbc.update("INSERT INTO git_domain_event_outbox(id,repository_id,workspace_id,task_id,event_type,git_object_key,repo,occurred_at) VALUES (?,?,?,?,'git.commit_linked',?,'test/repo',?)",UUID.randomUUID(),REPO,workspace,task,"a".repeat(40),Timestamp.from(TIME));
+        jdbc.update("INSERT INTO git_domain_event_outbox(id,repository_id,workspace_id,task_id,event_type,git_object_key,repo,occurred_at) VALUES (?,?,?,?,'git.commit_linked',?,'test/repo',?)",UUID.randomUUID(),REPO,workspace,secondTask,"b".repeat(40),Timestamp.from(TIME));
+        var claimed=outbox.claim(); assertThat(claimed).hasSize(2);
+        jdbc.update("UPDATE git_domain_event_outbox SET lease_until=CURRENT_TIMESTAMP + INTERVAL '5 seconds'");
+        outbox.publish(claimed.get(0));
+        assertThat(jdbc.queryForObject("SELECT status FROM git_domain_event_outbox WHERE id=?",String.class,claimed.get(0).id())).isEqualTo("PUBLISHED");
+        assertThat(jdbc.queryForObject("SELECT lease_until > CURRENT_TIMESTAMP + INTERVAL '30 seconds' FROM git_domain_event_outbox WHERE id=?",Boolean.class,claimed.get(1).id())).isTrue();
+        jdbc.update("UPDATE git_domain_event_outbox SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id=?",claimed.get(1).id());
+        outbox.publish(claimed.get(1));
+        assertThat(jdbc.queryForObject("SELECT status FROM git_domain_event_outbox WHERE id=?",String.class,claimed.get(1).id())).isEqualTo("PROCESSING");
+        assertThat(count("board_git_event_receipts")).isEqualTo(1);
     }
 
     @Test void multipleTasksRepositoriesAndPullRequestsUseTheFirstEligibleMerge() {
@@ -612,8 +673,11 @@ class GitTaskTransitionIntegrationTest {
         assertThat(probe.statuses).hasSize(4);
     }
 
-    void reject(DevFlowEvent event,String reason) {
-        var before=row(); assertThatThrownBy(() -> events.publishEvent(event)).hasMessageContaining(reason);
+    void skipWithoutReceipt(DevFlowEvent event,String reason) {
+        var before=row();
+        double beforeCount=metrics.counter("devflow.board.git.transitions","eventType",event.eventType(),"outcome","SKIPPED","reason",reason).count();
+        events.publishEvent(event);
+        assertThat(metrics.counter("devflow.board.git.transitions","eventType",event.eventType(),"outcome","SKIPPED","reason",reason).count()).isEqualTo(beforeCount+1);
         assertThat(row()).isEqualTo(before); assertThat(count("board_git_event_receipts")).isZero();
         assertThat(count("board_audit_events")).isZero(); assertThat(probe.statuses).isEmpty();
     }
