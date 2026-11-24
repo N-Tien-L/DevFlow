@@ -8,6 +8,8 @@ import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColu
 import { getBoard, listBoards, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { useBoardSync, type BoardConnectionStatus } from '../hooks/useBoardSync';
+import { useNotificationSync } from '../hooks/useNotificationSync';
+import { NotificationBell } from '../components/notification/NotificationBell';
 import { emptyBoardSyncScopes, fetchBoardSnapshot, fetchEveryTaskPage, hasBoardSyncWork, mapWithConcurrency, MAX_PAGES_PER_COLUMN, mergeBoardSyncScopes, type BoardSyncScopes } from '../board/boardSyncCoordinator';
 import type { BoardMutationMessage } from '../realtime/boardMutation';
 const TaskDetailModal = lazy(() => import('../components/board/TaskDetailModal').then((module) => ({ default: module.TaskDetailModal })));
@@ -52,6 +54,7 @@ export default function BoardPage() {
   // Chosen on /workspaces; ignored unless it is one of the caller's workspaces.
   const requestedWorkspaceId = useSearchParams()[0].get('workspace');
   const { user, ready: authReady, request, signOut, getValidAccessToken, sessionGeneration } = useAuth();
+  useNotificationSync();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [boards, setBoards] = useState<BoardSummary[]>([]);
@@ -780,6 +783,7 @@ export default function BoardPage() {
             {boards.map((item) => <option key={item.id} value={item.id}>{item.name}{item.archived ? ' · Đã lưu trữ' : ''}</option>)}
           </select>}
           <div className="ml-auto flex items-center gap-3 text-sm">
+            <NotificationBell onSelectTask={setSelectedTaskId} />
             <span className="hidden text-slate-500 sm:inline">{user?.fullName || user?.email}</span>
             <button className="rounded-lg px-3 py-2 text-slate-600 transition hover:bg-slate-100" onClick={signOut}>Đăng xuất</button>
           </div>
