@@ -64,7 +64,7 @@ class GitHubWebhookHttpIntegrationTest {
         assertThat(send(modified, sign(modified), "one", "ping").statusCode()).isEqualTo(409);
         assertThat(send(BODY, signature, "three", "push").statusCode()).isEqualTo(400);
         String push = "{\"ref\":\"refs/heads/main\",\"after\":\"123\",\"commits\":[],\"repository\":{\"id\":123}}";
-        assertThat(send(push, sign(push), "four", "push").statusCode()).isEqualTo(503);
+        assertThat(send(push, sign(push), "four", "push").statusCode()).isEqualTo(400);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM github_webhook_receipts", Integer.class)).isEqualTo(1);
         String concurrent = BODY.replace("test", "concurrent");
         String concurrentSignature = sign(concurrent);

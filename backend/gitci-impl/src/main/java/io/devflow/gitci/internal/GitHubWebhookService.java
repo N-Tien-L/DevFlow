@@ -29,12 +29,14 @@ class GitHubWebhookService {
     private final GitHubWebhookSignatureVerifier verifier = new GitHubWebhookSignatureVerifier(Clock.systemUTC());
     private final GitHubIntegrationQuota quota = new GitHubIntegrationQuota();
     private final ObjectMapper mapper;
+    private final GitWebhookIngestion ingestion;
 
-    GitHubWebhookService(JdbcTemplate jdbc, PlatformTransactionManager manager, GitHubWebhookProperties properties) {
+    GitHubWebhookService(JdbcTemplate jdbc, PlatformTransactionManager manager, GitHubWebhookProperties properties, GitWebhookIngestion ingestion) {
+        this.ingestion = ingestion;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(manager);
         this.properties = properties;
-        this.transactions.setTimeout(3);
+        this.transactions.setTimeout(6);
         JsonFactory factory = JsonFactory.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(32)
                         .maxStringLength(properties.getMaxBodyBytes()).maxNumberLength(64).build()).build();
@@ -43,9 +45,9 @@ class GitHubWebhookService {
 
     int receive(UUID id, String signature, String delivery, String event, byte[] body) {
         try {
-            List<Binding> rows = jdbc.query("SELECT workspace_id, provider, remote_repo_id, webhook_secret_ref "
+            List<Binding> rows = jdbc.query("SELECT workspace_id, provider, remote_repo_id, webhook_secret_ref, repository_url "
                     + "FROM repositories WHERE id = ?", (rs, n) -> new Binding(rs.getObject(1, UUID.class),
-                    rs.getString(2), rs.getString(3), rs.getString(4)), id);
+                    rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)), id);
             GitHubWebhookProperties.Binding key = properties.getBindings().get(id);
             if (rows.size() != 1 || key == null || !"GITHUB".equals(rows.get(0).provider())
                     || !rows.get(0).reference().equals(key.getReference())
@@ -70,32 +72,32 @@ class GitHubWebhookService {
                     if (!root.path("ref").isTextual() || !root.path("commits").isArray()
                             || !root.path("after").isTextual())
                         throw new WebhookFailure(400, "WEBHOOK_INVALID_PAYLOAD");
-                    throw new WebhookFailure(503, "WEBHOOK_HANDLER_NOT_READY");
                 }
                 case "pull_request", "workflow_run" -> {
                     if (!root.path("action").isTextual() || !root.path(event).isObject())
                         throw new WebhookFailure(400, "WEBHOOK_INVALID_PAYLOAD");
-                    // Production handlers are deliberately unavailable until the following tickets land.
-                    throw new WebhookFailure(503, "WEBHOOK_HANDLER_NOT_READY");
+                    if (event.equals("workflow_run")) throw new WebhookFailure(503, "WEBHOOK_HANDLER_NOT_READY");
                 }
                 default -> { return 204; }
             }
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body));
-            return transactions.execute(status -> storePing(id, binding, delivery, digest, event));
+            GitWebhookIngestion.Plan plan = ingestion.prepare(event, root, binding.remoteId());
+            return transactions.execute(status -> storeWebhook(id, binding, delivery, digest, event, plan));
         } catch (WebhookFailure ex) {
             throw ex;
-        } catch (DataAccessException ex) {
+        } catch (org.springframework.transaction.TransactionException | DataAccessException ex) {
             throw new WebhookFailure(503, "WEBHOOK_UNAVAILABLE");
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 unavailable", ex);
         }
     }
 
-    private int storePing(UUID id, Binding expected, String delivery, String digest, String event) {
+    private int storeWebhook(UUID id, Binding expected, String delivery, String digest, String event, GitWebhookIngestion.Plan plan) {
         jdbc.execute("SET LOCAL lock_timeout = '2s'");
-        List<Binding> rows = jdbc.query("SELECT workspace_id, provider, remote_repo_id, webhook_secret_ref "
-                + "FROM repositories WHERE id = ? FOR SHARE", (rs, n) -> new Binding(rs.getObject(1, UUID.class),
-                rs.getString(2), rs.getString(3), rs.getString(4)), id);
+        jdbc.execute("SET LOCAL statement_timeout = '4s'");
+        List<Binding> rows = jdbc.query("SELECT workspace_id, provider, remote_repo_id, webhook_secret_ref, repository_url "
+                + "FROM repositories WHERE id = ? FOR UPDATE", (rs, n) -> new Binding(rs.getObject(1, UUID.class),
+                rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)), id);
         if (rows.size() != 1 || !rows.get(0).equals(expected)) throw new WebhookFailure(503, "WEBHOOK_UNAVAILABLE");
         int inserted = jdbc.update("INSERT INTO github_webhook_receipts "
                 + "(repository_id, delivery_id, payload_sha256, event_name, status) VALUES (?, ?, ?, ?, 'PROCESSING') "
@@ -110,9 +112,10 @@ class GitHubWebhookService {
             if (completed == null || completed != 1) throw new WebhookFailure(503, "WEBHOOK_UNAVAILABLE");
             return 204;
         }
+        ingestion.persist(id, expected.workspaceId(), expected.url(), plan);
         jdbc.update("UPDATE github_webhook_receipts SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, "
                 + "updated_at = CURRENT_TIMESTAMP WHERE repository_id = ? AND delivery_id = ?", id, delivery);
-        return 200;
+        return event.equals("ping") ? 200 : 204;
     }
 
     private JsonNode parse(byte[] body) {
@@ -129,5 +132,5 @@ class GitHubWebhookService {
         }
     }
 
-    private record Binding(UUID workspaceId, String provider, String remoteId, String reference) { }
+    private record Binding(UUID workspaceId, String provider, String remoteId, String reference, String url) { }
 }

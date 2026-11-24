@@ -394,15 +394,17 @@ class KanbanSchemaIntegrationTest {
     @Test
     void persistsOrderingAndAllowsTemporaryDuplicatesAndGaps() {
         UUID secondColumnId = insertColumn(boardId, "Later", 8, "DONE");
+        // T-022 task keys prohibit cross-workspace moves; ordering still permits gaps/duplicates within a workspace.
+        UUID movableTaskId = insertTask(columnId, "Same workspace", 0);
         jdbc.update("UPDATE tasks SET position = 4 WHERE id = ?", taskId);
-        jdbc.update("UPDATE tasks SET column_id = ?, position = 4 WHERE id = ?", secondColumnId, otherTaskId);
+        jdbc.update("UPDATE tasks SET column_id = ?, position = 4 WHERE id = ?", secondColumnId, movableTaskId);
         jdbc.update("INSERT INTO tasks(column_id, title, position) VALUES (?, 'same position', 4)", columnId);
 
         assertThat(jdbc.queryForList("SELECT position FROM columns WHERE board_id = ? ORDER BY position, id",
                 Integer.class, boardId)).containsExactly(0, 8);
         assertThat(jdbc.queryForList("SELECT position FROM tasks WHERE column_id = ? ORDER BY position, id",
                 Integer.class, columnId)).containsExactly(4, 4);
-        assertThat(jdbc.queryForObject("SELECT column_id FROM tasks WHERE id = ?", UUID.class, otherTaskId))
+        assertThat(jdbc.queryForObject("SELECT column_id FROM tasks WHERE id = ?", UUID.class, movableTaskId))
                 .isEqualTo(secondColumnId);
     }
 
