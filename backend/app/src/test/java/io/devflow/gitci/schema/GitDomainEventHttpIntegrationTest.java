@@ -36,7 +36,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "devflow.gitci.outbox.worker-enabled=false")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "devflow.gitci.outbox.worker-enabled=false", "devflow.board.git.auto-transition-enabled=true"})
 class GitDomainEventHttpIntegrationTest {
     static final UUID REPO = UUID.fromString("c199e15a-7a6a-4e56-bc4b-625f47645555");
     static final String KEY = "test-only-t022-secret-0123456789-abcdef";
@@ -354,7 +355,7 @@ class GitDomainEventHttpIntegrationTest {
         send(push("main",List.of(commit("b".repeat(40),"T-001 T-002"))),"push");
         jdbc.update("UPDATE git_domain_event_outbox SET status='FAILED' WHERE git_object_key=? AND task_id=?","b".repeat(40),first);
         outbox.clean(); assertThat(count("git_domain_event_outbox")).isEqualTo(4);
-        jdbc.update("INSERT INTO git_domain_event_outbox(id,repository_id,task_id,event_type,git_object_key,repo,occurred_at,status,published_at) SELECT gen_random_uuid(),?,?,'git.commit_linked',lpad(n::text,40,'0'),'test/repo',CURRENT_TIMESTAMP,'PUBLISHED',CURRENT_TIMESTAMP-INTERVAL '8 days' FROM generate_series(1,1001) n",REPO,first);
+        jdbc.update("INSERT INTO git_domain_event_outbox(id,repository_id,task_id,event_type,git_object_key,repo,occurred_at,status,published_at,workspace_id) SELECT gen_random_uuid(),?,?,'git.commit_linked',lpad(n::text,40,'0'),'test/repo',CURRENT_TIMESTAMP,'PUBLISHED',CURRENT_TIMESTAMP-INTERVAL '8 days',? FROM generate_series(1,1001) n",REPO,first,workspace);
         outbox.clean(); assertThat(count("git_domain_event_outbox")).isEqualTo(5);
         outbox.clean(); assertThat(count("git_domain_event_outbox")).isEqualTo(4);
     }

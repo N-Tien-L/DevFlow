@@ -14,8 +14,14 @@ import java.util.UUID;
  * @param repo      repository the commit was pushed to
  * @param author    commit author (used for attribution and notifications)
  */
-public record GitCommitLinkedEvent(UUID taskId, String commitSha, String repo, String author, Instant occurredAt)
+public record GitCommitLinkedEvent(UUID taskId, String commitSha, String repo, String author, Instant occurredAt,
+        UUID eventId, UUID repositoryId, UUID workspaceId)
         implements DevFlowEvent {
+
+    /** Legacy callers remain readable, but cannot authorize an automated Board mutation. */
+    public GitCommitLinkedEvent(UUID taskId, String commitSha, String repo, String author, Instant occurredAt) {
+        this(taskId, commitSha, repo, author, occurredAt, null, null, null);
+    }
 
     public GitCommitLinkedEvent(UUID taskId, String commitSha, String repo, String author) {
         this(taskId, commitSha, repo, author, Instant.now());

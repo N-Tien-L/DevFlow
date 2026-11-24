@@ -80,6 +80,10 @@ logging:
     org.springframework.ai.converter.BeanOutputConverter: off
 
 devflow:
+  board:
+    git:
+      # Enable only after V17, producer/consumer rollout and board-category preflight.
+      auto-transition-enabled: ${BOARD_GIT_AUTO_TRANSITION_ENABLED:false}
   gitci:
     outbox:
       # Pause delivery without stopping durable enqueue from authenticated webhooks.

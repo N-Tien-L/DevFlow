@@ -49,9 +49,14 @@ public class BoardAuditService {
             UUID workspaceId,
             UUID sourceColumnId,
             UUID destinationColumnId) {
+        recordTaskMove(actorId, taskId, workspaceId, sourceColumnId, destinationColumnId, null);
+    }
+
+    public void recordTaskMove(UUID actorId, UUID taskId, UUID workspaceId,
+            UUID sourceColumnId, UUID destinationColumnId, UUID sourceEventId) {
         try {
             String fields = objectMapper.writeValueAsString(List.of("columnId", "position"));
-            repository.saveAndFlush(new BoardAuditEntity(
+            BoardAuditEntity audit = new BoardAuditEntity(
                     actorId,
                     "MOVE",
                     "TASK",
@@ -61,7 +66,9 @@ public class BoardAuditService {
                     BoardRequestContext.clientIp(),
                     fields,
                     sourceColumnId,
-                    destinationColumnId));
+                    destinationColumnId);
+            if (sourceEventId != null) audit.markGitMove(sourceEventId);
+            repository.saveAndFlush(audit);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Could not serialize Board audit metadata", exception);
         }
