@@ -18,6 +18,7 @@ class GitTaskReferenceCleanup {
     public void remove(TaskReferencesRemovedEvent event) {
         var named = new NamedParameterJdbcTemplate(jdbc);
         var params = java.util.Map.of("ids", event.taskIds());
+        named.update("DELETE FROM git_domain_event_outbox WHERE task_id IN (:ids)", params);
         named.update("UPDATE git_commits SET task_id=NULL WHERE task_id IN (:ids)", params);
         named.update("UPDATE pull_requests SET task_id=NULL WHERE task_id IN (:ids)", params);
         // Return the surviving parent IDs to restore compatibility mirrors after multi -> single cleanup.

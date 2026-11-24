@@ -24,22 +24,21 @@ public class GitActivityEventListener {
 
     @EventListener
     public void on(GitCommitLinkedEvent event) {
-        log.info("[{}] task={} commit={} repo={}",
-                event.eventType(), event.taskId(), event.commitSha(), event.repo());
+        log.info("Git activity received type={} task={}", event.eventType(), event.taskId());
         // TODO(PRODUCT_SPEC 5.2a): move the task to "In Progress" on first linked commit,
         //   then publish TaskStatusChangedEvent(cause = GIT).
     }
 
     @EventListener
     public void on(GitPrOpenedEvent event) {
-        log.info("[{}] task={} pr={}", event.eventType(), event.taskId(), event.prUrl());
+        log.info("Git activity received type={} task={}", event.eventType(), event.taskId());
         // TODO(PRODUCT_SPEC 5.2a): move the task to "In Review",
         //   then publish TaskStatusChangedEvent(cause = GIT).
     }
 
     @EventListener
     public void on(GitPrMergedEvent event) {
-        log.info("[{}] task={} pr={}", event.eventType(), event.taskId(), event.prUrl());
+        log.info("Git activity received type={} task={}", event.eventType(), event.taskId());
         // TODO(PRODUCT_SPEC 5.2a): move the task to "Done",
         //   then publish TaskStatusChangedEvent(cause = GIT).
     }
