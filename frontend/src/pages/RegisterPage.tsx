@@ -123,9 +123,10 @@ function RegisterForm({ onRegistered }: { onRegistered(response: RegisterRespons
   const blur = (field: RegisterField) => () => setTouched((current) => ({ ...current, [field]: true }));
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+    <form className="space-y-4" onSubmit={handleSubmit} noValidate>
       <TextField
         label="Họ và tên"
+        placeholder="Nguyễn Minh An"
         autoComplete="name"
         maxLength={FULL_NAME_MAX_LENGTH}
         value={values.fullName}
@@ -136,8 +137,9 @@ function RegisterForm({ onRegistered }: { onRegistered(response: RegisterRespons
         required
       />
       <TextField
-        label="Email"
+        label="Email công việc"
         type="email"
+        placeholder="an.nguyen@congty.vn"
         inputMode="email"
         autoComplete="email"
         autoCapitalize="none"
@@ -152,6 +154,7 @@ function RegisterForm({ onRegistered }: { onRegistered(response: RegisterRespons
       />
       <PasswordField
         label="Mật khẩu"
+        placeholder="Tạo mật khẩu mạnh"
         autoComplete="new-password"
         maxLength={PASSWORD_MAX_LENGTH}
         value={values.password}
@@ -196,11 +199,18 @@ export default function RegisterPage() {
       <AuthLayout
         headingRef={headingRef}
         title="Kiểm tra hộp thư"
-        description={<>Chúng tôi đã gửi liên kết xác minh tới <strong className="break-all font-semibold text-slate-800 dark:text-slate-100">{registered.email}</strong>. Mở liên kết để kích hoạt tài khoản, sau đó đăng nhập.</>}
-        footer={<>Đã xác minh? <Link className={linkClass} to="/login" state={{ email: registered.email }}>Đăng nhập</Link></>}
+        description={<>Chúng tôi đã gửi liên kết xác minh tới <strong className="break-all font-semibold text-slate-900 dark:text-slate-100">{registered.email}</strong>. Mở liên kết để kích hoạt tài khoản, sau đó đăng nhập.</>}
+        footer={(
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>Đã xác minh email?</span>
+            <Link className={linkClass} to="/login" state={{ email: registered.email }}>Đăng nhập ngay</Link>
+          </div>
+        )}
       >
         <div className="space-y-4">
-          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">Không thấy email? Hãy kiểm tra thư mục spam hoặc gửi lại. Liên kết có thời hạn và chỉ dùng được một lần.</p>
+          <FormAlert tone="info">
+            Không thấy email? Hãy kiểm tra thư mục spam hoặc nhấn gửi lại bên dưới. Liên kết có thời hạn và chỉ dùng được một lần.
+          </FormAlert>
           <ResendVerification email={registered.email} />
           <SecondaryButton className="w-full" onClick={() => { setRegistered(null); setFormKey((value) => value + 1); }}>
             Dùng email khác
@@ -214,8 +224,13 @@ export default function RegisterPage() {
     <AuthLayout
       headingRef={headingRef}
       title="Tạo tài khoản"
-      description="Bắt đầu điều phối công việc của nhóm trên DevFlow."
-      footer={<>Đã có tài khoản? <Link className={linkClass} to="/login">Đăng nhập</Link></>}
+      description="Bắt đầu điều phối công việc của nhóm phát triển trên DevFlow."
+      footer={(
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Đã có tài khoản?</span>
+          <Link className={linkClass} to="/login">Đăng nhập</Link>
+        </div>
+      )}
     >
       <RegisterForm key={formKey} onRegistered={setRegistered} />
     </AuthLayout>

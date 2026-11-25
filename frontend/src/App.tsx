@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import { DEFAULT_AFTER_LOGIN, loginPathWithReturnTo, returnToFromSearch } from './auth/returnTo';
 import ChatPanel from './components/ChatPanel';
+import { BrandMark } from './components/common/Icons';
+import { LoadingSpinner } from './components/common/UiPrimitives';
 import BoardPage from './pages/BoardPage';
 import EmailVerificationPage from './pages/EmailVerificationPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -35,14 +37,24 @@ function GuestOnly({ children }: { children: ReactNode }) {
 }
 
 function CenteredMessage({ message }: { message: string }) {
-  return <div className="grid min-h-screen place-items-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400" role="status">{message}</div>;
+  return (
+    <div className="bg-devflow-grid grid min-h-screen place-items-center bg-slate-50 px-4 dark:bg-slate-950" role="status">
+      <div className="flex flex-col items-center gap-3.5 text-center">
+        <BrandMark size="lg" />
+        <div className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+          <LoadingSpinner className="size-4 text-indigo-600 dark:text-indigo-400" />
+          <span>{message}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AuthenticatedApp() {
   const { user } = useAuth();
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="min-h-screen overflow-x-clip bg-[#f4f6fa] dark:bg-slate-950">
       <Routes>
         <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
         <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />

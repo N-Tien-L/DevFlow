@@ -6,8 +6,9 @@ import { useAuth } from '../auth/AuthProvider';
 import { authErrorMessage } from '../auth/authErrorMessage';
 import { removeTokenFromAddressBar } from '../auth/urlToken';
 import { AuthLayout } from '../components/auth/AuthLayout';
-import { FormAlert, SecondaryButton, linkClass } from '../components/auth/FormControls';
+import { FormAlert, SecondaryButton, linkClass, primaryLinkClass } from '../components/auth/FormControls';
 import { ResendVerification } from '../components/auth/ResendVerification';
+import { LoadingSpinner } from '../components/common/UiPrimitives';
 import { useCountdown } from '../hooks/useCountdown';
 import type { MessageResponse } from '../types/auth';
 import { ApiError } from '../types/board';
@@ -18,8 +19,6 @@ type Outcome =
   | { kind: 'expired' }
   | { kind: 'invalid' }
   | { kind: 'retryable'; message: string };
-
-const primaryLinkClass = 'block w-full rounded-xl bg-indigo-600 px-4 py-3 text-center font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 dark:shadow-none';
 
 function outcomeOf(reason: unknown): Outcome {
   const code = problemCode(reason);
@@ -86,31 +85,36 @@ export default function EmailVerificationPage() {
     <AuthLayout
       headingRef={headingRef}
       title={titles[outcome.kind]}
-      footer={outcome.kind === 'verified' ? undefined : <>Đã xác minh trước đó? <Link className={linkClass} to="/login">Đăng nhập</Link></>}
+      footer={outcome.kind === 'verified' ? undefined : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Đã xác minh trước đó?</span>
+          <Link className={linkClass} to="/login">Đăng nhập</Link>
+        </div>
+      )}
     >
       {outcome.kind === 'verifying' && (
-        <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300" role="status">
-          <span className="size-5 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600 motion-reduce:animate-none dark:border-indigo-900 dark:border-t-indigo-400" aria-hidden="true" />
-          Đang kiểm tra liên kết xác minh…
+        <div className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300" role="status">
+          <LoadingSpinner className="size-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          <span>Đang kiểm tra liên kết xác minh…</span>
         </div>
       )}
 
       {outcome.kind === 'verified' && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="success">Tài khoản đã được kích hoạt. Bạn có thể đăng nhập ngay bây giờ.</FormAlert>
           {loginLink}
         </div>
       )}
 
       {outcome.kind === 'expired' && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="warning">Liên kết xác minh đã hết hạn. Nhập email đăng ký để nhận liên kết mới.</FormAlert>
           <ResendVerification />
         </div>
       )}
 
       {outcome.kind === 'invalid' && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="error">
             Liên kết xác minh không hợp lệ hoặc đã được sử dụng. Hãy mở đúng liên kết mới nhất trong email, hoặc gửi lại email xác minh.
           </FormAlert>
@@ -119,7 +123,7 @@ export default function EmailVerificationPage() {
       )}
 
       {outcome.kind === 'retryable' && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="error">{outcome.message}</FormAlert>
           <SecondaryButton className="w-full" disabled={wait.active} onClick={retry}>
             {wait.active ? `Thử lại sau ${wait.remaining} giây` : 'Thử lại'}

@@ -14,7 +14,14 @@ import {
   type ResetPasswordField,
 } from '../auth/validation';
 import { AuthLayout } from '../components/auth/AuthLayout';
-import { FormAlert, PasswordField, SubmitButton, linkClass } from '../components/auth/FormControls';
+import {
+  FormAlert,
+  PasswordField,
+  SubmitButton,
+  linkClass,
+  primaryLinkClass,
+  secondaryLinkClass,
+} from '../components/auth/FormControls';
 import { PasswordChecklist } from '../components/auth/PasswordChecklist';
 import { useCountdown } from '../hooks/useCountdown';
 
@@ -27,10 +34,6 @@ const finalTitles: Record<'invalid' | 'expired' | 'unconfirmed', string> = {
   expired: 'Liên kết đã hết hạn',
   unconfirmed: 'Chưa xác nhận được kết quả',
 };
-
-const secondaryLinkClass = 'block w-full rounded-xl border border-slate-300 px-4 py-3 text-center font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus-visible:ring-indigo-500/30';
-
-const primaryLinkClass = 'block w-full rounded-xl bg-indigo-600 px-4 py-3 text-center font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 dark:shadow-none dark:focus-visible:ring-indigo-500/40';
 
 function failureMessage(failure: ResetPasswordFailure) {
   switch (failure.kind) {
@@ -150,15 +153,17 @@ export default function ResetPasswordPage() {
         <AuthLayout headingRef={headingRef} title={finalTitles.unconfirmed}>
           <div className="space-y-4">
             <FormAlert tone="warning">{failureMessage(failure)}</FormAlert>
-            <Link className={primaryLinkClass} to="/login">Đăng nhập bằng mật khẩu mới</Link>
-            <Link className={secondaryLinkClass} to="/forgot-password">Yêu cầu liên kết mới</Link>
+            <div className="space-y-2.5">
+              <Link className={primaryLinkClass} to="/login">Đăng nhập bằng mật khẩu mới</Link>
+              <Link className={secondaryLinkClass} to="/forgot-password">Yêu cầu liên kết mới</Link>
+            </div>
           </div>
         </AuthLayout>
       );
     }
     return (
       <AuthLayout headingRef={headingRef} title={finalTitles[failure.kind]} footer={footer}>
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="error">
             {failureMessage(failure)}
             {hadUncertainAttempt && <> Nếu lần thử trước đã thành công, hãy <Link className={linkClass} to="/login">đăng nhập bằng mật khẩu mới</Link>.</>}
@@ -172,7 +177,7 @@ export default function ResetPasswordPage() {
   if (!token) {
     return (
       <AuthLayout title="Không tìm thấy liên kết" footer={footer}>
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="error">
             Liên kết đặt lại mật khẩu không đầy đủ, hoặc trang đã được tải lại nên liên kết không còn trong bộ nhớ. Hãy mở lại liên kết trong email, hoặc yêu cầu liên kết mới.
           </FormAlert>
@@ -189,9 +194,10 @@ export default function ResetPasswordPage() {
       description="Sau khi đổi mật khẩu, mọi phiên đăng nhập hiện có của tài khoản sẽ bị đăng xuất."
       footer={footer}
     >
-      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
         <PasswordField
           label="Mật khẩu mới"
+          placeholder="Tạo mật khẩu mới"
           autoComplete="new-password"
           maxLength={PASSWORD_MAX_LENGTH}
           value={values.newPassword}
@@ -204,6 +210,7 @@ export default function ResetPasswordPage() {
         />
         <PasswordField
           label="Nhập lại mật khẩu mới"
+          placeholder="Nhập lại để xác nhận"
           autoComplete="new-password"
           maxLength={PASSWORD_MAX_LENGTH}
           value={values.confirmPassword}

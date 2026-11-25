@@ -43,14 +43,14 @@ export function NotificationBell({ onSelectTask }: NotificationBellProps) {
             ? `Thông báo (${unreadCount} chưa đọc)`
             : 'Thông báo'
         }
-        className="relative grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+        className="relative grid size-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1"
       >
         <svg
           className="size-5"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
-          strokeWidth={1.8}
+          strokeWidth={1.85}
           aria-hidden="true"
         >
           <path
@@ -62,7 +62,7 @@ export function NotificationBell({ onSelectTask }: NotificationBellProps) {
 
         {unreadCount > 0 && (
           <span
-            className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white"
+            className="tabular-nums absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-white"
             aria-hidden="true"
           >
             {badgeText}

@@ -74,10 +74,11 @@ function ForgotPasswordForm({ initialEmail, onSent }: { initialEmail: string; on
   }
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+    <form className="space-y-4" onSubmit={handleSubmit} noValidate>
       <TextField
-        label="Email"
+        label="Email tài khoản"
         type="email"
+        placeholder="ban@congty.vn"
         inputMode="email"
         autoComplete="email"
         autoCapitalize="none"
@@ -125,13 +126,13 @@ export default function ForgotPasswordPage() {
         headingRef={headingRef}
         title="Kiểm tra hộp thư"
         // Identical whether or not the address has an account: the page must not reveal which emails are registered.
-        description={<>Nếu <strong className="break-all font-semibold text-slate-800 dark:text-slate-100">{sentTo}</strong> có tài khoản DevFlow, chúng tôi đã gửi liên kết đặt lại mật khẩu tới địa chỉ này.</>}
+        description={<>Nếu <strong className="break-all font-semibold text-slate-900 dark:text-slate-100">{sentTo}</strong> có tài khoản DevFlow, chúng tôi đã gửi liên kết đặt lại mật khẩu tới địa chỉ này.</>}
         footer={backToLogin}
       >
         <div className="space-y-4">
-          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-            Liên kết có thời hạn và chỉ dùng được một lần; yêu cầu mới sẽ vô hiệu hóa liên kết cũ. Không thấy email? Hãy kiểm tra thư mục spam hoặc gửi lại yêu cầu sau ít phút.
-          </p>
+          <FormAlert tone="info">
+            Liên kết có thời hạn và chỉ dùng được một lần; yêu cầu mới sẽ vô hiệu hóa liên kết cũ. Không thấy email? Hãy kiểm tra thư mục spam hoặc gửi lại sau ít phút.
+          </FormAlert>
           <SecondaryButton className="w-full" onClick={() => { setSentTo(null); setFormKey((value) => value + 1); }}>
             Gửi lại hoặc dùng email khác
           </SecondaryButton>
@@ -144,8 +145,13 @@ export default function ForgotPasswordPage() {
     <AuthLayout
       headingRef={headingRef}
       title="Quên mật khẩu"
-      description="Nhập email tài khoản của bạn. Chúng tôi sẽ gửi liên kết để đặt mật khẩu mới."
-      footer={<>Nhớ ra mật khẩu? {backToLogin}</>}
+      description="Nhập email tài khoản của bạn. Chúng tôi sẽ gửi liên kết một lần để đặt mật khẩu mới."
+      footer={(
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Nhớ ra mật khẩu?</span>
+          {backToLogin}
+        </div>
+      )}
     >
       <ForgotPasswordForm
         key={formKey}

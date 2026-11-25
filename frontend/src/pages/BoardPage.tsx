@@ -1,22 +1,43 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/react';
-import { isSortable, useSortable } from '@dnd-kit/react/sortable';
-import { useDroppable } from '@dnd-kit/react';
+import { isSortable } from '@dnd-kit/react/sortable';
+import clsx from 'clsx';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
-import { getBoard, listBoards, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
+import { getBoard, listBoards, listWorkspaceMembers, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
 import { useBoardSync, type BoardConnectionStatus } from '../hooks/useBoardSync';
 import { useNotificationSync } from '../hooks/useNotificationSync';
-import { NotificationBell } from '../components/notification/NotificationBell';
+import { BoardColumnView } from '../components/board/BoardColumnView';
+import { BoardTopBar } from '../components/layout/BoardTopBar';
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  ArchiveIcon,
+  FilterIcon,
+  InfoIcon,
+  KanbanIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  RefreshIcon,
+  SearchIcon,
+  UserIcon,
+  XIcon,
+} from '../components/common/Icons';
+import {
+  Badge,
+  EmptyStatePanel,
+  LoadingSpinner,
+  PRIORITY_LABEL,
+  RoleBadge,
+} from '../components/common/UiPrimitives';
 import { emptyBoardSyncScopes, fetchBoardSnapshot, fetchEveryTaskPage, hasBoardSyncWork, mapWithConcurrency, MAX_PAGES_PER_COLUMN, mergeBoardSyncScopes, type BoardSyncScopes } from '../board/boardSyncCoordinator';
 import type { BoardMutationMessage } from '../realtime/boardMutation';
 const TaskDetailModal = lazy(() => import('../components/board/TaskDetailModal').then((module) => ({ default: module.TaskDetailModal })));
-import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskListItem, type TaskPriority, type WorkspaceSummary } from '../types/board';
+import { ApiError, type BoardColumn, type BoardPageResponse, type BoardResponse, type BoardState, type BoardSummary, type ColumnResponse, type TaskDetail, type TaskPriority, type WorkspaceMember, type WorkspaceSummary } from '../types/board';
 
 const PRIORITIES: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
-const PRIORITY_LABEL: Record<TaskPriority, string> = { LOW: 'Thấp', MEDIUM: 'Trung bình', HIGH: 'Cao', URGENT: 'Khẩn cấp' };
 
 interface DragData extends Record<string, unknown> {
   kind: 'task' | 'column';
@@ -55,8 +76,11 @@ export default function BoardPage() {
   const requestedWorkspaceId = useSearchParams()[0].get('workspace');
   const { user, ready: authReady, request, signOut, getValidAccessToken, sessionGeneration } = useAuth();
   useNotificationSync();
+
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
   const [workspaceId, setWorkspaceId] = useState('');
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [board, setBoard] = useState<BoardState | null>(null);
   const boardRef = useRef<BoardState | null>(null);
@@ -67,6 +91,7 @@ export default function BoardPage() {
   const [filterText, setFilterText] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [syncBlocked, setSyncBlocked] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -77,6 +102,8 @@ export default function BoardPage() {
   const [taskDetailRefreshVersion, setTaskDetailRefreshVersion] = useState(0);
   const [commentsRefreshVersion, setCommentsRefreshVersion] = useState(0);
   const [selectedTaskDeleted, setSelectedTaskDeleted] = useState(false);
+
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const generationRef = useRef(0);
   const connectionStatusRef = useRef<BoardConnectionStatus>('idle');
   const syncBlockedRef = useRef(syncBlocked);
@@ -103,9 +130,21 @@ export default function BoardPage() {
   const boardIdRef = useRef(boardId);
 
   const displayColumns = useMemo(() => previewColumns ?? board?.columns ?? [], [board?.columns, previewColumns]);
-  const filtersActive = Boolean(filterText.trim() || assigneeFilter || priorityFilter);
+  const activeFilterCount = [filterText.trim(), assigneeFilter, priorityFilter].filter(Boolean).length;
+  const filtersActive = activeFilterCount > 0;
   const allTasksComplete = Boolean(board?.columns.every((column) => column.complete));
-  const allAssignees = useMemo(() => [...new Set((board?.columns ?? []).flatMap((column) => column.tasks.map((task) => task.assigneeId).filter((id): id is string => Boolean(id))))].sort(), [board]);
+  const activeWorkspace = useMemo(
+    () => workspaces.find((ws) => ws.id === workspaceId) ?? null,
+    [workspaceId, workspaces],
+  );
+  const membersById = useMemo(
+    () => new Map(workspaceMembers.map((member) => [member.userId, member])),
+    [workspaceMembers],
+  );
+  const allAssignees = useMemo(
+    () => [...new Set((board?.columns ?? []).flatMap((column) => column.tasks.map((task) => task.assigneeId).filter((id): id is string => Boolean(id))))].sort(),
+    [board],
+  );
   boardRef.current = board;
   syncBlockedRef.current = syncBlocked;
   selectedTaskIdRef.current = selectedTaskId;
@@ -136,7 +175,7 @@ export default function BoardPage() {
         loading: false,
         error: null,
       }), generation);
-      if (!result.complete) setNotice(`Lượt tải cột dừng ở giới hạn ${MAX_PAGES_PER_COLUMN} trang. Dùng nút tải thêm để tiếp tục.`);
+      if (!result.complete) setNotice(`Lượt tải cột dừng ở giới hạn ${MAX_PAGES_PER_COLUMN} trang. Dùng nút tải tiếp để xem toàn bộ.`);
       else if (connectionStatusRef.current === 'connected' && boardRef.current?.columns.every((column) => column.id === columnId || column.complete)) setNotice(null);
       return result.complete;
     } catch (reason) {
@@ -181,6 +220,7 @@ export default function BoardPage() {
 
   useEffect(() => {
     let active = true;
+    setLoadingWorkspaces(true);
     void listWorkspaces(request).then((result) => {
       if (!active) return;
       setWorkspaces(result);
@@ -188,9 +228,26 @@ export default function BoardPage() {
       if (!boardId && preferred) setWorkspaceId(preferred.id);
     }).catch((reason: unknown) => {
       if (active) setError(errorMessage(reason));
+    }).finally(() => {
+      if (active) setLoadingWorkspaces(false);
     });
     return () => { active = false; };
   }, [boardId, request, requestedWorkspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkspaceMembers([]);
+      return;
+    }
+    let active = true;
+    // Best-effort member lookup to render readable names & avatars on cards and filters.
+    void listWorkspaceMembers(request, workspaceId, '', 0).then((result) => {
+      if (active) setWorkspaceMembers(result.items);
+    }).catch(() => {
+      if (active) setWorkspaceMembers([]);
+    });
+    return () => { active = false; };
+  }, [request, workspaceId]);
 
   useEffect(() => {
     if (boardId) {
@@ -395,7 +452,7 @@ export default function BoardPage() {
           setSyncBlocked(false);
           syncBlockedRef.current = false;
           const boardIncomplete = incompleteSnapshot || Boolean(boardRef.current?.columns.some((column) => !column.complete));
-          setNotice(boardIncomplete ? `Board chưa tải đủ task (mỗi lượt tối đa ${MAX_PAGES_PER_COLUMN} trang mỗi cột). Tải thêm để xem toàn bộ task; các cột chưa tải đủ không thể kéo thả.` : null);
+          setNotice(boardIncomplete ? `Board chưa tải đủ công việc (tối đa ${MAX_PAGES_PER_COLUMN} trang mỗi lượt). Dùng nút tải tiếp trên từng cột để bật lại kéo thả.` : null);
         }
       })();
     }, wait);
@@ -462,8 +519,8 @@ export default function BoardPage() {
       if (status === 'reconnecting' || status === 'offline') queuedSyncRef.current.full = true;
       setSyncBlocked(true);
       syncBlockedRef.current = true;
-      setNotice(status === 'offline' ? 'Mất kết nối mạng. Board đang ở trạng thái chỉ đọc.'
-        : status === 'error' ? 'Không thể kết nối đồng bộ board. Hãy thử kết nối lại.'
+      setNotice(status === 'offline' ? 'Mất kết nối mạng · đang hiển thị dữ liệu gần nhất (chỉ đọc).'
+        : status === 'error' ? 'Không thể kết nối đồng bộ realtime · đang hiển thị dữ liệu đã tải gần nhất.'
           : 'Đang kết nối đồng bộ board…');
     }
   }, []);
@@ -573,7 +630,7 @@ export default function BoardPage() {
       setActiveDragName('');
       activeDragRef.current = false;
       dragInvalidatedRef.current = false;
-      announce('Board vừa thay đổi hoặc mất kết nối. Dữ liệu đã được tải lại; hãy kéo lại task.');
+      announce('Board vừa thay đổi hoặc mất kết nối. Dữ liệu đã được tải lại; hãy kéo lại công việc.');
       return;
     }
     const position = locateTask(draft, taskId);
@@ -724,18 +781,65 @@ export default function BoardPage() {
     void finishTaskMove(taskId, original, draft);
   };
 
-  const activeColumns = useMemo(() => displayColumns.map((column) => ({
-    ...column,
-    visibleTasks: column.tasks.filter((task) =>
-      task.title.toLocaleLowerCase().includes(filterText.trim().toLocaleLowerCase()) &&
-      (!assigneeFilter || task.assigneeId === assigneeFilter || (assigneeFilter === 'unassigned' && !task.assigneeId)) &&
-      (!priorityFilter || task.priority === priorityFilter),
-    ),
-  })), [assigneeFilter, displayColumns, filterText, priorityFilter]);
+  const openTaskModal = useCallback((taskId: string, trigger?: HTMLElement | null) => {
+    modalReturnFocusRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setSelectedTaskDeleted(false);
+    setSelectedTaskId(taskId);
+  }, []);
 
-  const clearFilters = () => { setFilterText(''); setAssigneeFilter(''); setPriorityFilter(''); };
+  const closeTaskModal = useCallback(() => {
+    setSelectedTaskId(null);
+    const returnTarget = modalReturnFocusRef.current;
+    modalReturnFocusRef.current = null;
+    if (returnTarget && returnTarget.isConnected) {
+      requestAnimationFrame(() => returnTarget.focus());
+    }
+  }, []);
 
-  const handleTaskSaved = (updated: import('../types/board').TaskDetail) => {
+  const activeColumns = useMemo(() => {
+    const term = filterText.trim().toLocaleLowerCase();
+    return displayColumns.map((column) => ({
+      ...column,
+      visibleTasks: column.tasks.filter((task) =>
+        (!term || task.title.toLocaleLowerCase().includes(term) || task.taskKey.toLocaleLowerCase().includes(term)) &&
+        (!assigneeFilter || task.assigneeId === assigneeFilter || (assigneeFilter === 'unassigned' && !task.assigneeId)) &&
+        (!priorityFilter || task.priority === priorityFilter),
+      ),
+    }));
+  }, [assigneeFilter, displayColumns, filterText, priorityFilter]);
+
+  const boardMetrics = useMemo(() => {
+    if (!board) return null;
+    let totalLoaded = 0;
+    let totalReported = 0;
+    let doneCount = 0;
+    let overdueCount = 0;
+    let visibleCount = 0;
+    const now = Date.now();
+    for (const col of activeColumns) {
+      totalLoaded += col.tasks.length;
+      totalReported += Math.max(col.tasks.length, col.totalElements);
+      visibleCount += col.visibleTasks.length;
+      const isDoneCol = col.statusCategory === 'DONE';
+      for (const task of col.tasks) {
+        if (isDoneCol || task.statusCategory === 'DONE') {
+          doneCount += 1;
+        } else if (task.dueDate && new Date(task.dueDate).getTime() < now) {
+          overdueCount += 1;
+        }
+      }
+    }
+    const percent = totalLoaded > 0 ? Math.round((doneCount / totalLoaded) * 100) : 0;
+    return { totalLoaded, totalReported, doneCount, overdueCount, visibleCount, percent };
+  }, [activeColumns, board]);
+
+  const clearFilters = () => {
+    setFilterText('');
+    setAssigneeFilter('');
+    setPriorityFilter('');
+  };
+
+  const handleTaskSaved = (updated: TaskDetail) => {
     const current = boardRef.current;
     if (!current) return;
     const location = locateTask(current.columns, updated.id);
@@ -766,228 +870,470 @@ export default function BoardPage() {
     } : value);
   };
 
+  const isAssignedToMeActive = Boolean(user?.id && assigneeFilter === user.id);
+
+  // Unified contextual sync bar — only displayed when action or attention is needed
+  const showUnifiedStatusBar = Boolean(
+    board && (
+      notice ||
+      syncBlocked ||
+      connectionStatus === 'offline' ||
+      connectionStatus === 'error' ||
+      connectionStatus === 'reconnecting'
+    ),
+  );
+
+  const unifiedStatusTone =
+    connectionStatus === 'error'
+      ? 'border-rose-200/90 bg-rose-50/90 text-rose-900'
+      : syncBlocked || connectionStatus === 'offline' || connectionStatus === 'reconnecting'
+        ? 'border-amber-200/90 bg-amber-50/95 text-amber-950'
+        : 'border-indigo-200/90 bg-indigo-50/90 text-indigo-950';
+
+  const unifiedStatusMessage =
+    notice ??
+    (connectionStatus === 'offline'
+      ? 'Mất kết nối mạng · đang hiển thị dữ liệu gần nhất (chỉ đọc).'
+      : connectionStatus === 'error'
+        ? 'Không thể kết nối đồng bộ realtime · đang hiển thị dữ liệu đã tải gần nhất.'
+        : connectionStatus === 'reconnecting'
+          ? 'Đang kết nối lại realtime · dữ liệu đang chờ đối soát.'
+          : 'Đang đồng bộ dữ liệu board…');
+
   return (
-    <main className="min-h-screen bg-[#f6f7fb] text-slate-900">
-      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <a href="/boards" className="mr-2 flex items-center gap-2 font-bold tracking-tight text-slate-900" aria-label="DevFlow home">
-            <span className="grid size-9 place-items-center rounded-xl bg-indigo-600 text-white">D</span> DevFlow
-          </a>
-          {workspaces.length > 0 && <label className="sr-only" htmlFor="workspace-picker">Workspace</label>}
-          {workspaces.length > 0 && <select id="workspace-picker" className="max-w-48 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={workspaceId} onChange={(event) => handleWorkspaceChange(event.target.value)}>
-            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-          </select>}
-          {boards.length > 0 && <label className="sr-only" htmlFor="board-picker">Board</label>}
-          {boards.length > 0 && <select id="board-picker" className="max-w-56 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={boardId ?? ''} onChange={(event) => navigate(`/boards/${event.target.value}`)}>
-            <option value="" disabled>Chọn board</option>
-            {boards.map((item) => <option key={item.id} value={item.id}>{item.name}{item.archived ? ' · Đã lưu trữ' : ''}</option>)}
-          </select>}
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            <NotificationBell onSelectTask={setSelectedTaskId} />
-            <span className="hidden text-slate-500 sm:inline">{user?.fullName || user?.email}</span>
-            <button className="rounded-lg px-3 py-2 text-slate-600 transition hover:bg-slate-100" onClick={signOut}>Đăng xuất</button>
+    <main className="min-h-screen overflow-x-clip bg-[#f4f6fa] text-slate-900">
+      <BoardTopBar
+        user={user}
+        workspaces={workspaces}
+        workspaceId={workspaceId}
+        boards={boards}
+        boardId={boardId}
+        currentBoardArchived={board?.archived}
+        connectionStatus={connectionStatus}
+        syncBlocked={syncBlocked}
+        onWorkspaceChange={handleWorkspaceChange}
+        onBoardChange={(nextBoardId) => navigate(`/boards/${nextBoardId}`)}
+        onSelectTask={(taskId) => openTaskModal(taskId)}
+        onRetrySync={() => scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true })}
+        onRetryConnection={realtime.retry}
+        onSignOut={signOut}
+      />
+
+      <div className="mx-auto max-w-[1600px] px-3 pb-24 pt-4 sm:px-6 sm:pt-5 lg:px-8">
+        {error && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900" role="alert">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <AlertCircleIcon className="size-4 shrink-0 text-rose-600" />
+              <span className="min-w-0">{error}</span>
+            </div>
+            <button
+              type="button"
+              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-200 transition hover:bg-rose-100/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              onClick={() => boardId ? void loadBoard(boardId) : window.location.reload()}
+            >
+              <RefreshIcon className="size-3.5" />
+              <span>Thử tải lại</span>
+            </button>
           </div>
-        </div>
-      </header>
+        )}
 
-      <div className="mx-auto max-w-[1600px] px-4 py-8 sm:px-6 lg:px-8">
-        {error && <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800" role="alert"><span>{error}</span><button className="font-semibold underline" onClick={() => boardId && void loadBoard(boardId)}>Thử tải lại</button></div>}
-        {!boardId && !error && <section className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-sm font-semibold text-indigo-600">WORKSPACE</p>
-          <h1 className="mt-2 text-2xl font-bold">{loadingBoards ? 'Đang tải board…' : workspaces.length === 0 ? 'Bạn chưa có workspace' : 'Chưa có board trong workspace này'}</h1>
-          <p className="mt-2 text-sm text-slate-500">{workspaces.length === 0 ? 'Hãy tham gia workspace trước khi quản lý công việc.' : 'Board sẽ xuất hiện tại đây khi workspace có board được cấp quyền.'}</p>
-        </section>}
-        {boardId && loading && !board && <div className="grid min-h-72 place-items-center text-sm text-slate-500" role="status">Đang tải board và công việc…</div>}
-        {board && <>
-          <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">Workspace board</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">{board.name}</h1>
-              {board.description && <p className="mt-2 max-w-2xl text-sm text-slate-500">{board.description}</p>}
-              {board.archived && <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Board đã lưu trữ · chỉ xem</span>}
+        {/* Empty Workspace / Empty Board States with clear next steps */}
+        {!boardId && !error && (
+          loadingWorkspaces || loadingBoards ? (
+            <div className="grid min-h-72 place-items-center rounded-2xl border border-slate-200/80 bg-white/80 p-8" role="status">
+              <div className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
+                <LoadingSpinner className="size-5 text-indigo-600" />
+                <span>{loadingWorkspaces ? 'Đang tải danh sách workspace…' : 'Đang tải danh sách board…'}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">{board.columns.length} cột</span>
-              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">{board.columns.reduce((sum, column) => sum + column.tasks.length, 0)} công việc đã tải</span>
+          ) : workspaces.length === 0 ? (
+            <EmptyStatePanel
+              icon={<LayoutGridIcon className="size-6" />}
+              eyebrow="Workspace"
+              title="Bạn chưa thuộc workspace nào"
+              description="Tạo workspace đầu tiên cho nhóm phát triển của bạn, hoặc mở liên kết lời mời từ quản trị viên để tham gia dự án."
+              actions={(
+                <>
+                  <Link
+                    to="/workspaces/new"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/30"
+                  >
+                    <PlusIcon className="size-4" />
+                    <span>Tạo workspace mới</span>
+                  </Link>
+                  <Link
+                    to="/workspaces"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/20"
+                  >
+                    <span>Mở trang quản lý workspace</span>
+                  </Link>
+                </>
+              )}
+            />
+          ) : (
+            <EmptyStatePanel
+              icon={<KanbanIcon className="size-6" />}
+              eyebrow={activeWorkspace ? `Workspace · ${activeWorkspace.name}` : 'Workspace'}
+              title="Workspace này chưa có board nào"
+              description={(
+                <>
+                  {activeWorkspace && (
+                    <span className="mb-2 inline-flex items-center gap-1.5">
+                      <span>Vai trò của bạn:</span>
+                      <RoleBadge role={activeWorkspace.role} />
+                    </span>
+                  )}
+                  <span className="block">
+                    Chuyển sang workspace khác đã có board hoặc đợi quản trị viên tạo board mới trong workspace này.
+                  </span>
+                </>
+              )}
+              actions={(
+                <>
+                  <Link
+                    to="/workspaces"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/30"
+                  >
+                    <LayoutGridIcon className="size-4" />
+                    <span>Chọn workspace khác</span>
+                  </Link>
+                  <Link
+                    to="/workspaces/new"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/20"
+                  >
+                    <PlusIcon className="size-4" />
+                    <span>Tạo workspace mới</span>
+                  </Link>
+                </>
+              )}
+            />
+          )
+        )}
+
+        {/* Board Loading Skeleton */}
+        {boardId && loading && !board && (
+          <div className="space-y-4" role="status" aria-label="Đang tải board và công việc">
+            <div className="h-16 animate-pulse rounded-2xl border border-slate-200/80 bg-white/80 motion-reduce:animate-none" />
+            <div className="flex gap-4 overflow-hidden">
+              {[0, 1, 2, 3].map((col) => (
+                <div key={col} className="h-96 w-[316px] shrink-0 animate-pulse rounded-2xl border border-slate-200/80 bg-white/70 motion-reduce:animate-none" />
+              ))}
             </div>
           </div>
+        )}
 
-          <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm" aria-label="Bộ lọc công việc">
-            <div className="grid gap-3 md:grid-cols-[minmax(200px,1fr)_220px_190px_auto]">
-              <label className="relative">
-                <span className="sr-only">Tìm theo tiêu đề</span>
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">⌕</span>
-                <input className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50" placeholder="Tìm công việc…" value={filterText} onChange={(event) => setFilterText(event.target.value)} />
-              </label>
-              <label>
-                <span className="sr-only">Lọc theo người phụ trách</span>
-                <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)}>
-                  <option value="">Mọi người phụ trách</option><option value="unassigned">Chưa giao</option>
-                  {allAssignees.map((id) => <option key={id} value={id}>{id === user?.id ? 'Được giao cho tôi' : `Thành viên ${id.slice(0, 8)}`}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="sr-only">Lọc theo độ ưu tiên</span>
-                <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
-                  <option value="">Mọi độ ưu tiên</option>{PRIORITIES.map((priority) => <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>)}
-                </select>
-              </label>
-              <button className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 disabled:opacity-40" onClick={clearFilters} disabled={!filtersActive}>Xóa lọc</button>
-            </div>
-            {filtersActive && <p className="mt-2 px-1 text-xs text-slate-500">Bộ lọc kết hợp với nhau. Kéo thả thẻ sẽ bật lại khi xóa bộ lọc.</p>}
-            {!allTasksComplete && <p className="mt-2 px-1 text-xs text-amber-700">Kết quả bộ lọc chỉ gồm công việc đã tải; tải đủ từng cột để có kết quả toàn board.</p>}
-          </section>
+        {board && (
+          <>
+            {/* Compact Board Title & Sprint Progress Header */}
+            <section className="mb-3.5 flex flex-col gap-2.5 sm:mb-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg font-extrabold leading-snug tracking-tight text-slate-950 sm:text-2xl">
+                    {board.name}
+                  </h1>
+                  {board.archived && (
+                    <Badge tone="warning">
+                      <ArchiveIcon className="size-3" />
+                      <span>Đã lưu trữ · Chỉ xem</span>
+                    </Badge>
+                  )}
+                  {activeWorkspace && (
+                    <RoleBadge role={activeWorkspace.role} className="xl:hidden" />
+                  )}
+                </div>
+                {board.description && (
+                  <p className="mt-1 line-clamp-2 max-w-3xl text-xs leading-5 text-slate-600 sm:text-sm">
+                    {board.description}
+                  </p>
+                )}
+              </div>
 
-          {notice && <div className={`mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3 text-sm ${syncBlocked ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-800'}`}>
-            <span role="status" aria-live="polite">{notice}</span>
-            {syncBlocked && connectionStatus === 'connected' && <button className="font-semibold underline" onClick={() => scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true })}>Thử đồng bộ</button>}
-            {(connectionStatus === 'error' || connectionStatus === 'offline') && <button className="font-semibold underline" onClick={realtime.retry}>Kết nối lại</button>}
-          </div>}
-          <div className={`mb-4 flex items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${connectionStatus === 'connected' && !syncBlocked ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`} role="status" aria-live="polite">
-            <span>{connectionStatus === 'connected' && !syncBlocked ? 'Đồng bộ realtime đang hoạt động' : connectionStatus === 'offline' ? 'Mất mạng · board chỉ đọc' : connectionStatus === 'error' ? 'Realtime chưa kết nối' : connectionStatus === 'reconnecting' ? 'Đang kết nối lại · dữ liệu cần đối soát' : connectionStatus === 'connecting' ? 'Đang kết nối đồng bộ board…' : 'Chưa kết nối đồng bộ board'}</span>
-            {connectionStatus === 'connected' && !syncBlocked && <span className="text-xs">Dữ liệu đã đối soát</span>}
-          </div>
-          {board.columns.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">Board này chưa có cột nào.</div>}
+              {boardMetrics && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <div
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3 py-1.5 shadow-2xs"
+                    title={`Hoàn thành ${boardMetrics.doneCount} trên ${boardMetrics.totalLoaded} công việc đã tải`}
+                  >
+                    <span className="tabular-nums font-bold text-slate-900">
+                      {boardMetrics.doneCount}/{boardMetrics.totalLoaded}
+                    </span>
+                    <span className="text-slate-500">hoàn thành</span>
+                    <span className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                      <span
+                        className="block h-full rounded-full bg-emerald-500 transition-all"
+                        style={{ width: `${boardMetrics.percent}%` }}
+                      />
+                    </span>
+                  </div>
+                  {boardMetrics.overdueCount > 0 && (
+                    <Badge tone="danger" className="py-1 text-xs">
+                      <span className="tabular-nums">{boardMetrics.overdueCount} quá hạn</span>
+                    </Badge>
+                  )}
+                  <span className="tabular-nums hidden rounded-xl border border-slate-200/90 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-2xs sm:inline-flex">
+                    {board.columns.length} cột · {boardMetrics.totalLoaded} công việc
+                  </span>
+                </div>
+              )}
+            </section>
 
-          <DragDropProvider<DragData> onDragStart={handleDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
-            <div className="flex min-h-[65vh] items-start gap-4 overflow-x-auto pb-8" aria-label="Kanban board">
-              {activeColumns.map(({ visibleTasks, ...column }, columnIndex) => <BoardColumnView
-                key={column.id}
-                column={column}
-                visibleTasks={visibleTasks}
-                availableColumns={board.columns}
-                index={columnIndex}
-                activeFilters={filtersActive}
-                canReorder={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
-                canMoveCards={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && !filtersActive && column.complete}
-                onMoveTask={moveTaskFromMenu}
-                onOpenTask={(taskId) => { setSelectedTaskDeleted(false); setSelectedTaskId(taskId); }}
-                onRetry={() => void loadColumn(column.id, generationRef.current)}
-                onLoadMore={() => void loadColumn(column.id, generationRef.current, false)}
-              />)}
-            </div>
-          </DragDropProvider>
-          <p className="sr-only" aria-live="assertive">{activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}</p>
-          {selectedTaskId && <Suspense fallback={<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="status">Đang mở chi tiết task…</div>}><TaskDetailModal key={`${board.id}:${selectedTaskId}`} taskId={selectedTaskId}
-            canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
-            detailRefreshVersion={taskDetailRefreshVersion}
-            commentsRefreshVersion={commentsRefreshVersion}
-            remoteDeleted={selectedTaskDeleted}
-            onClose={() => setSelectedTaskId(null)} onSaved={handleTaskSaved} /></Suspense>}
-        </>}
+            {/* Compact Responsive Filter Toolbar */}
+            <section
+              className="mb-3.5 rounded-2xl border border-slate-200/90 bg-white p-2 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:mb-4 sm:p-2.5"
+              aria-label="Bộ lọc công việc"
+            >
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                {/* Search + Mobile Filter Toggle */}
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <label className="sr-only" htmlFor="board-task-search">Tìm công việc theo mã hoặc tiêu đề</label>
+                    <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      id="board-task-search"
+                      type="search"
+                      className="min-h-10 w-full rounded-xl border border-slate-200/90 bg-slate-50/80 py-2 pl-9 pr-8 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/15"
+                      placeholder="Tìm theo mã (T-048) hoặc tiêu đề…"
+                      value={filterText}
+                      onChange={(event) => setFilterText(event.target.value)}
+                    />
+                    {filterText && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterText('')}
+                        aria-label="Xóa từ khóa tìm kiếm"
+                        className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      >
+                        <XIcon className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Mobile collapsible filters button */}
+                  <button
+                    type="button"
+                    onClick={() => setMobileFiltersOpen((open) => !open)}
+                    aria-expanded={mobileFiltersOpen}
+                    aria-controls="board-secondary-filters"
+                    className={clsx(
+                      'inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 md:hidden',
+                      mobileFiltersOpen || assigneeFilter || priorityFilter
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100',
+                    )}
+                  >
+                    <FilterIcon className="size-3.5" />
+                    <span>Lọc</span>
+                    {(assigneeFilter || priorityFilter) && (
+                      <span className="tabular-nums grid size-4 place-items-center rounded-full bg-indigo-600 text-[10px] font-bold text-white">
+                        {[assigneeFilter, priorityFilter].filter(Boolean).length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Secondary Filters: always visible on md+, collapsible on mobile so Kanban starts above fold */}
+                <div
+                  id="board-secondary-filters"
+                  className={clsx(
+                    'flex-wrap items-center gap-2 md:flex',
+                    mobileFiltersOpen ? 'grid grid-cols-1 pt-1 sm:grid-cols-2' : 'hidden',
+                  )}
+                >
+                  {user && (
+                    <button
+                      type="button"
+                      aria-pressed={isAssignedToMeActive}
+                      onClick={() => setAssigneeFilter(isAssignedToMeActive ? '' : user.id)}
+                      className={clsx(
+                        'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500',
+                        isAssignedToMeActive
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200/90 bg-slate-50/80 text-slate-700 hover:border-slate-300 hover:bg-white',
+                      )}
+                    >
+                      <UserIcon className="size-3.5" />
+                      <span>Việc của tôi</span>
+                    </button>
+                  )}
+
+                  <label className="min-w-0">
+                    <span className="sr-only">Lọc theo người phụ trách</span>
+                    <select
+                      className="min-h-10 w-full rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-2 text-xs font-medium text-slate-800 transition hover:border-slate-300 hover:bg-white focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/15 md:w-48"
+                      value={assigneeFilter}
+                      onChange={(event) => setAssigneeFilter(event.target.value)}
+                    >
+                      <option value="">Mọi người phụ trách</option>
+                      <option value="unassigned">Chưa giao</option>
+                      {allAssignees.map((id) => {
+                        const m = membersById.get(id);
+                        const label = id === user?.id
+                          ? `${m?.fullName ? `${m.fullName} (Tôi)` : 'Được giao cho tôi'}`
+                          : m?.fullName || `Thành viên ${id.slice(0, 8)}`;
+                        return <option key={id} value={id}>{label}</option>;
+                      })}
+                    </select>
+                  </label>
+
+                  <label className="min-w-0">
+                    <span className="sr-only">Lọc theo độ ưu tiên</span>
+                    <select
+                      className="min-h-10 w-full rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-2 text-xs font-medium text-slate-800 transition hover:border-slate-300 hover:bg-white focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/15 md:w-40"
+                      value={priorityFilter}
+                      onChange={(event) => setPriorityFilter(event.target.value)}
+                    >
+                      <option value="">Mọi độ ưu tiên</option>
+                      {PRIORITIES.map((priority) => (
+                        <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {filtersActive && (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="inline-flex min-h-10 items-center justify-center gap-1 rounded-xl px-3 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    >
+                      <XIcon className="size-3.5" />
+                      <span>Xóa lọc ({activeFilterCount})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {(filtersActive || !allTasksComplete) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 px-1 pt-2 text-[11px] font-medium">
+                  {filtersActive && boardMetrics && (
+                    <span className="text-indigo-700">
+                      Đang hiển thị <strong className="tabular-nums">{boardMetrics.visibleCount}/{boardMetrics.totalLoaded}</strong> công việc khớp lọc · kéo thả tạm khóa khi đang lọc.
+                    </span>
+                  )}
+                  {!allTasksComplete && (
+                    <span className="text-amber-800">
+                      Một số cột chưa tải hết công việc; dùng nút “Tải tiếp” trên cột để xem toàn board.
+                    </span>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* Unified Contextual Sync / Offline / Retry Bar (zero duplicate banners) */}
+            {showUnifiedStatusBar && (
+              <div
+                className={clsx(
+                  'mb-3.5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs font-medium sm:mb-4 sm:text-sm',
+                  unifiedStatusTone,
+                )}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  {connectionStatus === 'error' ? (
+                    <AlertCircleIcon className="size-4 shrink-0 text-rose-600" />
+                  ) : syncBlocked || connectionStatus === 'offline' || connectionStatus === 'reconnecting' ? (
+                    <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
+                  ) : (
+                    <InfoIcon className="size-4 shrink-0 text-indigo-600" />
+                  )}
+                  <span className="min-w-0 leading-5">{unifiedStatusMessage}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {syncBlocked && connectionStatus === 'connected' && (
+                    <button
+                      type="button"
+                      onClick={() => scheduleBoardSync({ ...emptyBoardSyncScopes(), full: true })}
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-white px-3 py-1 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-300/90 transition hover:bg-amber-100/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                    >
+                      <RefreshIcon className="size-3.5" />
+                      <span>Thử đồng bộ</span>
+                    </button>
+                  )}
+                  {(connectionStatus === 'error' || connectionStatus === 'offline') && (
+                    <button
+                      type="button"
+                      onClick={realtime.retry}
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-white px-3 py-1 text-xs font-semibold text-slate-900 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    >
+                      <RefreshIcon className="size-3.5" />
+                      <span>Kết nối lại</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Screen-reader live region for healthy connection state & drag announcements */}
+            <p className="sr-only" role="status" aria-live="polite">
+              {connectionStatus === 'connected' && !syncBlocked ? 'Đồng bộ realtime đang hoạt động. Dữ liệu đã đối soát.' : ''}
+            </p>
+
+            {board.columns.length === 0 ? (
+              <EmptyStatePanel
+                icon={<KanbanIcon className="size-6" />}
+                title="Board này chưa có cột nào"
+                description="Khi board có các cột trạng thái (Cần làm, Đang làm, Hoàn thành…), công việc sẽ xuất hiện tại đây."
+              />
+            ) : (
+              /* Only the Kanban lane track scrolls horizontally when needed */
+              <DragDropProvider<DragData> onDragStart={handleDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
+                <div
+                  className="devflow-scroll -mx-3 flex min-h-[60vh] snap-x snap-proximity items-start gap-3.5 overflow-x-auto px-3 pb-6 sm:mx-0 sm:gap-4 sm:px-0"
+                  aria-label="Kanban board"
+                >
+                  {activeColumns.map(({ visibleTasks, ...column }, columnIndex) => (
+                    <BoardColumnView
+                      key={column.id}
+                      column={column}
+                      visibleTasks={visibleTasks}
+                      availableColumns={board.columns}
+                      membersById={membersById}
+                      currentUserId={user?.id}
+                      index={columnIndex}
+                      activeFilters={filtersActive}
+                      canReorder={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
+                      canMoveCards={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected' && !filtersActive && column.complete}
+                      onMoveTask={moveTaskFromMenu}
+                      onOpenTask={openTaskModal}
+                      onClearFilters={clearFilters}
+                      onRetry={() => void loadColumn(column.id, generationRef.current)}
+                      onLoadMore={() => void loadColumn(column.id, generationRef.current, false)}
+                    />
+                  ))}
+                </div>
+              </DragDropProvider>
+            )}
+
+            <p className="sr-only" aria-live="assertive">
+              {activeDragName ? `Đang di chuyển ${activeDragName}` : notice ?? ''}
+            </p>
+
+            {selectedTaskId && (
+              <Suspense
+                fallback={(
+                  <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-xs" role="status">
+                    <div className="inline-flex items-center gap-2.5 rounded-2xl bg-white px-5 py-3.5 text-sm font-medium text-slate-700 shadow-xl">
+                      <LoadingSpinner className="size-4 text-indigo-600" />
+                      <span>Đang mở chi tiết công việc…</span>
+                    </div>
+                  </div>
+                )}
+              >
+                <TaskDetailModal
+                  key={`${board.id}:${selectedTaskId}`}
+                  taskId={selectedTaskId}
+                  canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
+                  detailRefreshVersion={taskDetailRefreshVersion}
+                  commentsRefreshVersion={commentsRefreshVersion}
+                  remoteDeleted={selectedTaskDeleted}
+                  onClose={closeTaskModal}
+                  onSaved={handleTaskSaved}
+                />
+              </Suspense>
+            )}
+          </>
+        )}
       </div>
     </main>
-  );
-}
-
-function BoardColumnView({
-  column, visibleTasks, availableColumns, index, activeFilters, canReorder, canMoveCards, onMoveTask, onRetry, onLoadMore,
-  onOpenTask,
-}: {
-  column: BoardColumn;
-  visibleTasks: TaskListItem[];
-  availableColumns: BoardColumn[];
-  index: number;
-  activeFilters: boolean;
-  canReorder: boolean;
-  canMoveCards: boolean;
-  onMoveTask(taskId: string, destinationColumnId: string): void;
-  onOpenTask(taskId: string): void;
-  onRetry(): void;
-  onLoadMore(): void;
-}) {
-  const accepts = column.complete ? ['column', 'task'] : ['column'];
-  const { ref, handleRef, isDragging, isDropTarget } = useSortable({
-    id: `column:${column.id}`,
-    index,
-    type: 'column',
-    accept: accepts,
-    group: 'board-columns',
-    disabled: !canReorder,
-    data: { kind: 'column', columnId: column.id },
-  });
-
-  return (
-    <section
-      ref={ref}
-      className={`w-[min(86vw,340px)] shrink-0 rounded-2xl border bg-slate-100/80 transition ${isDragging ? 'opacity-50' : ''} ${isDropTarget ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'}`}
-      aria-label={`Cột ${column.name}`}
-    >
-      <header className="flex items-center gap-2 border-b border-slate-200/80 px-4 py-3.5">
-        <button ref={handleRef} type="button" disabled={!canReorder} className="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-white hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default" aria-label={`Sắp xếp cột ${column.name}`} title="Kéo để sắp xếp cột">⠿</button>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-bold text-slate-800">{column.name}</h2>
-          <p className="text-xs text-slate-400">{column.complete ? `${column.totalElements} công việc` : `${column.tasks.length} đã tải`}</p>
-        </div>
-        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">{column.tasks.length}</span>
-      </header>
-      <div className="max-h-[calc(100vh-250px)] min-h-32 space-y-3 overflow-y-auto p-3" aria-label={`Danh sách công việc ${column.name}`}>
-        {column.loading && column.tasks.length === 0 && <div className="space-y-3" aria-label="Đang tải công việc"><div className="h-24 animate-pulse rounded-xl bg-white" /><div className="h-24 animate-pulse rounded-xl bg-white" /></div>}
-        {column.error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700" role="alert"><p>{column.error}</p><button className="mt-2 font-semibold underline" onClick={onRetry}>Thử tải lại</button></div>}
-        {!column.loading && !column.error && visibleTasks.length === 0 && <EmptyTaskTarget column={column} canMoveCards={canMoveCards} activeFilters={activeFilters} />}
-        {visibleTasks.map((task, taskIndex) => <TaskCard key={task.id} task={task} column={column} columns={availableColumns} index={taskIndex} disabled={!canMoveCards} onMoveTask={onMoveTask} onOpenTask={onOpenTask} />)}
-        {column.complete && column.totalElements > column.tasks.length && <button className="w-full rounded-xl border border-dashed border-slate-300 bg-white/60 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-white" onClick={onLoadMore}>Tải thêm công việc</button>}
-        {!column.complete && !column.loading && !column.error && column.totalElements > column.tasks.length && <button className="w-full rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-3 text-xs font-semibold text-amber-800" onClick={onLoadMore}>Tải tiếp {Math.max(0, column.totalElements - column.tasks.length)} công việc</button>}
-      </div>
-    </section>
-  );
-}
-
-function EmptyTaskTarget({ column, canMoveCards, activeFilters }: { column: BoardColumn; canMoveCards: boolean; activeFilters: boolean }) {
-  const { ref, isDropTarget } = useDroppable({
-    id: `empty:${column.id}`,
-    type: 'task',
-    accept: 'task',
-    disabled: !canMoveCards,
-    data: { kind: 'column', columnId: column.id },
-  });
-  return <div ref={ref} className={`grid min-h-24 place-items-center rounded-xl border border-dashed px-4 text-center text-xs ${isDropTarget ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-slate-300 bg-white/60 text-slate-400'}`}>
-    {activeFilters ? 'Không có công việc phù hợp' : canMoveCards ? `Thả công việc vào ${column.name}` : 'Chưa có công việc'}
-  </div>;
-}
-
-function TaskCard({ task, column, columns, index, disabled, onMoveTask, onOpenTask }: { task: TaskListItem; column: BoardColumn; columns: BoardColumn[]; index: number; disabled: boolean; onMoveTask(taskId: string, destinationColumnId: string): void; onOpenTask(taskId: string): void }) {
-  const [showMoveMenu, setShowMoveMenu] = useState(false);
-  const { ref, handleRef, isDragging, isDropTarget } = useSortable({
-    id: `task:${task.id}`,
-    index,
-    type: 'task',
-    accept: 'task',
-    group: 'board-tasks',
-    disabled,
-    data: { kind: 'task', taskId: task.id, columnId: column.id },
-  });
-  const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-  const overdue = dueDate && dueDate.getTime() < Date.now();
-  const priorityClass: Record<TaskPriority, string> = {
-    LOW: 'bg-slate-100 text-slate-600',
-    MEDIUM: 'bg-sky-100 text-sky-700',
-    HIGH: 'bg-amber-100 text-amber-800',
-    URGENT: 'bg-rose-100 text-rose-700',
-  };
-  return (
-      <article id={`task-drop-${task.id}`} ref={ref} className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isDragging ? 'opacity-35' : ''} ${isDropTarget ? 'border-indigo-400 ring-2 ring-indigo-100' : ''}`}>
-      <div className="mb-3 flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-800"><button type="button" onClick={() => onOpenTask(task.id)} className="text-left hover:text-indigo-700 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Mở chi tiết ${task.title}`}><span className="mr-2 font-mono text-xs text-slate-500">{task.taskKey}</span>{task.title}</button></h3>
-        <button ref={handleRef} type="button" disabled={disabled} className="grid size-7 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default" aria-label={`Kéo để di chuyển ${task.title}`} title={disabled ? 'Xóa bộ lọc và tải đủ cột để sắp xếp' : 'Kéo để di chuyển'}>⠿</button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${priorityClass[task.priority]}`}>{PRIORITY_LABEL[task.priority]}</span>
-        {task.assigneeId && <span className="max-w-32 truncate rounded-full bg-violet-50 px-2 py-1 text-[10px] font-medium text-violet-700" title={task.assigneeId}>#{task.assigneeId.slice(0, 8)}</span>}
-        {dueDate && <span className={`ml-auto text-[10px] font-medium ${overdue ? 'text-rose-600' : 'text-slate-400'}`}>{new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: 'short' }).format(dueDate)}</span>}
-      </div>
-      <div className="mt-3 border-t border-slate-100 pt-2">
-        {showMoveMenu ? <label className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="shrink-0">Di chuyển đến</span>
-          <select autoFocus className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" value="" onChange={(event) => {
-            if (event.target.value) onMoveTask(task.id, event.target.value);
-            setShowMoveMenu(false);
-          }} onBlur={() => setShowMoveMenu(false)}>
-            <option value="" disabled>Chọn cột…</option>
-            {columns.filter((item) => item.id !== column.id && item.complete).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-        </label> : <button type="button" className="text-xs font-medium text-slate-400 transition hover:text-indigo-600 focus:outline-none focus:underline disabled:cursor-default disabled:opacity-50" disabled={disabled || columns.filter((item) => item.id !== column.id && item.complete).length === 0} onClick={() => setShowMoveMenu(true)}>Di chuyển…</button>}
-      </div>
-    </article>
   );
 }

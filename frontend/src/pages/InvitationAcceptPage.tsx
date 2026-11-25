@@ -5,17 +5,20 @@ import { useAuth } from '../auth/AuthProvider';
 import { captureInvitationToken, clearInvitationToken, invitationFailure, isFinalFailure, type InvitationFailure } from '../auth/invitation';
 import { loginPathWithReturnTo } from '../auth/returnTo';
 import { removeTokenFromAddressBar } from '../auth/urlToken';
-import { workspaceRoleLabel } from '../auth/workspaceRole';
 import { AuthLayout } from '../components/auth/AuthLayout';
-import { FormAlert, SecondaryButton, linkClass } from '../components/auth/FormControls';
+import {
+  FormAlert,
+  SecondaryButton,
+  linkClass,
+  primaryLinkClass,
+  secondaryLinkClass,
+} from '../components/auth/FormControls';
+import { ArrowRightIcon } from '../components/common/Icons';
+import { Avatar, LoadingSpinner, RoleBadge } from '../components/common/UiPrimitives';
 import { useCountdown } from '../hooks/useCountdown';
 import type { WorkspaceSummary } from '../types/board';
 
 const ACCEPT_PATH = '/invitations/accept';
-
-const primaryClass = 'block w-full rounded-xl bg-indigo-600 px-4 py-3 text-center font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-60 dark:shadow-none dark:focus-visible:ring-indigo-500/40';
-
-const secondaryClass = 'block w-full rounded-xl border border-slate-300 px-4 py-3 text-center font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus-visible:ring-indigo-500/30';
 
 interface Accepted {
   workspace: WorkspaceSummary;
@@ -81,7 +84,14 @@ export default function InvitationAcceptPage() {
   }
 
   if (!ready) {
-    return <AuthLayout title="Lời mời tham gia workspace"><p className="text-sm text-slate-500 dark:text-slate-400" role="status">Đang kiểm tra phiên đăng nhập…</p></AuthLayout>;
+    return (
+      <AuthLayout title="Lời mời tham gia workspace">
+        <div className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300" role="status">
+          <LoadingSpinner className="size-5 shrink-0 text-indigo-600" />
+          <span>Đang kiểm tra phiên đăng nhập…</span>
+        </div>
+      </AuthLayout>
+    );
   }
 
   if (accepted) {
@@ -92,19 +102,24 @@ export default function InvitationAcceptPage() {
         title={alreadyMember ? 'Bạn đã là thành viên' : 'Đã tham gia workspace'}
         footer={<Link className={linkClass} to="/workspaces">Xem tất cả workspace</Link>}
       >
-        <div className="space-y-5">
+        <div className="space-y-4">
           <FormAlert tone="success">
             {alreadyMember
               ? <>Bạn đã ở trong workspace này từ trước; vai trò hiện tại được giữ nguyên.</>
               : <>Bạn đã tham gia workspace thành công.</>}
           </FormAlert>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-2xl border border-slate-200 p-4 text-sm dark:border-slate-800">
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4 text-sm dark:border-slate-800 dark:bg-slate-950/60">
             <dt className="text-slate-500 dark:text-slate-400">Workspace</dt>
-            <dd className="min-w-0 break-words font-semibold text-slate-900 dark:text-white">{workspace.name}</dd>
+            <dd className="min-w-0 break-words font-semibold text-slate-950 dark:text-white">{workspace.name}</dd>
+            <dt className="text-slate-500 dark:text-slate-400">Mã định danh</dt>
+            <dd className="font-mono-code min-w-0 truncate text-xs text-slate-600 dark:text-slate-300">{workspace.slug}</dd>
             <dt className="text-slate-500 dark:text-slate-400">Vai trò</dt>
-            <dd className="font-semibold text-slate-900 dark:text-white">{workspaceRoleLabel(workspace.role)}</dd>
+            <dd><RoleBadge role={workspace.role} /></dd>
           </dl>
-          <Link className={primaryClass} to={`/boards?workspace=${encodeURIComponent(workspace.id)}`}>Vào workspace</Link>
+          <Link className={primaryLinkClass} to={`/boards?workspace=${encodeURIComponent(workspace.id)}`}>
+            <span>Mở workspace ngay</span>
+            <ArrowRightIcon className="size-4" />
+          </Link>
         </div>
       </AuthLayout>
     );
@@ -112,8 +127,18 @@ export default function InvitationAcceptPage() {
 
   if (!token) {
     return (
-      <AuthLayout title="Không tìm thấy lời mời" footer={<Link className={linkClass} to={user ? '/workspaces' : '/login'}>{user ? 'Xem danh sách workspace' : 'Đăng nhập'}</Link>}>
-        <FormAlert tone="error">Liên kết mời không đầy đủ hoặc đã được dùng trên trang này. Hãy mở lại liên kết trong email mời.</FormAlert>
+      <AuthLayout
+        title="Không tìm thấy lời mời"
+        footer={<Link className={linkClass} to={user ? '/workspaces' : '/login'}>{user ? 'Xem danh sách workspace' : 'Quay lại đăng nhập'}</Link>}
+      >
+        <div className="space-y-4">
+          <FormAlert tone="error">
+            Liên kết mời không đầy đủ hoặc đã được dùng trên trang này. Hãy mở lại liên kết mới nhất trong email mời.
+          </FormAlert>
+          <Link className={secondaryLinkClass} to={user ? '/workspaces' : '/login'}>
+            {user ? 'Đi tới danh sách workspace' : 'Đăng nhập DevFlow'}
+          </Link>
+        </div>
       </AuthLayout>
     );
   }
@@ -122,12 +147,15 @@ export default function InvitationAcceptPage() {
     return (
       <AuthLayout
         title="Bạn được mời tham gia workspace"
-        description="Đăng nhập bằng email đã nhận lời mời để chấp nhận."
+        description="Đăng nhập bằng email đã nhận lời mời để xác nhận tham gia cùng nhóm."
       >
-        <div className="space-y-4">
-          <Link className={primaryClass} to={loginPathWithReturnTo(ACCEPT_PATH)}>Đăng nhập để chấp nhận</Link>
-          <Link className={secondaryClass} to="/register">Tạo tài khoản mới</Link>
-          <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+        <div className="space-y-3">
+          <Link className={primaryLinkClass} to={loginPathWithReturnTo(ACCEPT_PATH)}>
+            <span>Đăng nhập để chấp nhận</span>
+            <ArrowRightIcon className="size-4" />
+          </Link>
+          <Link className={secondaryLinkClass} to="/register">Tạo tài khoản mới</Link>
+          <p className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs leading-5 text-slate-600 ring-1 ring-inset ring-slate-200/70 dark:bg-slate-950/60 dark:text-slate-400 dark:ring-slate-800">
             Chưa có tài khoản? Hãy đăng ký bằng đúng email được mời. Sau khi xác minh email, mở lại liên kết mời để tham gia.
           </p>
         </div>
@@ -140,10 +168,20 @@ export default function InvitationAcceptPage() {
     <AuthLayout
       headingRef={headingRef}
       title={final ? 'Không thể chấp nhận lời mời' : 'Chấp nhận lời mời'}
-      description={final ? undefined : <>Bạn đang đăng nhập bằng <span className="break-all font-medium text-slate-700 dark:text-slate-200">{user.email}</span>.</>}
+      description={final ? undefined : 'Xác nhận tham gia workspace bằng tài khoản đang đăng nhập dưới đây.'}
       footer={<Link className={linkClass} to="/workspaces">Xem danh sách workspace</Link>}
     >
-      <div className="space-y-5">
+      <div className="space-y-4">
+        {!final && (
+          <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200/90 bg-slate-50/75 p-3.5 dark:border-slate-800 dark:bg-slate-950/60">
+            <Avatar seed={user.id} name={user.fullName || user.email} avatarUrl={user.avatarUrl} size="md" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user.fullName || 'Tài khoản DevFlow'}</p>
+              <p className="truncate text-xs text-slate-600 dark:text-slate-400">{user.email}</p>
+            </div>
+          </div>
+        )}
+
         {failure && (
           <FormAlert tone="error">
             {failureMessage(failure, user.email)}
@@ -159,8 +197,15 @@ export default function InvitationAcceptPage() {
         )}
 
         {!final && failure?.kind !== 'emailMismatch' && (
-          <button type="button" className={primaryClass} disabled={busy || wait.active} aria-busy={busy || undefined} onClick={() => void handleAccept()}>
-            {busy ? 'Đang chấp nhận…' : wait.active ? `Thử lại sau ${wait.remaining} giây` : failure ? 'Thử lại' : 'Chấp nhận lời mời'}
+          <button
+            type="button"
+            className={primaryLinkClass}
+            disabled={busy || wait.active}
+            aria-busy={busy || undefined}
+            onClick={() => void handleAccept()}
+          >
+            {busy && <LoadingSpinner className="size-4 text-white" />}
+            <span>{busy ? 'Đang chấp nhận…' : wait.active ? `Thử lại sau ${wait.remaining} giây` : failure ? 'Thử lại' : 'Chấp nhận lời mời'}</span>
           </button>
         )}
       </div>

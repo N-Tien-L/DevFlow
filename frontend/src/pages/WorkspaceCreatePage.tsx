@@ -67,19 +67,25 @@ export default function WorkspaceCreatePage() {
 
   return (
     <AuthLayout
-      title="Tạo workspace"
-      description="Workspace là nơi nhóm của bạn quản lý board và công việc. Bạn sẽ là chủ sở hữu."
+      title="Tạo workspace mới"
+      description="Workspace là không gian chung để nhóm quản lý board Kanban, thành viên và tích hợp Git/CI. Bạn sẽ là chủ sở hữu."
       footer={<Link className={linkClass} to="/workspaces">← Quay lại danh sách workspace</Link>}
     >
-      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
         <TextField
           label="Tên workspace"
+          placeholder="VD: DevFlow Core Engineering"
           autoComplete="organization"
           maxLength={WORKSPACE_NAME_MAX_LENGTH}
           value={name}
           inputRef={inputRef}
           error={fieldError}
-          hint={`${name.trim().length}/${WORKSPACE_NAME_MAX_LENGTH} ký tự`}
+          hint={(
+            <div className="flex items-center justify-between gap-2">
+              <span>Dùng tên dự án hoặc tên đội ngũ của bạn.</span>
+              <span className="tabular-nums font-medium">{name.trim().length}/{WORKSPACE_NAME_MAX_LENGTH}</span>
+            </div>
+          )}
           onChange={(event) => {
             setName(event.target.value);
             setServerError(undefined);

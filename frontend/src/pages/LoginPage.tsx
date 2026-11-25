@@ -9,6 +9,7 @@ import { EMAIL_MAX_LENGTH, validateLogin, type FieldErrors } from '../auth/valid
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormAlert, PasswordField, SubmitButton, TextField, linkClass } from '../components/auth/FormControls';
 import { ResendVerification } from '../components/auth/ResendVerification';
+import { LockIcon } from '../components/common/Icons';
 import { useCountdown } from '../hooks/useCountdown';
 import { ApiError } from '../types/board';
 
@@ -63,20 +64,30 @@ export default function LoginPage() {
   return (
     <AuthLayout
       title="Chào mừng trở lại"
-      description="Đăng nhập để tiếp tục quản lý board của nhóm."
-      footer={<>Chưa có tài khoản? <Link className={linkClass} to="/register">Tạo tài khoản</Link></>}
+      description="Đăng nhập để tiếp tục theo dõi board, tiến độ sprint và hoạt động Git/CI của nhóm."
+      footer={(
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Chưa có tài khoản DevFlow?</span>
+          <Link className={linkClass} to="/register">Tạo tài khoản mới</Link>
+        </div>
+      )}
     >
       {notice === 'passwordReset' && (
-        <FormAlert tone="success" className="mb-5">Mật khẩu đã được đặt lại. Mọi phiên đăng nhập cũ đã bị đăng xuất; hãy đăng nhập bằng mật khẩu mới.</FormAlert>
+        <FormAlert tone="success" className="mb-5">
+          Mật khẩu đã được đặt lại. Mọi phiên đăng nhập cũ đã bị đăng xuất; hãy đăng nhập bằng mật khẩu mới.
+        </FormAlert>
       )}
       {sessionEnd === 'expired' && notice !== 'passwordReset' && (
-        <FormAlert tone="warning" className="mb-5">Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.</FormAlert>
+        <FormAlert tone="warning" className="mb-5">
+          Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục công việc.
+        </FormAlert>
       )}
 
-      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
         <TextField
           label="Email"
           type="email"
+          placeholder="ban@congty.vn"
           inputMode="email"
           autoComplete="username"
           autoCapitalize="none"
@@ -90,6 +101,7 @@ export default function LoginPage() {
         />
         <PasswordField
           label="Mật khẩu"
+          placeholder="Nhập mật khẩu của bạn"
           autoComplete="current-password"
           value={password}
           inputRef={(element) => { inputs.current.password = element; }}
@@ -97,9 +109,11 @@ export default function LoginPage() {
           onChange={(event) => setPassword(event.target.value)}
           required
         />
-        <p className="-mt-2 text-right text-sm">
-          <Link className={linkClass} to="/forgot-password" state={{ email: email.trim().toLowerCase() }}>Quên mật khẩu?</Link>
-        </p>
+        <div className="flex justify-end">
+          <Link className={`${linkClass} text-sm`} to="/forgot-password" state={{ email: email.trim().toLowerCase() }}>
+            Quên mật khẩu?
+          </Link>
+        </div>
 
         {error && <FormAlert tone="error">{error}</FormAlert>}
 
@@ -109,7 +123,7 @@ export default function LoginPage() {
       </form>
 
       {unverifiedEmail && (
-        <div className="mt-6 space-y-3">
+        <div className="mt-5 space-y-3 border-t border-slate-200/80 pt-5 dark:border-slate-800">
           <FormAlert tone="warning">
             Email <strong className="break-all font-semibold">{unverifiedEmail}</strong> chưa được xác minh. Hãy mở liên kết trong hộp thư, hoặc gửi lại email xác minh.
           </FormAlert>
@@ -117,7 +131,10 @@ export default function LoginPage() {
         </div>
       )}
 
-      <p className="mt-6 text-xs leading-5 text-slate-500 dark:text-slate-400">Phiên đăng nhập được lưu trong tab hiện tại và xóa khi đăng xuất.</p>
+      <p className="mt-5 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600 ring-1 ring-inset ring-slate-200/70 dark:bg-slate-950/60 dark:text-slate-400 dark:ring-slate-800">
+        <LockIcon className="size-3.5 shrink-0 text-slate-500" />
+        <span>Phiên đăng nhập được lưu trong tab hiện tại và tự động xóa khi đăng xuất.</span>
+      </p>
     </AuthLayout>
   );
 }

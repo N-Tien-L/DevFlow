@@ -4,6 +4,7 @@ import { AuthErrorCode, problemCode, retryAfterSeconds } from '../../api/problem
 import { authErrorMessage } from '../../auth/authErrorMessage';
 import { validateEmail } from '../../auth/validation';
 import { useCountdown } from '../../hooks/useCountdown';
+import { LoadingSpinner } from '../common/UiPrimitives';
 import { FormAlert, SecondaryButton, TextField } from './FormControls';
 
 // Client-side pause between resends; the server enforces its own rate limit and answers 429 with Retry-After.
@@ -31,11 +32,19 @@ export function ResendVerification({ email: knownEmail }: ResendVerificationProp
     try {
       await resendVerification(target);
       // 202 never reveals whether the address is registered, so the copy stays neutral.
-      setResult({ tone: 'success', message: 'Nếu email này đang chờ xác minh, một liên kết mới đã được gửi. Hãy kiểm tra cả thư mục spam.' });
+      setResult({
+        tone: 'success',
+        message: 'Nếu email này đang chờ xác minh, một liên kết mới đã được gửi. Hãy kiểm tra cả thư mục spam.',
+      });
       cooldown.start(RESEND_COOLDOWN_SECONDS);
     } catch (reason) {
-      if (problemCode(reason) === AuthErrorCode.RateLimitExceeded) cooldown.start(retryAfterSeconds(reason) ?? RESEND_COOLDOWN_SECONDS);
-      setResult({ tone: 'error', message: authErrorMessage(reason, 'Không gửi lại được email xác minh. Vui lòng thử lại.') });
+      if (problemCode(reason) === AuthErrorCode.RateLimitExceeded) {
+        cooldown.start(retryAfterSeconds(reason) ?? RESEND_COOLDOWN_SECONDS);
+      }
+      setResult({
+        tone: 'error',
+        message: authErrorMessage(reason, 'Không gửi lại được email xác minh. Vui lòng thử lại.'),
+      });
     } finally {
       setBusy(false);
     }
@@ -47,6 +56,7 @@ export function ResendVerification({ email: knownEmail }: ResendVerificationProp
         <TextField
           label="Email đăng ký"
           type="email"
+          placeholder="ban@congty.vn"
           autoComplete="email"
           inputMode="email"
           maxLength={254}
@@ -56,7 +66,8 @@ export function ResendVerification({ email: knownEmail }: ResendVerificationProp
         />
       )}
       <SecondaryButton className="w-full" disabled={busy || cooldown.active} onClick={() => void handleResend()}>
-        {busy ? 'Đang gửi…' : cooldown.active ? `Gửi lại sau ${cooldown.remaining} giây` : 'Gửi lại email xác minh'}
+        {busy && <LoadingSpinner className="size-4 text-indigo-600" />}
+        <span>{busy ? 'Đang gửi…' : cooldown.active ? `Gửi lại sau ${cooldown.remaining} giây` : 'Gửi lại email xác minh'}</span>
       </SecondaryButton>
       {result && <FormAlert tone={result.tone}>{result.message}</FormAlert>}
     </div>
