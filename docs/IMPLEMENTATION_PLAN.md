@@ -1,11 +1,11 @@
 # DevFlow — Master Implementation Plan
 
-> 🌐 **Language:** **English** (Authoritative Agent Best-Practice Guide) | [Bản Tiếng Việt (Dành cho Developer)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/IMPLEMENTATION_PLAN_VI.md)
+> 🌐 **Language:** **English** (Authoritative Agent Best-Practice Guide) | [Bản Tiếng Việt (Dành cho Developer)](IMPLEMENTATION_PLAN_VI.md)
 >
 > **Source-of-Truth References:**
-> - Product Specification: [docs/PRODUCT_SPEC.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/PRODUCT_SPEC.md)
-> - System Architecture: [docs/ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md)
-> - Scaffold Audit Report: [AUDIT_REPORT.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/AUDIT_REPORT.md)
+> - Product Specification: [docs/PRODUCT_SPEC.md](PRODUCT_SPEC.md)
+> - System Architecture: [docs/ARCHITECTURE.md](ARCHITECTURE.md)
+> - Scaffold Audit Report: [2026-09-09_SCAFFOLD_AUDIT_REPORT.md](archive/2026-09-09_SCAFFOLD_AUDIT_REPORT.md) (archived)
 > - Task Tracker: [Trello Development Board](https://trello.com/b/CKoJR2cC/development)
 >
 > **Target Scope:** 1 Semester (10–12 weeks)  
@@ -77,7 +77,7 @@ gantt
   3. **Frontend Client & UI (`frontend/`):**
      - Fetch-based `AuthProvider` (`src/auth/AuthProvider.tsx`): Bearer token on every request, single-flight refresh on 401, session in `sessionStorage`, sign-out on refresh failure. No Axios.
      - Shared RFC 7807 helper exposing `code` / `errors` / `Retry-After` for the auth pages.
-     - UI: Polished [LoginPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/LoginPage.tsx) and `RegisterPage.tsx` with validation and dark-mode aesthetic.
+     - UI: Polished [LoginPage.tsx](../frontend/src/pages/LoginPage.tsx) and `RegisterPage.tsx` with validation and dark-mode aesthetic.
 - **Verification Commands:**
   - Backend: `./gradlew :auth-impl:test :app:test`
   - Boundaries: `./gradlew :verifyModuleBoundaries`
@@ -104,7 +104,7 @@ gantt
      - WebSocket STOMP: Broadcast board mutations to destination `/topic/boards/{boardId}`.
      - Implement `BoardApi` contract (`findTasksByProject(UUID)`, `findTask(UUID)`).
   3. **Frontend Kanban Board UI (`frontend/`):**
-     - Refactor [BoardPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/BoardPage.tsx): dynamic columns (Backlog, To Do, In Progress, In Review, Done).
+     - Refactor [BoardPage.tsx](../frontend/src/pages/BoardPage.tsx): dynamic columns (Backlog, To Do, In Progress, In Review, Done).
      - Drag-and-drop card movements with optimistic UI updates.
      - Task detail modal with Markdown description editor, priority tags, and assignee picker.
      - STOMP WebSocket hook (`useBoardSync`): auto-update board state without browser reload.

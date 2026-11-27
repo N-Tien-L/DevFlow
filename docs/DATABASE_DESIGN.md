@@ -4,7 +4,7 @@
 > **Course:** Service-Oriented Program Design  
 > **Architecture:** Modular Monolith (Java 17, Spring Boot 3.4.5, PostgreSQL 17)  
 > **Version:** 1.0.0 (Milestone M1)  
-> **Cross-Reference:** [docs/DATABASE_DESIGN_VI.md](file:///docs/DATABASE_DESIGN_VI.md) (Vietnamese version) | [docs/ARCHITECTURE.md](file:///docs/ARCHITECTURE.md)
+> **Cross-Reference:** [docs/DATABASE_DESIGN_VI.md](DATABASE_DESIGN_VI.md) (Vietnamese version) | [docs/ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
@@ -146,7 +146,7 @@ graph TD
 
 ### 2.2. Detailed Schema & Attributes (Mermaid Code)
 The complete Mermaid ERD source code with all attributes, data types, indexes, and constraints is maintained at:  
-👉 **[docs/diagrams/database-erd.mmd](file:///docs/diagrams/database-erd.mmd)**
+👉 **[docs/diagrams/database-erd.mmd](diagrams/database-erd.mmd)**
 
 ---
 

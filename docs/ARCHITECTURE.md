@@ -1,6 +1,6 @@
 # DevFlow — Architecture
 
-> 🌐 **Language:** **English** (Authoritative Agent Architecture Specification) | [Bản Tiếng Việt (Dành cho Developer)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md)
+> 🌐 **Language:** **English** (Authoritative Agent Architecture Specification) | [Bản Tiếng Việt (Dành cho Developer)](ARCHITECTURE_VI.md)
 >
 > Companion to `PRODUCT_SPEC.md` / `PRODUCT_SPEC_VI.md`. Read that first for *what* and *why*; this document covers *how* the system is structured.
 >

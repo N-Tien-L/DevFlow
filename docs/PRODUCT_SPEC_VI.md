@@ -1,11 +1,11 @@
 # DevFlow — Đặc tả Sản phẩm & Tính năng (Product & Feature Specification)
 
-> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/PRODUCT_SPEC.md)
+> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](PRODUCT_SPEC.md)
 >
 > **Mục đích tài liệu:**  
 > Đây là tài liệu đặc tả sản phẩm gốc (source-of-truth product spec) của DevFlow. Tài liệu này nhằm giúp cả thành viên phát triển lẫn các AI coding agent (Cursor, Claude Code, Antigravity...) có cùng một cách hiểu thống nhất về sản phẩm làm *cái gì* và *tại sao* mỗi tính năng lại tồn tại, trước khi đưa ra các quyết định kiến trúc hoặc lựa chọn công nghệ.
 >
-> **Trạng thái:** Ý tưởng và phạm vi tính năng đã được chốt cố định. Chi tiết về kiến trúc kỹ thuật và tech stack vui lòng tham khảo [docs/ARCHITECTURE_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md) hoặc [docs/ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md).
+> **Trạng thái:** Ý tưởng và phạm vi tính năng đã được chốt cố định. Chi tiết về kiến trúc kỹ thuật và tech stack vui lòng tham khảo [docs/ARCHITECTURE_VI.md](ARCHITECTURE_VI.md) hoặc [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -164,7 +164,7 @@ DevFlow vận hành theo định hướng một ứng dụng SaaS thực tế ch
 
 ## 10. Lưu ý Dành cho Lập trình viên & AI Coding Agents
 
-- Không tự ý suy đoán kiến trúc, công nghệ từ tài liệu này — mọi quyết định kiến trúc kỹ thuật nằm tại [docs/ARCHITECTURE_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md) hoặc [docs/ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md).
+- Không tự ý suy đoán kiến trúc, công nghệ từ tài liệu này — mọi quyết định kiến trúc kỹ thuật nằm tại [docs/ARCHITECTURE_VI.md](ARCHITECTURE_VI.md) hoặc [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 - AI Service là **một bộ não duy nhất** phục vụ cả Chat UI lẫn MCP Server — tránh duplicate logic ở 2 nơi.
 - Mọi tính năng đánh dấu **Later** đều nằm ngoài phạm vi thực thi trừ khi có chỉ đạo mới.
 - Tuân thủ nghiêm ngặt các Tiêu chuẩn Chất lượng & Yêu cầu Phi chức năng đã quy định tại Mục 8. Tuyệt đối không chấp nhận các bản cài đặt chỉ dừng lại ở mức "chạy được ở kịch bản lý tưởng" (happy-path).

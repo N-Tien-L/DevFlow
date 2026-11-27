@@ -1,6 +1,6 @@
 # DevFlow — Tài liệu Kiến trúc Hệ thống (Architecture)
 
-> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md)
+> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](ARCHITECTURE.md)
 >
 > Tài liệu bổ trợ cho `PRODUCT_SPEC_VI.md` / `PRODUCT_SPEC.md`. Đọc tài liệu đó trước để hiểu sản phẩm làm *cái gì* và *tại sao*; tài liệu này tập trung vào *cách thức* hệ thống được cấu trúc.
 >

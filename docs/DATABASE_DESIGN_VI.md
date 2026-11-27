@@ -4,7 +4,7 @@
 > **Môn học:** Thiết kế chương trình hướng dịch vụ (Service-Oriented Program Design)  
 > **Kiến trúc:** Modular Monolith (Java 17, Spring Boot 3.4.5, PostgreSQL 17)  
 > **Phiên bản:** 1.0.0 (Giai đoạn Milestone M1)  
-> **Tài liệu đối chiếu:** [docs/DATABASE_DESIGN.md](file:///docs/DATABASE_DESIGN.md) (English version) | [docs/ARCHITECTURE_VI.md](file:///docs/ARCHITECTURE_VI.md)
+> **Tài liệu đối chiếu:** [docs/DATABASE_DESIGN.md](DATABASE_DESIGN.md) (English version) | [docs/ARCHITECTURE_VI.md](ARCHITECTURE_VI.md)
 
 ---
 
@@ -146,7 +146,7 @@ graph TD
 
 ### 2.2. Chi Tiết Thực Thể & Thuộc Tính (Detailed ERD)
 Mã nguồn Mermaid chi tiết của 16 bảng với đầy đủ thuộc tính, kiểu dữ liệu PostgreSQL, các chỉ mục và quan hệ khóa ngoại nội bộ được lưu độc lập tại:  
-👉 **[docs/diagrams/database-erd.mmd](file:///docs/diagrams/database-erd.mmd)**
+👉 **[docs/diagrams/database-erd.mmd](diagrams/database-erd.mmd)**
 
 ---
 
@@ -660,7 +660,7 @@ Nguyên tắc tối thượng: **Tuyệt đối không JOIN trực tiếp giữa
 
 V3–V5 đã được triển khai cho board audit, task audit và task version. Git/CI dùng V6; AI/Notification phải chọn version còn trống tiếp theo khi triển khai.
 
-Để đảm bảo việc triển khai không làm gián đoạn hệ thống và tuân thủ lộ trình 5 giai đoạn tại [docs/IMPLEMENTATION_PLAN_VI.md](file:///docs/IMPLEMENTATION_PLAN_VI.md):
+Để đảm bảo việc triển khai không làm gián đoạn hệ thống và tuân thủ lộ trình 5 giai đoạn tại [docs/IMPLEMENTATION_PLAN_VI.md](IMPLEMENTATION_PLAN_VI.md):
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

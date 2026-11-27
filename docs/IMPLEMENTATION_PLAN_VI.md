@@ -1,11 +1,11 @@
 # DevFlow — Kế hoạch Triển khai Dự án Tổng quan (Master Implementation Plan)
 
-> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/IMPLEMENTATION_PLAN.md)
+> 🌐 **Ngôn ngữ:** **Tiếng Việt** (Dành cho Developer đọc & theo dõi) | [English Version (Best Practices for AI Agents)](IMPLEMENTATION_PLAN.md)
 >
 > **Tài liệu Tham chiếu:**
-> - Đặc tả sản phẩm: [docs/PRODUCT_SPEC_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/PRODUCT_SPEC_VI.md) | [PRODUCT_SPEC.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/PRODUCT_SPEC.md)
-> - Kiến trúc hệ thống: [docs/ARCHITECTURE_VI.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE_VI.md) | [ARCHITECTURE.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/docs/ARCHITECTURE.md)
-> - Báo cáo Scaffold Audit: [AUDIT_REPORT.md](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/AUDIT_REPORT.md)
+> - Đặc tả sản phẩm: [docs/PRODUCT_SPEC_VI.md](PRODUCT_SPEC_VI.md) | [PRODUCT_SPEC.md](PRODUCT_SPEC.md)
+> - Kiến trúc hệ thống: [docs/ARCHITECTURE_VI.md](ARCHITECTURE_VI.md) | [ARCHITECTURE.md](ARCHITECTURE.md)
+> - Báo cáo Scaffold Audit: [2026-09-09_SCAFFOLD_AUDIT_REPORT.md](archive/2026-09-09_SCAFFOLD_AUDIT_REPORT.md) (archived)
 > - Bảng quản lý tiến độ: [Trello Development Board](https://trello.com/b/CKoJR2cC/development)
 >
 > **Thời gian dự kiến:** 1 Học kỳ (10–12 tuần)  
@@ -68,7 +68,7 @@ gantt
      - Triển khai `AuthApi` trong `auth-impl` cho các module khác tra cứu user/workspace.
   3. **Frontend Integration:**
      - `AuthProvider` dựa trên fetch (`src/auth/AuthProvider.tsx`): tự gắn Bearer token, refresh single-flight khi 401, lưu phiên trong `sessionStorage`, đăng xuất khi refresh thất bại. Không dùng Axios.
-     - Xây dựng trang [LoginPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/LoginPage.tsx) và `RegisterPage.tsx` với giao diện thẩm mỹ cao, validation form.
+     - Xây dựng trang [LoginPage.tsx](../frontend/src/pages/LoginPage.tsx) và `RegisterPage.tsx` với giao diện thẩm mỹ cao, validation form.
      - Quản lý trạng thái Auth (Context hoặc Zustand store) lưu giữ User profile & current workspace.
 - **Tiêu chí nghiệm thu (DoD):**
   - [ ] Người dùng có thể đăng ký tài khoản, đăng nhập nhận JWT và tự động điều hướng vào Workspace.
@@ -95,7 +95,7 @@ gantt
      - WebSocket STOMP Gateway: Broadcast bản tin thay đổi task tới `/topic/boards/{boardId}`.
      - Triển khai `BoardApi` (`findTasksByProject`, `findTask`).
   3. **Frontend Integration:**
-     - Tái cấu trúc [BoardPage.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/pages/BoardPage.tsx): Hiển thị header board, thanh filter (search, priority, assignee).
+     - Tái cấu trúc [BoardPage.tsx](../frontend/src/pages/BoardPage.tsx): Hiển thị header board, thanh filter (search, priority, assignee).
      - Kanban UI: Các cột trạng thái (Backlog, To Do, In Progress, In Review, Done).
      - Tương tác kéo thả (Drag-and-Drop) mượt mà với hiệu ứng chuyển động tự nhiên.
      - Modal chi tiết Task: Cập nhật tiêu đề, mô tả Markdown, đổi trạng thái, bình luận.
@@ -161,7 +161,7 @@ gantt
        - `lookupCiFailure(pipelineId)`: Xem phân tích nguyên nhân lỗi CI/CD ngay trong file code.
        - `getMyTasks()` (user lấy từ token): Cho developer biết họ cần làm gì tiếp theo.
   5. **Frontend AI Chat UI:**
-     - Hoàn thiện [ChatPanel.tsx](file:///c:/Users/Tien/university/ServiceOrientedProgramDesign/DevFlow/frontend/src/components/ChatPanel.tsx) ở góc phải: Giao diện chat hiện đại, hỗ trợ render Markdown, code snippet, và các Action Card (nút "Tạo Task" từ gợi ý của AI).
+     - Hoàn thiện [ChatPanel.tsx](../frontend/src/components/ChatPanel.tsx) ở góc phải: Giao diện chat hiện đại, hỗ trợ render Markdown, code snippet, và các Action Card (nút "Tạo Task" từ gợi ý của AI).
 - **Tiêu chí nghiệm thu (DoD):**
   - [ ] Khi CI fail, thẻ Task liên quan hiển thị bản tóm tắt nguyên nhân lỗi súc tích do AI phân tích.
   - [ ] Người dùng chat "Chia nhỏ tính năng upload avatar" → AI trả về danh sách subtasks hợp lý kèm nút bấm tạo thẻ lên Board.
