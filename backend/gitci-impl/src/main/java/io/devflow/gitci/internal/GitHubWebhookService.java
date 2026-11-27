@@ -117,7 +117,7 @@ class GitHubWebhookService {
             if (completed == null || completed != 1) throw new WebhookFailure(503, "WEBHOOK_UNAVAILABLE");
             return 204;
         }
-        if (event.equals("workflow_run")) workflows.persist(id, attempt);
+        if (event.equals("workflow_run")) workflows.persist(id, expected.workspaceId(), attempt);
         else ingestion.persist(id, expected.workspaceId(), expected.url(), plan);
         jdbc.update("UPDATE github_webhook_receipts SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, "
                 + "updated_at = CURRENT_TIMESTAMP WHERE repository_id = ? AND delivery_id = ?", id, delivery);

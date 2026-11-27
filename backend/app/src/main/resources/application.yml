@@ -88,6 +88,10 @@ devflow:
       # Enable only after V17, producer/consumer rollout and board-category preflight.
       auto-transition-enabled: ${BOARD_GIT_AUTO_TRANSITION_ENABLED:false}
   gitci:
+    read:
+      rate-limit:
+        capacity: ${GITCI_READ_RATE_LIMIT_CAPACITY:120}
+        refill-seconds: ${GITCI_READ_RATE_LIMIT_REFILL_SECONDS:60}
     ci:
       fetch-enabled: ${CI_LOG_FETCH_ENABLED:false}
       publish-enabled: ${CI_FAILURE_PUBLISH_ENABLED:false}

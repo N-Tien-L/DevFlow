@@ -1,15 +1,19 @@
 package io.devflow.gitci.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.devflow.common.event.TaskGitActivityChangedEvent.ActivityKind;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -23,11 +27,19 @@ final class CiWorkflowIngestion {
     private final JdbcTemplate jdbc;
     private final GitHubActionsProperties properties;
     private final MeterRegistry metrics;
+    private final ApplicationEventPublisher events;
 
     CiWorkflowIngestion(JdbcTemplate jdbc, GitHubActionsProperties properties, MeterRegistry metrics) {
+        this(jdbc, properties, metrics, null);
+    }
+
+    @Autowired
+    CiWorkflowIngestion(JdbcTemplate jdbc, GitHubActionsProperties properties, MeterRegistry metrics,
+                        ApplicationEventPublisher events) {
         this.jdbc = jdbc;
         this.properties = properties;
         this.metrics = metrics;
+        this.events = events;
     }
 
     record Attempt(String runId, int number, String sha, String branch, String status, String conclusion,
@@ -74,6 +86,10 @@ final class CiWorkflowIngestion {
     }
 
     void persist(UUID repository, Attempt attempt) {
+        persist(repository, null, attempt);
+    }
+
+    void persist(UUID repository, UUID workspace, Attempt attempt) {
         if (attempt == null) {
             afterCommit("ignored");
             return;
@@ -86,6 +102,7 @@ final class CiWorkflowIngestion {
                 repository, attempt.runId(), attempt.number());
         if (stored.isEmpty()) {
             insert(repository, attempt);
+            notifyLinkedTasks(repository, workspace, attempt.sha());
             afterCommit("accepted");
             return;
         }
@@ -105,8 +122,31 @@ final class CiWorkflowIngestion {
                     """, attempt.branch(), attempt.status(), attempt.conclusion(), sqlTime(attempt.started()),
                     sqlTime(attempt.updated()), sqlTime(attempt.updated()), previous.id());
             if (!terminal && attempt.status().equals("FAILED")) enqueue(repository, previous.id());
+            notifyLinkedTasks(repository, workspace, attempt.sha());
         }
         afterCommit(order > 0 ? "accepted" : "duplicate");
+    }
+
+    private void notifyLinkedTasks(UUID repository, UUID workspace, String sha) {
+        if (events == null || workspace == null || sha == null) return;
+        List<UUID> linked = jdbc.queryForList("""
+                SELECT DISTINCT task_id FROM (
+                    SELECT l.task_id
+                    FROM git_commit_task_links l
+                    JOIN git_commits c ON c.id = l.commit_id
+                    WHERE c.repository_id = ? AND c.sha = ?
+                    UNION ALL
+                    SELECT pl.task_id
+                    FROM git_pull_request_task_links pl
+                    JOIN pull_requests pr ON pr.id = pl.pull_request_id
+                    WHERE pr.repository_id = ? AND pr.head_sha = ?
+                ) matched
+                LIMIT 100
+                """, UUID.class, repository, sha, repository, sha);
+        if (!linked.isEmpty()) {
+            GitWebhookIngestion.publishActivityAfterCommit(
+                    events, metrics, workspace, repository, new LinkedHashSet<>(linked), ActivityKind.CI_UPDATED);
+        }
     }
 
     private void insert(UUID repository, Attempt attempt) {
