@@ -2,15 +2,12 @@ package io.devflow.ai.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeast;
-import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.verify;
 
 import io.devflow.ai.api.CancelChatRequest;
 import io.devflow.ai.api.ChatMessageRequest;
 import io.devflow.ai.api.ChatMessageResponse;
 import io.devflow.ai.api.ChatMessageType;
+import io.devflow.ai.internal.config.AiProperties;
 import io.devflow.ai.internal.qa.ProjectFixture;
 import io.devflow.ai.internal.support.TestBoardDirectory;
 import io.devflow.ai.internal.support.TestMembershipDirectory;
@@ -24,7 +21,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -68,6 +64,12 @@ class ChatGatewayControllerTest {
 
     @Autowired
     private TestBoardDirectory boardDirectory;
+
+    @Autowired
+    private ChatStreamService chatStreamService;
+
+    @Autowired
+    private AiProperties aiProperties;
 
     private ProjectFixture fixture;
     private final List<CapturedMessage> capturedMessages = new CopyOnWriteArrayList<>();
@@ -153,6 +155,7 @@ class ChatGatewayControllerTest {
         assertThat(errorResponse.conversationId()).isEqualTo(convId);
         assertThat(errorResponse.seq()).isEqualTo(-1);
         assertThat(errorResponse.content()).containsIgnoringCase("access");
+        assertThat(errorResponse.metadata()).containsEntry("code", "WORKSPACE_ACCESS_DENIED");
     }
 
     @Test
@@ -254,17 +257,99 @@ class ChatGatewayControllerTest {
     }
 
     @Test
-    @DisplayName("Cancel aborts an active stream")
+    @DisplayName("Cancelling an unknown or finished conversation sends nothing")
+    void cancelUnknownConversation_sendsNothing() {
+        chatGatewayController.cancel(new CancelChatRequest(UUID.randomUUID()), principal(fixture.askerId));
+
+        assertThat(userMessages(fixture.askerId)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Cancel stops an active stream: END(-1) is the last frame and the user's slot is released")
     void cancelChat_stopsActiveStream() {
         UUID user = fixture.askerId;
-        UUID workspaceId = fixture.projectId;
         UUID convId = UUID.randomUUID();
+        withStreamDelay(150, () -> {
+            chatGatewayController.chat(new ChatMessageRequest(convId, fixture.projectId,
+                    "how many tasks are left in this project?"), principal(user));
+            Awaitility.await().atMost(Duration.ofSeconds(3))
+                    .until(() -> userMessages(user).stream().anyMatch(m -> m.payload().type() == ChatMessageType.CHUNK));
 
-        CancelChatRequest cancelReq = new CancelChatRequest(convId);
-        chatGatewayController.cancel(cancelReq, principal(user));
+            chatGatewayController.cancel(new CancelChatRequest(convId), principal(user));
 
-        // When cancelling nonexistent or completed stream, no error is thrown
-        assertThat(userMessages(user)).isEmpty();
+            Awaitility.await().atMost(Duration.ofSeconds(3))
+                    .until(() -> chatStreamService.activeStreamCount(user) == 0);
+            sleepQuietly(400);
+            List<ChatMessageResponse> frames = userMessages(user).stream().map(CapturedMessage::payload).toList();
+            ChatMessageResponse last = frames.get(frames.size() - 1);
+            assertThat(last.type()).isEqualTo(ChatMessageType.END);
+            assertThat(last.seq()).isEqualTo(-1);
+            assertThat(frames).filteredOn(f -> f.type() == ChatMessageType.END).hasSize(1);
+            assertThat(frames).noneMatch(f -> f.type() == ChatMessageType.ERROR);
+        });
+    }
+
+    @Test
+    @DisplayName("A user cannot cancel another user's stream, even with the same conversationId")
+    void cancelByAnotherUser_isIgnored() {
+        UUID owner = fixture.askerId;
+        UUID other = fixture.bobId;
+        UUID convId = UUID.randomUUID();
+        withStreamDelay(50, () -> {
+            chatGatewayController.chat(new ChatMessageRequest(convId, fixture.projectId,
+                    "how many tasks are left in this project?"), principal(owner));
+            Awaitility.await().atMost(Duration.ofSeconds(3))
+                    .until(() -> userMessages(owner).stream().anyMatch(m -> m.payload().type() == ChatMessageType.CHUNK));
+
+            chatGatewayController.cancel(new CancelChatRequest(convId), principal(other));
+
+            Awaitility.await().atMost(Duration.ofSeconds(5))
+                    .until(() -> userMessages(owner).stream().anyMatch(m -> m.payload().type() == ChatMessageType.END));
+            ChatMessageResponse end = userMessages(owner).stream().map(CapturedMessage::payload)
+                    .filter(f -> f.type() == ChatMessageType.END).findFirst().orElseThrow();
+            assertThat(end.seq()).isPositive();
+            assertThat(userMessages(other)).isEmpty();
+        });
+    }
+
+    @Test
+    @DisplayName("A user may run at most max-streams-per-user answers at once")
+    void concurrentStreamsPerUser_areCapped() {
+        UUID user = userDirectory.addUser("Parallel Asker");
+        membershipDirectory.addMember(user, fixture.projectId);
+        int limit = aiProperties.getChat().getMaxStreamsPerUser();
+        withStreamDelay(150, () -> {
+            for (int i = 0; i < limit; i++) {
+                chatGatewayController.chat(new ChatMessageRequest(UUID.randomUUID(), fixture.projectId,
+                        "how many tasks are left in this project?"), principal(user));
+            }
+            Awaitility.await().atMost(Duration.ofSeconds(3))
+                    .until(() -> chatStreamService.activeStreamCount(user) == limit);
+
+            UUID refused = UUID.randomUUID();
+            chatGatewayController.chat(new ChatMessageRequest(refused, fixture.projectId,
+                    "how many tasks are left in this project?"), principal(user));
+
+            Awaitility.await().atMost(Duration.ofSeconds(3))
+                    .until(() -> userMessages(user).stream().anyMatch(m -> m.payload().conversationId().equals(refused)));
+            ChatMessageResponse error = userMessages(user).stream().map(CapturedMessage::payload)
+                    .filter(f -> f.conversationId().equals(refused)).findFirst().orElseThrow();
+            assertThat(error.type()).isEqualTo(ChatMessageType.ERROR);
+            assertThat(error.metadata()).containsEntry("code", "AI_CHAT_STREAMS_LIMIT");
+
+            Awaitility.await().atMost(Duration.ofSeconds(10))
+                    .until(() -> chatStreamService.activeStreamCount(user) == 0);
+        });
+    }
+
+    @Test
+    @DisplayName("Chunks reassemble to the full answer with no characters lost")
+    void splitIntoChunks_keepsEveryCharacter() {
+        String text = "2 of 5 tasks  are not done yet" + System.lineSeparator() + "(to do: 2, in progress: 1).";
+        List<String> chunks = ChatStreamService.splitIntoChunks(text, 25);
+        assertThat(String.join("", chunks)).isEqualTo(text);
+        assertThat(chunks).allMatch(chunk -> !chunk.isEmpty());
+        assertThat(ChatStreamService.splitIntoChunks("", 25)).isEmpty();
     }
 
     @Test
@@ -306,6 +391,24 @@ class ChatGatewayControllerTest {
         return capturedMessages.stream()
                 .filter(m -> m.destinationUser().equals(userId.toString()))
                 .toList();
+    }
+
+    private void withStreamDelay(long delayMs, Runnable body) {
+        long previous = aiProperties.getChat().getStreamDelayMs();
+        aiProperties.getChat().setStreamDelayMs(delayMs);
+        try {
+            body.run();
+        } finally {
+            aiProperties.getChat().setStreamDelayMs(previous);
+        }
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static Principal principal(UUID userId) {

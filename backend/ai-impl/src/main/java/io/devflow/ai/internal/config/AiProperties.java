@@ -308,6 +308,16 @@ public class AiProperties {
         @Max(1000)
         private long streamDelayMs = 20;
 
+        /** Chat streams one user may have running at the same time over STOMP (T-034). */
+        @Min(1)
+        @Max(20)
+        private int maxStreamsPerUser = 2;
+
+        /** Chat streams the whole instance runs at once; bounds the chat worker threads (T-034). */
+        @Min(1)
+        @Max(500)
+        private int maxConcurrentStreams = 32;
+
         public String getModel() {
             return model;
         }
@@ -346,6 +356,22 @@ public class AiProperties {
 
         public void setStreamDelayMs(long streamDelayMs) {
             this.streamDelayMs = streamDelayMs;
+        }
+
+        public int getMaxStreamsPerUser() {
+            return maxStreamsPerUser;
+        }
+
+        public void setMaxStreamsPerUser(int maxStreamsPerUser) {
+            this.maxStreamsPerUser = maxStreamsPerUser;
+        }
+
+        public int getMaxConcurrentStreams() {
+            return maxConcurrentStreams;
+        }
+
+        public void setMaxConcurrentStreams(int maxConcurrentStreams) {
+            this.maxConcurrentStreams = maxConcurrentStreams;
         }
     }
 
