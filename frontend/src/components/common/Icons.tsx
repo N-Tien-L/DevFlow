@@ -299,6 +299,45 @@ export function GitBranchIcon({ className, ...props }: IconProps) {
   );
 }
 
+export function GitCommitIcon({ className, ...props }: IconProps) {
+  return (
+    <svg className={clsx('size-3.5', className)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true" {...props}>
+      <circle cx="12" cy="12" r="3.5" />
+      <path strokeLinecap="round" d="M3 12h5.5M15.5 12H21" />
+    </svg>
+  );
+}
+
+export function GitPullRequestIcon({ className, ...props }: IconProps) {
+  return (
+    <svg className={clsx('size-3.5', className)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.95} aria-hidden="true" {...props}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.5v7M13 6h2.5A2.5 2.5 0 0 1 18 8.5v7M15 4l-2 2 2 2" />
+    </svg>
+  );
+}
+
+export function GitMergeIcon({ className, ...props }: IconProps) {
+  return (
+    <svg className={clsx('size-3.5', className)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.95} aria-hidden="true" {...props}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.5v7M6 8.5c0 5 4.5 7 9.5 7" />
+    </svg>
+  );
+}
+
+export function ExternalLinkIcon({ className, ...props }: IconProps) {
+  return (
+    <svg className={clsx('size-3', className)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true" {...props}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5M10 14 19 5M19 14v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18V6.5A1.5 1.5 0 0 1 6.5 5H10" />
+    </svg>
+  );
+}
+
 export function ShieldCheckIcon({ className, ...props }: IconProps) {
   return (
     <svg className={clsx('size-4', className)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} aria-hidden="true" {...props}>

@@ -7,6 +7,7 @@ import clsx from 'clsx';
 import { applyColumnOrder, cloneColumns, locateTask, moveTaskBefore, reorderColumnById } from '../board/mutations';
 import { getBoard, listBoards, listWorkspaceMembers, listWorkspaces, moveTask, reorderColumn } from '../api/boardApi';
 import { useAuth } from '../auth/AuthProvider';
+import { useBoardGitSummaries } from '../hooks/useBoardGitSummaries';
 import { useBoardSync, type BoardConnectionStatus } from '../hooks/useBoardSync';
 import { useNotificationSync } from '../hooks/useNotificationSync';
 import { BoardColumnView } from '../components/board/BoardColumnView';
@@ -16,6 +17,7 @@ import {
   AlertTriangleIcon,
   ArchiveIcon,
   FilterIcon,
+  GitBranchIcon,
   InfoIcon,
   KanbanIcon,
   LayoutGridIcon,
@@ -101,7 +103,21 @@ export default function BoardPage() {
   const [connectionStatus, setConnectionStatus] = useState<BoardConnectionStatus>('idle');
   const [taskDetailRefreshVersion, setTaskDetailRefreshVersion] = useState(0);
   const [commentsRefreshVersion, setCommentsRefreshVersion] = useState(0);
+  const [gitActivityRefreshVersion, setGitActivityRefreshVersion] = useState(0);
+  const [gitFullRefreshVersion, setGitFullRefreshVersion] = useState(0);
   const [selectedTaskDeleted, setSelectedTaskDeleted] = useState(false);
+
+  const gitSummaries = useBoardGitSummaries({
+    request,
+    workspaceId,
+    boardId,
+    sessionGeneration,
+    enabled: authReady && Boolean(user),
+  });
+  const refreshAllGitSummaries = gitSummaries.refreshAll;
+  const refreshSubsetGitSummaries = gitSummaries.refreshSubset;
+  const refreshSubsetGitSummariesRef = useRef(refreshSubsetGitSummaries);
+  refreshSubsetGitSummariesRef.current = refreshSubsetGitSummaries;
 
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const generationRef = useRef(0);
@@ -165,6 +181,9 @@ export default function BoardPage() {
       const pageStart = replace ? 0 : (boardRef.current?.columns.find((column) => column.id === columnId)?.loadedPages ?? 0);
       const result = await fetchEveryTaskPage(request, columnId, pageStart, signal);
       if (signal?.aborted || generation !== generationRef.current || columnLoadSequenceRef.current.get(columnId) !== sequence) return false;
+      const existingIds = !replace
+        ? new Set((boardRef.current?.columns.find((column) => column.id === columnId)?.tasks ?? []).map((task) => task.id))
+        : null;
       updateColumn(columnId, (column) => ({
         ...column,
         tasks: replace ? result.tasks : [...new Map([...column.tasks, ...result.tasks].map((task) => [task.id, task])).values()].sort((left, right) => left.position - right.position),
@@ -175,6 +194,10 @@ export default function BoardPage() {
         loading: false,
         error: null,
       }), generation);
+      if (!replace && existingIds) {
+        const newlyPagedIds = result.tasks.map((task) => task.id).filter((id) => !existingIds.has(id));
+        if (newlyPagedIds.length > 0) refreshSubsetGitSummariesRef.current(newlyPagedIds, { debounced: false });
+      }
       if (!result.complete) setNotice(`Lượt tải cột dừng ở giới hạn ${MAX_PAGES_PER_COLUMN} trang. Dùng nút tải tiếp để xem toàn bộ.`);
       else if (connectionStatusRef.current === 'connected' && boardRef.current?.columns.every((column) => column.id === columnId || column.complete)) setNotice(null);
       return result.complete;
@@ -338,6 +361,7 @@ export default function BoardPage() {
       setWorkspaceId(response.workspaceId);
       setBoards((items) => items.map((item) => item.id === response.id ? { ...item, name: response.name, description: response.description, archived: response.archived, updatedAt: response.updatedAt } : item));
       setSelectedTaskDeleted(false);
+      setGitFullRefreshVersion((version) => version + 1);
       return nextColumns.every((column) => column.complete) ? 'current' : 'partial';
     } finally {
       if (reconciliationControllerRef.current === controller) reconciliationControllerRef.current = null;
@@ -391,7 +415,10 @@ export default function BoardPage() {
           iterations += 1;
           lastSyncBatchStartedAtRef.current = Date.now();
           try {
-            if (scopes.refreshTaskDetail && selectedTaskIdRef.current) setTaskDetailRefreshVersion((version) => version + 1);
+            if (scopes.refreshTaskDetail && selectedTaskIdRef.current) {
+              setTaskDetailRefreshVersion((version) => version + 1);
+              setGitActivityRefreshVersion((version) => version + 1);
+            }
             if (scopes.refreshComments && selectedTaskIdRef.current) setCommentsRefreshVersion((version) => version + 1);
             const result = scopes.full || scopes.refreshColumns.size > 0
               ? await reconcileBoardSnapshot(scopes)
@@ -500,6 +527,26 @@ export default function BoardPage() {
       } : current);
     }
 
+    const gitActivityOnly =
+      message.type === 'CARD_UPDATED' &&
+      message.data.changedFields.length > 0 &&
+      message.data.changedFields.every((field) => field === 'gitActivity');
+    if (gitActivityOnly) {
+      const affectedTaskIds = message.data.taskId
+        ? [message.data.taskId]
+        : (boardRef.current?.columns ?? [])
+            .filter((column) =>
+              message.data.affectedColumnIds.length === 0 ||
+              message.data.affectedColumnIds.includes(column.id),
+            )
+            .flatMap((column) => column.tasks.map((task) => task.id));
+      if (affectedTaskIds.length > 0) refreshSubsetGitSummaries(affectedTaskIds, { debounced: true });
+      if (selectedTaskId && (!message.data.taskId || message.data.taskId === selectedTaskId)) {
+        setGitActivityRefreshVersion((version) => version + 1);
+      }
+      return;
+    }
+
     const scopes = emptyBoardSyncScopes();
     scopes.full = refresh.has('BOARD') || refresh.has('COLUMNS') || message.type.startsWith('COLUMN_');
     if (refresh.has('TASK_LISTS')) {
@@ -510,7 +557,7 @@ export default function BoardPage() {
     scopes.refreshTaskDetail = refresh.has('TASK_DETAIL') && selectedTaskMatches;
     scopes.refreshComments = scopes.refreshTaskDetail && message.data.changedFields.includes('comments');
     scheduleBoardSync(scopes);
-  }, [navigate, request, scheduleBoardSync, selectedTaskId]);
+  }, [navigate, refreshSubsetGitSummaries, request, scheduleBoardSync, selectedTaskId]);
 
   const handleConnectionStatus = useCallback((status: BoardConnectionStatus) => {
     connectionStatusRef.current = status;
@@ -795,6 +842,25 @@ export default function BoardPage() {
       requestAnimationFrame(() => returnTarget.focus());
     }
   }, []);
+
+  const loadedBoardTaskIds = useMemo(
+    () => [...new Set((board?.columns ?? []).flatMap((column) => column.tasks.map((task) => task.id)))].sort(),
+    [board],
+  );
+  const loadedBoardTaskIdsRef = useRef<string[]>([]);
+  loadedBoardTaskIdsRef.current = loadedBoardTaskIds;
+  const loadedBoardId = board?.id ?? '';
+  const initialColumnsStillLoading = Boolean(board?.columns.some((column) => column.loading && column.tasks.length === 0));
+  const lastGitFullFetchKeyRef = useRef('');
+
+  useEffect(() => {
+    if (!authReady || !user || !workspaceId || !boardId || loadedBoardId !== boardId) return;
+    if (initialColumnsStillLoading) return;
+    const fetchKey = `${workspaceId}:${boardId}:${sessionGeneration}:${gitFullRefreshVersion}`;
+    if (lastGitFullFetchKeyRef.current === fetchKey) return;
+    lastGitFullFetchKeyRef.current = fetchKey;
+    refreshAllGitSummaries(loadedBoardTaskIdsRef.current);
+  }, [authReady, boardId, gitFullRefreshVersion, initialColumnsStillLoading, loadedBoardId, refreshAllGitSummaries, sessionGeneration, user, workspaceId]);
 
   const activeColumns = useMemo(() => {
     const term = filterText.trim().toLocaleLowerCase();
@@ -1263,6 +1329,33 @@ export default function BoardPage() {
               </div>
             )}
 
+            {/* Non-blocking Git/CI degraded-mode banner (never locks Kanban DnD or editing) */}
+            {gitSummaries.error && (
+              <div
+                className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200/90 bg-white px-3.5 py-2 text-xs text-slate-700 shadow-2xs sm:mb-4"
+                role="status"
+                aria-live="polite"
+                data-testid="gitci-degraded-banner"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <GitBranchIcon className="size-3.5 shrink-0 text-amber-600" />
+                  <span className="min-w-0 leading-5">
+                    {gitSummaries.error}
+                    {gitSummaries.stale ? ' Đang giữ dữ liệu Git/CI gần nhất.' : ''}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={gitSummaries.loading}
+                  onClick={() => refreshAllGitSummaries(loadedBoardTaskIds)}
+                  className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-indigo-50 hover:text-indigo-700 hover:ring-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50"
+                >
+                  <RefreshIcon className="size-3.5" />
+                  <span>Thử tải lại Git/CI</span>
+                </button>
+              </div>
+            )}
+
             {/* Screen-reader live region for healthy connection state & drag announcements */}
             <p className="sr-only" role="status" aria-live="polite">
               {connectionStatus === 'connected' && !syncBlocked ? 'Đồng bộ realtime đang hoạt động. Dữ liệu đã đối soát.' : ''}
@@ -1288,6 +1381,7 @@ export default function BoardPage() {
                       visibleTasks={visibleTasks}
                       availableColumns={board.columns}
                       membersById={membersById}
+                      gitSummariesByTaskId={gitSummaries.summariesByTaskId}
                       currentUserId={user?.id}
                       index={columnIndex}
                       activeFilters={filtersActive}
@@ -1325,6 +1419,7 @@ export default function BoardPage() {
                   canEdit={!board.archived && !pending && !syncBlocked && connectionStatus === 'connected'}
                   detailRefreshVersion={taskDetailRefreshVersion}
                   commentsRefreshVersion={commentsRefreshVersion}
+                  gitActivityRefreshVersion={gitActivityRefreshVersion}
                   remoteDeleted={selectedTaskDeleted}
                   onClose={closeTaskModal}
                   onSaved={handleTaskSaved}
