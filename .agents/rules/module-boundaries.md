@@ -44,42 +44,40 @@ The Gradle build strictly checks these dependency rules:
    - Entity references across modules must be stored as raw IDs (`UUID userId`, `UUID boardId`, `UUID taskId`).
 
 3. **Table Ownership:**
-   - Each module strictly owns its respective database tables:
-     - `auth`: `users`, `refresh_tokens`
-     - `board`: `boards`, `columns`, `tasks`, `task_history`
-     - `gitci`: `git_repositories`, `git_commits`, `git_pull_requests`, `ci_runs`, `ci_failures`
-     - `ai`: `ai_analysis_reports`, `ai_risk_flags`
-     - `notification`: `notifications`, `user_notification_preferences`
+   - Each module strictly owns its tables. The authoritative list is `docs/ARCHITECTURE.md` Section 5 and `docs/DATABASE_DESIGN.md`; check there (or the Flyway migrations) before touching a table.
 
 ---
 
 ## 4. Cross-Module Communication
 
-All inter-module interactions must follow one of two patterns:
+All inter-module interactions must follow one of these patterns:
 
 ### Pattern A: Asynchronous / Event-Driven (Standard & Preferred)
 - Cross-module coordination is achieved via Spring's `ApplicationEventPublisher`.
-- Events are defined in `:common` (`io.devflow.common.event.*`) and inherit from `DevFlowEvent`.
+- Events are `final` classes in `:common` (`io.devflow.common.event.*`) that **implement the `DevFlowEvent` interface** (`eventType()`, `occurredAt()`); there is no `source` argument.
 - The publisher module fires the event:
   ```java
-  eventPublisher.publishEvent(new TaskCreatedEvent(this, taskId, boardId, title, assigneeId));
+  eventPublisher.publishEvent(new TaskCreatedEvent(/* validated payload fields */));
   ```
-- The consumer module listens via `@EventListener`:
+- The consumer module listens after the publisher's transaction commits:
   ```java
   @Component
-  public class NotificationEventListener {
-      @EventListener
+  public class NotificationEventListeners {
+      @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
       public void onTaskCreated(TaskCreatedEvent event) {
           // Send notification...
       }
   }
   ```
 
+- Events whose loss would corrupt another module's state go through a durable outbox written in the same transaction (`GitDomainEventOutbox`, `CiFailureEventOutbox` in `gitci-impl`).
+
 ### Pattern B: Synchronous In-Process API (Read-only Queries)
-- When immediate return values are required (e.g. verifying user permissions), the consumer module calls an interface exposed in the provider's `-api` module:
-  - Provider: `io.devflow.auth.api.AuthApi` in `auth-api`
-  - Implementation: `io.devflow.auth.internal.service.AuthApiImpl` in `auth-impl` (registered as a Spring bean)
-  - Consumer: Injects `AuthApi` (from `auth-api`), never `AuthApiImpl`.
+- When immediate return values are required, the consumer injects the interface exposed in the provider's `-api` module (`AuthApi`, `BoardApi`, `GitCiApi`, `NotificationApi`, `AiServiceApi`), never the implementing class from `-impl`.
+
+### Pattern C: Synchronous Request/Decision Event (Write Guards)
+- When a write must be authorized by another module (e.g. `WorkspaceMembershipCheckRequestedEvent`, `TaskReferencesResolveRequestedEvent`), the caller publishes the request event and the owning module's plain `@EventListener` records exactly one decision on it before `publishEvent` returns.
+- The caller **fails closed** on a missing or duplicate decision. These listeners must never be async or transactional-after-commit.
 
 ---
 

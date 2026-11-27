@@ -1,212 +1,48 @@
 ---
 name: frontend-dev
-description: Guidance and recipes for developing the DevFlow React 19, TypeScript, and Vite frontend, including routing, components, TailwindCSS v4 styling, and backend API integration.
+description: DevFlow frontend rules and commands (React 19, TypeScript 5.8, Vite 6, Tailwind 4, React Router 7, zustand, STOMP realtime, vitest). Use before adding or changing anything under frontend/ - pages, components, API clients, stores, realtime sync, tests - or when running npm scripts. Covers the project's folder layout, ProblemDetail error handling, auth and Turnstile, realtime patterns and the fast test commands. For visual design and UI flows, the frontend-delivery skill leads; this skill holds the DevFlow-specific code rules.
 ---
 
-# Frontend Development Skill — DevFlow
+# DevFlow frontend
 
-This skill outlines guidelines, project structure, component templates, and commands for developing the DevFlow frontend web application.
+## Commands (run in `frontend/`)
 
----
+| Goal | Command |
+|---|---|
+| Dev server (proxies `/api` and WebSocket to :8080) | `npm run dev` (port 5173) |
+| One test file | `npx vitest run src/api/problemDetail.test.ts` |
+| All tests | `npm test` |
+| Lint (also runs per edited file through a hook) | `npm run lint` |
+| Type-check and build (the CI gate) | `npm run build` |
 
-## 1. Quick Reference & System Stack
+CI runs `npm ci && npm run lint && npm test && npm run build`. Run all four before a PR.
 
-- **Framework:** React 19
-- **Bundler / Dev Server:** Vite 6.3
-- **Language:** TypeScript 5.8
-- **Routing:** React Router 7 (`react-router-dom`)
-- **Styling:** TailwindCSS 4 (`@tailwindcss/vite`) + `clsx`
-- **Linting:** ESLint 9
-- **Local Dev Server Port:** `5173` (Vite dev server)
-- **Production Port:** `3000` (via Docker Nginx container)
-
----
-
-## 2. Standard NPM Commands
-
-Run these commands inside the `frontend/` directory:
-
-```bash
-# Install node dependencies
-npm install
-
-# Start Vite development server (proxies /api to localhost:8080)
-npm run dev
-
-# Run TypeScript type-checking and build production bundle
-npm run build
-
-# Run ESLint check
-npm run lint
-
-# Preview the production build locally
-npm run preview
-```
-
----
-
-## 3. Directory Layout
+## Layout (actual)
 
 ```
-frontend/src/
-├── api/             # API request functions (fetch / axios clients)
-├── components/      # UI components
-│   ├── common/      # Generic UI: Button, Badge, Modal, Input, Spinner
-│   ├── board/       # Board specific: BoardView, Column, TaskCard, TaskModal
-│   └── layout/      # AppShell, Navbar, Sidebar
-├── hooks/           # Custom reusable hooks (e.g. useBoard, useTasks)
-├── pages/           # Route-level views (e.g. BoardPage.tsx, AnalyticsPage.tsx)
-├── types/           # TypeScript interfaces matching backend DTOs & models
-├── App.tsx          # Router and root component setup
-├── main.tsx         # DOM render root
-└── index.css        # Global CSS & TailwindCSS v4 entrypoint
+src/
+├── api/         # one client per backend module: authApi, boardApi, notificationApi, plus problemDetail.ts
+├── auth/        # AuthProvider, session/return-to logic, validation, token-in-URL handling
+├── board/       # board mutations and the sync coordinator
+├── realtime/    # STOMP message types (boardMutation.ts)
+├── hooks/       # useBoardSync, useNotificationSync, useTurnstile, useCountdown
+├── stores/      # zustand stores (notificationStore)
+├── components/  # auth/, board/, common/, layout/, notification/, ChatPanel
+└── pages/       # route-level screens
 ```
 
----
+Tests sit next to the file: `foo.ts` gets `foo.test.ts` (vitest + jsdom).
 
-## 4. Development Recipes
+## Rules
 
-### Recipe 1: Defining Shared TypeScript Types
+- **API calls**: relative `/api/v1/...` only. Parse responses with `readJsonResponse` and errors with `parseProblemDetail` from `api/problemDetail.ts`. Branch on `problemCode(...)` and `fieldErrors(...)`, never on message text. Honour `Retry-After` through `retryAfterSeconds`.
+- **Cancellation**: API functions take an `AbortSignal`. Effects abort on unmount, and dropdown or polling fetches must not loop (see commit 13e068d).
+- **Auth**: session state comes from `AuthProvider`. Clear per-user stores on logout or user switch, as `notificationStore` does. Public forms (register, login, resend, forgot password) need Turnstile through `useTurnstile`.
+- **Realtime**: board and notification updates arrive over STOMP (`@stomp/stompjs`) through `useBoardSync` / `useNotificationSync`. Apply server events idempotently, because optimistic updates and server echoes both arrive.
+- **State**: use zustand for cross-component state and local `useState` otherwise. No new state library.
+- **Styling**: Tailwind 4 utilities and `clsx`. Keep the existing component look; new screens follow the frontend-delivery workflow.
+- **Types**: mirror backend DTO records exactly, including nullability. No `any`.
 
-Define models matching backend API DTOs in `src/types/`:
+## Done means
 
-```typescript
-// frontend/src/types/board.ts
-export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'DONE';
-
-export interface Task {
-  id: string;
-  columnId: string;
-  title: string;
-  description?: string;
-  assigneeId?: string;
-  status: TaskStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Column {
-  id: string;
-  title: string;
-  order: number;
-  tasks: Task[];
-}
-
-export interface Board {
-  id: string;
-  name: string;
-  description?: string;
-  columns: Column[];
-}
-```
-
----
-
-### Recipe 2: API Client Integration
-
-Always use relative paths (`/api/v1/...`) so Vite proxy or Nginx handles routing to the backend:
-
-```typescript
-// frontend/src/api/boardApi.ts
-import { Board, Task } from '../types/board';
-
-const API_BASE = '/api/v1';
-
-export async function fetchBoard(boardId: string): Promise<Board> {
-  const res = await fetch(`${API_BASE}/boards/${boardId}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch board: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-export async function createTask(taskData: {
-  columnId: string;
-  title: string;
-  description?: string;
-}): Promise<Task> {
-  const res = await fetch(`${API_BASE}/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(taskData),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to create task: ${res.statusText}`);
-  }
-  return res.json();
-}
-```
-
----
-
-### Recipe 3: Creating a Reusable Component with TailwindCSS v4
-
-```tsx
-// frontend/src/components/common/Badge.tsx
-import React from 'react';
-import clsx from 'clsx';
-
-interface BadgeProps {
-  variant?: 'info' | 'success' | 'warning' | 'danger';
-  children: React.ReactNode;
-  className?: string;
-}
-
-export const Badge: React.FC<BadgeProps> = ({
-  variant = 'info',
-  children,
-  className,
-}) => {
-  const variantStyles = {
-    info: 'bg-blue-50 text-blue-700 border-blue-200',
-    success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    warning: 'bg-amber-50 text-amber-700 border-amber-200',
-    danger: 'bg-rose-50 text-rose-700 border-rose-200',
-  };
-
-  return (
-    <span
-      className={clsx(
-        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-        variantStyles[variant],
-        className
-      )}
-    >
-      {children}
-    </span>
-  );
-};
-```
-
----
-
-### Recipe 4: Adding Routes in React Router 7
-
-In `frontend/src/App.tsx`:
-
-```tsx
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { BoardPage } from './pages/BoardPage';
-import { DashboardPage } from './pages/DashboardPage';
-
-export function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/boards" replace />} />
-        <Route path="/boards" element={<BoardPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-      </Routes>
-    </BrowserRouter>
-  );
-}
-```
-
----
-
-## 5. Pre-Commit Checklist for Frontend
-
-- [ ] Run `npm run build` to ensure `tsc` passes without type errors.
-- [ ] Run `npm run lint` and resolve any ESLint errors or unused imports.
-- [ ] Ensure all API endpoints point to relative `/api/v1/...` (never hardcode `localhost:8080`).
-- [ ] Test UI responsiveness on both desktop and mobile viewports.
+AGENTS.md Section 4 checklist passes; lint, tests and build are green. UI changes are checked in a real browser (Playwright plugin) at desktop and mobile widths.

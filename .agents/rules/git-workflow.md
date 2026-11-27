@@ -12,6 +12,10 @@ The repository follows a simplified GitFlow model:
 - **`develop`**: Integration branch for active sprint development. All feature and bugfix branches branch off from and merge back into `develop`.
 - **Feature Branches**: Short-lived branches created for specific tickets or user stories.
 
+> [!IMPORTANT]
+> **Agents:** always start a branch from the remote tip: `git fetch origin && git switch -c feature/T-<id>-<slug> origin/develop`. A local `develop` is usually stale.
+> GitHub's default branch is `main`, so always pass the base explicitly: `gh pr create --base develop`.
+
 ### Branch Naming Conventions
 Always include the Trello ticket ID if working on a tracked task:
 
@@ -73,7 +77,7 @@ Commit messages must adhere strictly to the [Conventional Commits](https://www.c
 *Example:* `[T-010] Implement Board and Column REST API endpoints`
 
 ### 3.2 PR Description Template
-When creating or proposing a PR description, include:
+GitHub pre-fills `.github/pull_request_template.md`. When writing a description by hand (e.g. `gh pr create --body`), keep its sections:
 
 ```markdown
 ## Summary of Changes
@@ -91,5 +95,5 @@ When creating or proposing a PR description, include:
 ```
 
 ### 3.3 Merge Strategy
-- **Target Branch:** `develop` for features/fixes; `main` for release milestones.
+- **Target Branch:** `develop` for features/fixes (`gh pr create --base develop`); `main` for release milestones only.
 - **Merge Type:** Use **Squash and Merge** into `develop` to preserve clean, linear history.

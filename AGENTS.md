@@ -16,9 +16,9 @@
 
 ### 1.1. Team Roles & Ownership Matrix
 DevFlow is co-developed with clear vertical slice domain ownership:
-- **Tien Lam (`@tienlam15`, Trello ID: `68639fd09f37de1717567ea2`):** Focus on **Intelligence & Identity** — Modules `auth`, `ai`, `notification`, and Cloudflare/PaaS deployment.
-- **Xuan Le (`@xuanle2`, Trello ID: `6aa2664e0ad1266d74a8efdc`):** Focus on **DevOps & Process Core** — Modules `board`, `gitci`, and Docker local.
-- **Collaborator / Advisor:** Anh Ly Tuan (`@anhlytuan`, Trello ID: `6aa26add5a27b7fc8687d7a3`).
+- **Tien Lam (GitHub `N-Tien-L`, Trello `@tienlam15`, Trello ID: `68639fd09f37de1717567ea2`):** Focus on **Intelligence & Identity** — Modules `auth`, `ai`, `notification`, and Cloudflare/PaaS deployment.
+- **Xuan Le (GitHub `lvXuankg`, Trello `@xuanle2`, Trello ID: `6aa2664e0ad1266d74a8efdc`):** Focus on **DevOps & Process Core** — Modules `board`, `gitci`, and Docker local.
+- **Collaborator / Advisor:** Anh Ly Tuan (Trello `@anhlytuan`, Trello ID: `6aa26add5a27b7fc8687d7a3`).
 
 > [!NOTE]
 > **Developer Identity:** Each developer configures their personal identity locally in `.agents/rules/personal-user-identity.md` (git-ignored) so their AI agent automatically recognizes which team member it is assisting.
@@ -29,15 +29,15 @@ DevFlow is co-developed with clear vertical slice domain ownership:
 
 Before designing new features, modifying architecture, or adding integrations, you **must consult**:
 
-1. [docs/ARCHITECTURE.md](file:///docs/ARCHITECTURE.md) (EN) / [docs/ARCHITECTURE_VI.md](file:///docs/ARCHITECTURE_VI.md) (VI) — The authoritative system architecture:
+1. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (EN) / [docs/ARCHITECTURE_VI.md](docs/ARCHITECTURE_VI.md) (VI) — The authoritative system architecture:
    - Section 2: Modular Monolith architecture & dependency layout
    - Section 4: Domain Event Catalog (`DevFlowEvent` contract & matrix)
    - Section 5: Database schema & module table ownership
    - Section 9.2: Cross-cutting concerns & NFR technical implementation
    - Section 10: Module boundary enforcement rules
-2. [docs/PRODUCT_SPEC.md](file:///docs/PRODUCT_SPEC.md) (EN) / [docs/PRODUCT_SPEC_VI.md](file:///docs/PRODUCT_SPEC_VI.md) (VI) — Functional specifications, user personas, use cases, and Section 8 Quality Standards & NFRs.
-3. [docs/IMPLEMENTATION_PLAN.md](file:///docs/IMPLEMENTATION_PLAN.md) (EN) / [docs/IMPLEMENTATION_PLAN_VI.md](file:///docs/IMPLEMENTATION_PLAN_VI.md) (VI) — Master implementation plan, 5-phase rollout roadmap, sprint milestones, and ticket breakdown.
-4. [Trello Management Skill](file:///.agents/skills/trello-management/SKILL.md) — Project tasks, board lists, and card workflows.
+2. [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md) (EN) / [docs/PRODUCT_SPEC_VI.md](docs/PRODUCT_SPEC_VI.md) (VI) — Functional specifications, user personas, use cases, and Section 8 Quality Standards & NFRs.
+3. [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) (EN) / [docs/IMPLEMENTATION_PLAN_VI.md](docs/IMPLEMENTATION_PLAN_VI.md) (VI) — Master implementation plan, 5-phase rollout roadmap, sprint milestones, and ticket breakdown.
+4. [Trello Management Skill](.agents/skills/trello-management/SKILL.md) — Project tasks, board lists, and card workflows.
 
 ---
 
@@ -49,7 +49,7 @@ DevFlow enforces clean separation of concerns at compile/build time:
   - `<module>-api`: Public interface and DTOs. **Only depends on `:common`**.
   - `<module>-impl`: Internal logic, JPA entities, controllers, and services. Depends on `:common`, its own `-api`, and foreign `-api` modules.
 - **No `impl -> impl` dependencies:** Under NO circumstances may one module depend on or import classes from another module's `-impl` package (`io.devflow.<module>.internal.*`).
-- **Cross-module communication:** Must ONLY occur via the Spring Event Bus (`ApplicationEventPublisher`) using events extending `DevFlowEvent` in `:common`.
+- **Cross-module communication:** Must ONLY occur via the Spring Event Bus (`ApplicationEventPublisher`) using event classes implementing the `DevFlowEvent` interface in `:common`, or read-only queries through another module's `-api` interface.
 - **Validation:** Always verify boundaries with `./gradlew :verifyModuleBoundaries`.
 
 ---
@@ -65,28 +65,42 @@ Before marking any feature or ticket as complete, verify that the implementation
 - [ ] **Observability & Metrics:** Critical business and operational events recorded via Micrometer counters/timers. Health checks reflect subsystem availability.
 - [ ] **Resilience & Timeouts:** External network calls (LLM, email, Git APIs) configured with explicit connect/read timeouts, exponential retries, and circuit breakers (Resilience4j).
 - [ ] **Data Integrity & Privacy:** Database constraints (`NOT NULL`, unique keys, foreign keys) mirror business rules. Cascade rules and GDPR-compliant data cleanup supported. Ephemeral tokens strictly expire and are single-use.
-- [ ] **Module Boundaries:** Zero `impl -> impl` imports. Cross-module data flows through typed domain events extending `DevFlowEvent`. Verified with `./gradlew :verifyModuleBoundaries`.
+- [ ] **Module Boundaries:** Zero `impl -> impl` imports. Cross-module data flows through typed domain events implementing `DevFlowEvent`. Verified with `./gradlew :verifyModuleBoundaries`.
 
 ---
 
 ## 5. Skills & Rules Index
 
-### Custom Skills (`.agents/skills/`)
+Skills follow the open Agent Skills format. `.agents/skills/` is the source of truth (read by Codex, Cursor and Antigravity). `.claude/skills/` holds thin Claude Code entry points that point back to it; edit the `.agents/` copy.
+
+### Project Skills (`.agents/skills/`)
 | Skill | Purpose | Key File / Entrypoint |
 |---|---|---|
-| [`trello-management`](file:///.agents/skills/trello-management/SKILL.md) | Manage Trello boards, sprint lists, cards, checklists | `node .agents/skills/trello-management/scripts/trello.js` |
-| [`backend-dev`](file:///.agents/skills/backend-dev/SKILL.md) | Gradle commands, module creation, event publishing, JPA/REST patterns | `./gradlew` |
-| [`frontend-dev`](file:///.agents/skills/frontend-dev/SKILL.md) | Vite commands, React components, Tailwind styling, API/WS integration | `npm run dev` in `frontend/` |
-| [`docker-local`](file:///.agents/skills/docker-local/SKILL.md) | Manage containers, inspect logs, PostgreSQL CLI, Prometheus/Grafana | `docker compose` |
+| [`backend-dev`](.agents/skills/backend-dev/SKILL.md) | DevFlow backend rules: module layout, the three event patterns, migrations, H2 vs Testcontainers tests | `./gradlew` |
+| [`frontend-dev`](.agents/skills/frontend-dev/SKILL.md) | DevFlow frontend rules: layout, ProblemDetail handling, auth/Turnstile, STOMP realtime | `npm` in `frontend/` |
+| [`trello-management`](.agents/skills/trello-management/SKILL.md) | Trello boards, sprint lists, cards, checklists | `node .agents/skills/trello-management/scripts/trello.js` |
+| [`docker-local`](.agents/skills/docker-local/SKILL.md) | Containers, logs, PostgreSQL CLI, Prometheus/Grafana | `docker compose` |
+| `openspec-*` (generated) | Spec-driven change workflow: explore, propose, apply, archive (see Section 8) | `openspec` CLI 2.2.0 |
+
+### Shared Claude Code Plugins (`.claude/settings.json`)
+Enabled per project; Claude Code offers to install them on first run. Setup steps: [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md).
+
+| Plugin | Use it for |
+|---|---|
+| `superpowers` | Brainstorm, plan, TDD, systematic debugging, subagent-driven execution, code review |
+| `insecure-defaults`, `sharp-edges`, `differential-review` (Trail of Bits) | Security review of auth, tokens, webhooks and every diff before a PR |
+| `postgres-best-practices` (Supabase) | Schema, index and query review for Flyway migrations |
+| `playwright` | Drive the running app to verify UI changes |
+| `skill-creator` | Write or improve project skills |
 
 ### Project Rules (`.agents/rules/`)
 | Rule | Scope |
 |---|---|
-| [`personal-user-identity.md`](file:///.agents/rules/personal-user-identity.md) *(local)* | Developer's local identity, active tickets, and personal preferences (git-ignored) |
-| [`coding-conventions.md`](file:///.agents/rules/coding-conventions.md) | Naming patterns, package organization, REST standards, React component rules |
-| [`git-workflow.md`](file:///.agents/rules/git-workflow.md) | Branch naming (`feature/T-XXX-...`), commit messages (Conventional Commits), PR guidelines |
-| [`module-boundaries.md`](file:///.agents/rules/module-boundaries.md) | Dependency rules, event-driven isolation, forbidden patterns |
-| [`response-formatting.md`](file:///.agents/rules/response-formatting.md) | Chat output formatting (no Mermaid/KaTeX in chat, DevFlow ASCII diagrams, link format) |
+| [`personal-user-identity.md`](.agents/rules/personal-user-identity.md) *(local)* | Developer's local identity, active tickets, and personal preferences (git-ignored) |
+| [`coding-conventions.md`](.agents/rules/coding-conventions.md) | Naming patterns, package organization, REST standards, React component rules |
+| [`git-workflow.md`](.agents/rules/git-workflow.md) | Branch naming (`feature/T-XXX-...`), commit messages (Conventional Commits), PR guidelines |
+| [`module-boundaries.md`](.agents/rules/module-boundaries.md) | Dependency rules, event-driven isolation, forbidden patterns |
+| [`response-formatting.md`](.agents/rules/response-formatting.md) | Chat output formatting (no Mermaid/KaTeX in chat, DevFlow ASCII diagrams, link format) |
 
 ---
 
@@ -102,6 +116,10 @@ cd backend
 # Run boundary verification task only
 ./gradlew :verifyModuleBoundaries
 
+# Fast loop: one module, one test class (append .methodName for one method)
+./gradlew :board-impl:test
+./gradlew :app:test --tests 'io.devflow.auth.api.PersonalAccessTokenApiIntegrationTest'
+
 # Run Spring Boot backend locally
 ./gradlew :app:bootRun
 ```
@@ -114,6 +132,12 @@ npm install
 
 # Start Vite dev server (proxies /api to http://localhost:8080)
 npm run dev
+
+# Fast loop: one test file
+npx vitest run src/api/problemDetail.test.ts
+
+# Run tests
+npm test
 
 # Run TypeScript check & build
 npm run build
@@ -153,11 +177,22 @@ docker compose down
 
 ## 8. Working on a Task Workflow
 
-When instructed to work on a task:
-1. **Find Card & Ticket ID:** Use `trello-management` skill to find the card details and acceptance criteria (e.g., `T-004`). Run `node .agents/skills/trello-management/scripts/trello.js my-cards` to automatically fetch cards assigned to your active Trello profile.
-2. **Review Architecture:** Check `docs/ARCHITECTURE.md` to see which modules and events are affected.
-3. **Follow Git Convention:** Follow `.agents/rules/git-workflow.md` for branch naming (`feature/T-<id>-<description>`).
-4. **Implement Code:** Follow `.agents/rules/coding-conventions.md`, `.agents/rules/module-boundaries.md`, and the **Production Quality Checklist** (Section 4).
-5. **Verify:** Run `./gradlew check` and frontend `npm run build` to ensure no compile, test, or boundary errors, and verify all Production Quality criteria.
-6. **Update Trello:** Move card to `In Progress` when starting and update checklist items as you make progress.
+DevFlow uses **OpenSpec** (spec-driven development) for every ticket that changes behaviour. `docs/PRODUCT_SPEC.md` and `docs/ARCHITECTURE.md` stay the product baseline; `openspec/specs/` grows the per-capability specs one change at a time, and `openspec/changes/<change>/` holds the work in progress.
 
+1. **Find the card**: `node .agents/skills/trello-management/scripts/trello.js my-cards`. Move it to `In Progress`.
+2. **Branch from the remote integration branch**: `git fetch origin && git switch -c feature/T-<id>-<slug> origin/develop`. Never branch from a local `develop`, which goes stale.
+3. **Propose**: `/openspec-propose` with the card's acceptance criteria. Name the change `t-<id>-<slug>`. Review `proposal.md`, the delta specs, `design.md` and `tasks.md` with the owner before writing code. Skip this only for chores, docs and one-line fixes.
+4. **Implement**: `/openspec-apply-change`, task by task, test first. Follow `.agents/rules/coding-conventions.md`, `.agents/rules/module-boundaries.md` and the Section 4 checklist.
+4b. **Superpowers vs OpenSpec**: OpenSpec owns the plan (proposal, specs, design, tasks). Use superpowers only for `test-driven-development`, `systematic-debugging`, `verification-before-completion` and code review. Do not let `brainstorming` or `writing-plans` create a second plan when an OpenSpec change exists.
+5. **Verify**: `./gradlew check` in `backend/`; `npm run lint && npm test && npm run build` in `frontend/`; `openspec validate`. Run a security pass (`differential-review`) on auth, token, webhook and AI changes.
+6. **Open the PR against `develop`**: `gh pr create --base develop`. GitHub's default branch is `main`, so omitting `--base` targets the wrong branch. Use the template in `.github/pull_request_template.md`.
+7. **After merge**: `/openspec-archive-change` to fold the delta specs into `openspec/specs/`, then update the Trello checklist.
+
+### Flyway migration numbering (parallel branches)
+- Never edit a migration that already exists on `origin/develop` (a hook blocks it).
+- New migration: `V<max on origin/develop + 1>__<snake_case>.sql`. When two open branches pick the same number, whoever merges second renumbers before merging. Do not reference the number anywhere else.
+
+### Parallel agents and worktrees
+- One worktree per lane, each ticket branched from `origin/develop`. Keep worktree paths short on Windows (`Filename too long`).
+- Run only one `docker compose` stack or `bootRun` at a time (ports 8080/5432).
+- A task is done when it is committed, the tree is clean and the test report is green, not when an agent reports idle.

@@ -28,19 +28,19 @@ io.devflow.<module>.api
 #### Implementation Subproject (`<module>-impl`)
 ```
 io.devflow.<module>.internal
-├── controller/      # Spring MVC REST Controllers (@RestController)
-├── service/         # Business logic services (@Service)
+├── <Resource>Controller, <Resource>Service, ...   # controllers and services sit directly in internal/
 ├── entity/          # JPA entities (@Entity, @Table)
-├── repository/      # Spring Data repositories (@Repository)
-├── listener/        # Event listeners (@EventListener)
-└── config/          # Spring @Configuration classes specific to module
+├── repository/      # Spring Data repositories
+├── exception/       # module @RestControllerAdvice and exceptions (some modules keep these flat)
+└── <feature>/       # feature packages when a module grows, e.g. auth: pat/, verification/, passwordreset/, security/
 ```
+Follow the layout already used by the module you are changing; do not introduce `controller/` or `service/` subpackages.
 *Rule:* All classes in `<module>-impl` belong to the `internal` package and are considered private to that module.
 
 ### 1.3 Naming Conventions
 - **Controllers:** `<Resource>Controller.java` (e.g., `BoardController.java`, `TaskController.java`)
 - **Services:** `<Resource>Service.java` or `<Action>Service.java`
-- **Entities:** Singular noun with JPA annotations (e.g., `Board.java`, `Task.java`, `Notification.java`)
+- **Entities:** `<Name>Entity.java` in `internal.entity` (e.g., `PersonalAccessTokenEntity`, `BoardAuditEntity`, `CiSummaryEntity`)
 - **DTOs:** `<Action><Resource>Request.java` / `<Resource>Response.java` (e.g., `CreateTaskRequest.java`, `TaskSummaryResponse.java`). Use Java `record` for immutable DTOs whenever possible.
 - **Repositories:** `<Entity>Repository.java` extending `JpaRepository<Entity, UUID>` or `CrudRepository`.
 
@@ -59,10 +59,10 @@ io.devflow.<module>.internal
 
 ### 1.5 Domain Events
 - Cross-module communication must use domain events published via Spring's `ApplicationEventPublisher`.
-- All event classes must extend `io.devflow.common.event.DevFlowEvent`.
+- All event classes are `final` classes implementing the `io.devflow.common.event.DevFlowEvent` interface.
 - Event type string must be declared in `io.devflow.common.event.EventTypes`.
 - Event naming format: `<domain>.<action_past_tense>` (e.g., `task.created`, `task.status_changed`, `git.pr_merged`, `ci.failure_detected`).
-- Listeners: Use `@EventListener` (or `@TransactionalEventListener(phase = AFTER_COMMIT)`) in the consumer module's `internal.listener` package.
+- Listeners: `@TransactionalEventListener(phase = AFTER_COMMIT)` for side effects; plain `@EventListener` only for synchronous request/decision events (see `module-boundaries.md` Pattern C).
 
 ---
 
@@ -78,7 +78,11 @@ io.devflow.<module>.internal
 ### 2.2 Directory Structure
 ```
 frontend/src/
-├── api/             # API client methods and fetch wrappers
+├── api/             # API clients per backend module + problemDetail.ts (RFC 7807 parsing)
+├── auth/            # AuthProvider, session and token helpers
+├── board/           # board mutations and sync coordinator
+├── realtime/        # STOMP message types
+├── stores/          # zustand stores
 ├── components/      # Reusable UI components
 │   ├── common/      # Generic buttons, modals, badges, inputs
 │   └── layout/      # Navbar, Sidebar, PageContainer

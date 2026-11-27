@@ -117,12 +117,12 @@ Before outputting a message in the chatbox, verify:
 
 ## 4. Clickable File Links & Code Anchors
 
-- Always format file paths and classes as clickable links using Markdown format: `[basename](file:///path/to/file)` or `[ClassName](file:///path/to/file#L10-L20)`.
+- Always format file paths and classes as clickable links using Markdown format: `[basename](../../path/to/file)` or `[ClassName](../../path/to/file#L10-L20)`.
 - Use forward slashes (`/`) even on Windows paths.
 - Examples:
-  - Controller: [`TaskController.java`](file:///backend/task-impl/src/main/java/io/devflow/task/internal/controller/TaskController.java)
-  - Event: [`DevFlowEvent.java`](file:///backend/common/src/main/java/io/devflow/common/event/DevFlowEvent.java)
-  - Frontend Component: [`BoardColumn.tsx`](file:///frontend/src/components/board/BoardColumn.tsx)
+  - Controller: [`TaskController.java`](../../backend/task-impl/src/main/java/io/devflow/task/internal/controller/TaskController.java)
+  - Event: [`DevFlowEvent.java`](../../backend/common/src/main/java/io/devflow/common/event/DevFlowEvent.java)
+  - Frontend Component: [`BoardColumn.tsx`](../../frontend/src/components/board/BoardColumn.tsx)
 
 ---
 
