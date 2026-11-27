@@ -1,0 +1,21 @@
+# Ownership matrix: AGENTS.md section 1.1. Owners are requested as reviewers automatically.
+*                          @N-Tien-L @lvXuankg
+
+# Intelligence & Identity
+/backend/auth-*/           @N-Tien-L
+/backend/ai-*/             @N-Tien-L
+/backend/notification-*/   @N-Tien-L
+
+# DevOps & Process Core
+/backend/board-*/          @lvXuankg
+/backend/gitci-*/          @lvXuankg
+/docker-compose.yml        @lvXuankg
+/infra/                    @lvXuankg
+
+# Shared contracts: both owners review
+/backend/common/           @N-Tien-L @lvXuankg
+/backend/app/src/main/resources/db/migration/ @N-Tien-L @lvXuankg
+/docs/ARCHITECTURE*.md     @N-Tien-L @lvXuankg
+/AGENTS.md                 @N-Tien-L @lvXuankg
+/.agents/                  @N-Tien-L @lvXuankg
+/.claude/                  @N-Tien-L @lvXuankg
