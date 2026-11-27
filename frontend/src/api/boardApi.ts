@@ -4,6 +4,7 @@ import type {
   ColumnResponse,
   TaskPageResponse,
   TaskDetail,
+  TaskListItem,
   TaskCommentPage,
   TaskComment,
   WorkspaceMemberPage,
@@ -94,5 +95,20 @@ export function createTaskComment(request: ApiRequest, taskId: string, content: 
   return request<TaskComment>(`/api/v1/tasks/${taskId}/comments`, {
     method: 'POST',
     body: JSON.stringify({ content }),
+  });
+}
+
+export function createTask(
+  request: ApiRequest,
+  columnId: string,
+  input: {
+    title: string;
+    description?: string | null;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  }
+) {
+  return request<TaskListItem>(`/api/v1/columns/${columnId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }

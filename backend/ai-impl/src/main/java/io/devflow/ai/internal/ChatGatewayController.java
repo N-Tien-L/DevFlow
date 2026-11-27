@@ -1,35 +1,69 @@
 package io.devflow.ai.internal;
 
+import io.devflow.ai.api.CancelChatRequest;
+import io.devflow.ai.api.ChatMessageRequest;
+import java.security.Principal;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Controller;
+import org.springframework.util.StringUtils;
 
 /**
- * Chat WebSocket gateway (STOMP over /ws) — one of the two thin adapters into the shared
- * AI service (ARCHITECTURE.md Section 5). Consumed by the web client's chat panel.
+ * Chat WebSocket gateway (STOMP over /ws) — the thin STOMP adapter into the shared
+ * AI capabilities (ARCHITECTURE.md Section 5, PRODUCT_SPEC Section 5.2b).
  *
- * <p>TODO(T-034, PRODUCT_SPEC Section 5.2b — Conversational AI Assistant):
- * <ul>
- *   <li>Route chat messages to {@link io.devflow.ai.api.AiServiceApi} (Q&amp;A, task breakdown) with the
- *       session's authenticated user and project, replying on the caller's own {@code /user/queue/chat}</li>
- *   <li>Live sync with the board: actions taken via chat (e.g. AI creates a task) must be
- *       pushed to board viewers immediately (also PRODUCT_SPEC 5.1 real-time sync)</li>
- * </ul>
+ * <p>Receives chat requests sent to {@code /app/chat} and {@code /app/chat/cancel}.
+ * Strict per-user isolation: all replies are pushed exclusively to the authenticated caller's
+ * private queue {@code /user/queue/chat} (never broadcasted to {@code /topic/chat}).
  */
 @Controller
 public class ChatGatewayController {
 
-    static final String NOT_AVAILABLE = "Chat over WebSocket is not available yet. "
-            + "Ask project questions with POST /api/v1/ai/project-query.";
+    private static final Logger log = LoggerFactory.getLogger(ChatGatewayController.class);
+
+    private final ChatStreamService chatStreamService;
+
+    public ChatGatewayController(ChatStreamService chatStreamService) {
+        this.chatStreamService = chatStreamService;
+    }
 
     /**
-     * Placeholder until T-034. Project Q&amp;A needs an authenticated user and a project to check membership
-     * against; this socket has neither yet, so it answers nothing from project data (and, on a shared
-     * {@code /topic}, it must not).
+     * Handles real-time chat messages from the web client.
      */
     @MessageMapping("/chat")
-    @SendTo("/topic/chat")
-    public String chat(String message) {
-        return NOT_AVAILABLE;
+    public void chat(@Payload ChatMessageRequest request, Principal principal) {
+        UUID userId = extractUserId(principal);
+        if (userId == null) {
+            log.warn("Rejected chat frame: unauthenticated or invalid principal");
+            return;
+        }
+        chatStreamService.handleChat(userId, request);
+    }
+
+    /**
+     * Handles client request to cancel an active streaming conversation.
+     */
+    @MessageMapping("/chat/cancel")
+    public void cancel(@Payload CancelChatRequest request, Principal principal) {
+        UUID userId = extractUserId(principal);
+        if (userId == null || request == null) {
+            return;
+        }
+        chatStreamService.cancel(userId, request.conversationId());
+    }
+
+    private static UUID extractUserId(Principal principal) {
+        if (principal == null || !StringUtils.hasText(principal.getName())) {
+            return null;
+        }
+        try {
+            return UUID.fromString(principal.getName());
+        } catch (IllegalArgumentException e) {
+            log.warn("Principal name is not a valid UUID name={}", principal.getName());
+            return null;
+        }
     }
 }

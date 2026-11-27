@@ -5,7 +5,8 @@ public enum AiFeature {
 
     PROJECT_QA("qa"),
     TASK_BREAKDOWN("breakdown"),
-    CI_SUMMARY("ci_summary");
+    CI_SUMMARY("ci_summary"),
+    CHAT("chat");
 
     private final String tag;
 
