@@ -1,0 +1,36 @@
+schema: spec-driven
+
+# Constraints an agent cannot infer from the code. Product baseline: docs/PRODUCT_SPEC.md,
+# architecture: docs/ARCHITECTURE.md. Team workflow: AGENTS.md section 8.
+context: |
+  DevFlow is a Spring Boot 3.4 modular monolith (modules: auth, board, gitci, ai, notification) with a React 19 SPA.
+  Every change is tied to one Trello ticket. Name the change t-<id>-<slug>, for example t-041-ai-risk-digest.
+  Modules talk only through DevFlowEvent classes in :common. No -impl module may depend on another -impl module.
+  Production SaaS standard: the AGENTS.md section 4 checklist applies to every change.
+  Flyway migrations are append-only. Never plan an edit to a migration that is already on origin/develop.
+  Write artifacts in English. Vietnamese is fine in discussion, but specs stay English like docs/ARCHITECTURE.md.
+
+rules:
+  proposal:
+    - Link the Trello card (T-<id>) and quote its acceptance criteria.
+    - List the affected modules and say who owns each one (AGENTS.md section 1.1).
+    - State what is out of scope.
+  specs:
+    - Write requirements as observable behaviour (API responses, events, UI states), including error and abuse cases.
+    - Every requirement has at least one scenario covering a failure path (validation, authorization, rate limit, provider down).
+  design:
+    - Name every new or changed DevFlowEvent, its producer, its consumers, and which pattern it uses (after-commit, outbox, or synchronous request/decision).
+    - List schema changes with table ownership. Write "next free number" instead of a migration number.
+    - Cover security (authn/authz, IDOR, input validation), observability (metrics, logs without PII) and resilience (timeouts, retries, circuit breaker) explicitly, or say why each does not apply.
+  tasks:
+    - Put tests first in each task group (H2 API tests, Testcontainers tests for schema/Postgres behaviour, vitest for frontend).
+    - End with a verification group - ./gradlew check, npm run lint, npm test, npm run build, openspec validate - and a PR against develop.
+
+operations:
+  apply:
+    guidance:
+      - Branch from origin/develop first (git fetch origin && git switch -c feature/T-<id>-<slug> origin/develop).
+      - Commit per task group with Conventional Commits; never add AI co-author trailers.
+  archive:
+    guidance:
+      - Archive only after the PR is merged into develop.
