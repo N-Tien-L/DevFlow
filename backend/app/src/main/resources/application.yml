@@ -140,6 +140,10 @@ devflow:
       max-tokens: ${AI_MAX_TOKENS:1024}
       temperature: 0.2
       max-prompt-chars: 16000
+      # STOMP chat (T-034): pacing between streamed chunks, and how many answers may run at once.
+      stream-delay-ms: 20
+      max-streams-per-user: 2
+      max-concurrent-streams: 32
     openai:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}

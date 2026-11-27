@@ -18,7 +18,15 @@ import java.util.List;
  * and live board sync (handled by the Board module). This class only wires the shared
  * broker — message handling lives in the owning modules.
  *
- * <p>Conventions: clients SEND to /app/*, SUBSCRIBE to /topic/*.
+ * <p>Conventions: clients SEND to /app/*; they SUBSCRIBE to /topic/* for shared streams (board sync) and to
+ * /user/queue/* for frames meant only for them (notifications, AI chat replies). Only the server publishes to
+ * /topic and /queue; each owning module guards its destinations with an inbound interceptor.
+ *
+ * <p>Frame order per session is deliberately NOT forced. With {@code setPreserveReceiveOrder(true)}, Spring 6.2's
+ * UserDestinationMessageHandler fails with "Expected mutable SimpMessageHeaderAccessor" as soon as a user has
+ * several sessions (board sync, notifications and chat each open one), dropping the message for every session
+ * after the first. Chat chunks carry a {@code seq} and the client reassembles them instead;
+ * {@code ChatStompIntegrationTest} covers the multi-session case.
  *
  * <p>Board topic authorization and STOMP JWT authentication are installed by their owning
  * modules through ordered {@link WebSocketMessageBrokerConfigurer} implementations.
