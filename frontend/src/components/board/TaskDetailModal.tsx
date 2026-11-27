@@ -27,6 +27,7 @@ import {
   PriorityBadge,
   StatusCategoryBadge,
 } from '../common/UiPrimitives';
+import { TaskGitActivitySection } from './TaskGitActivitySection';
 
 type Draft = { title: string; description: string; priority: TaskPriority; assigneeId: string; dueLocal: string };
 
@@ -75,12 +76,13 @@ interface TaskDetailModalProps {
   canEdit: boolean;
   detailRefreshVersion?: number;
   commentsRefreshVersion?: number;
+  gitActivityRefreshVersion?: number;
   remoteDeleted?: boolean;
   onClose(): void;
   onSaved(task: TaskDetail): void;
 }
 
-export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, commentsRefreshVersion = 0, remoteDeleted = false, onClose, onSaved }: TaskDetailModalProps) {
+export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, commentsRefreshVersion = 0, gitActivityRefreshVersion = 0, remoteDeleted = false, onClose, onSaved }: TaskDetailModalProps) {
   const { request } = useAuth();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
@@ -910,6 +912,12 @@ export function TaskDetailModal({ taskId, canEdit, detailRefreshVersion = 0, com
                       </div>
                     </dl>
                   </div>
+
+                  <TaskGitActivitySection
+                    workspaceId={task.workspaceId}
+                    taskId={task.id}
+                    refreshVersion={gitActivityRefreshVersion}
+                  />
 
                   {isArchived && (
                     <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200/90 bg-amber-50/90 p-3.5 text-xs leading-5 text-amber-950">

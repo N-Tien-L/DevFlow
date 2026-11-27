@@ -28,6 +28,9 @@ public final class EventTypes {
     /** Published by Git &amp; CI. Consumed by Board, Notification. */
     public static final String GIT_PR_MERGED = "git.pr_merged";
 
+    /** Best-effort after-commit notification published by Git &amp; CI. Consumed by Board for UI refresh. */
+    public static final String TASK_GIT_ACTIVITY_CHANGED = "git.task_activity_changed";
+
     /** Published by Git &amp; CI. Consumed by AI service. */
     public static final String CI_FAILURE_DETECTED = "ci.failure_detected";
     public static final String CI_FAILURE_LOG_READ_REQUESTED = "ci.failure_log_read_requested";

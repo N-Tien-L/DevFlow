@@ -2,6 +2,8 @@ package io.devflow.gitci.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.devflow.common.event.EventTypes;
+import io.devflow.common.event.TaskGitActivityChangedEvent;
+import io.devflow.common.event.TaskGitActivityChangedEvent.ActivityKind;
 import io.devflow.common.event.TaskReferencesResolveRequestedEvent;
 import io.devflow.common.event.TaskReferencesResolveRequestedEvent.Outcome;
 import io.devflow.common.event.TaskReferencesResolveRequestedEvent.Resolution;
@@ -20,15 +22,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Called only after T-021 authentication; all writes join the receipt transaction. */
 @Component
 final class GitWebhookIngestion {
+    private static final Logger log = LoggerFactory.getLogger(GitWebhookIngestion.class);
     record Commit(String sha, String message, Instant timestamp, String author, GitReferenceSourcePolicy.References references) { }
-    record PullRequest(int number, String title, String head, String base, String status, Instant updatedAt,
+    record PullRequest(int number, String title, String head, String base, String headSha, String status, Instant updatedAt,
                        String fingerprint, String action, Instant occurredAt, GitReferenceSourcePolicy.References references) { }
     record Plan(List<Commit> commits, PullRequest pr, String ignoredReason) {
         Plan { commits = List.copyOf(commits); }
@@ -108,6 +115,7 @@ final class GitWebhookIngestion {
         String title = text(pr, "title");
         String head = text(pr.path("head"), "ref");
         String base = text(pr.path("base"), "ref");
+        String headSha = optionalSha(pr.path("head"), "sha");
         GitReferenceSourcePolicy.bounded(title);
         GitReferenceSourcePolicy.bounded(head);
         GitReferenceSourcePolicy.bounded(base);
@@ -119,8 +127,10 @@ final class GitWebhookIngestion {
         Instant updated = timestamp(text(pr, "updated_at"));
         Instant occurredAt = action.equals("opened") ? optionalTimestamp(pr, "created_at", updated)
                 : status.equals("MERGED") ? optionalTimestamp(pr, "merged_at", updated) : updated;
-        String fingerprint = fingerprint(title, head, base, status);
-        return new Plan(List.of(), new PullRequest(number.intValue(), title, head, base, status, updated,
+        String fingerprint = headSha == null
+                ? fingerprint(title, head, base, status)
+                : fingerprint(title, head, base, status, headSha);
+        return new Plan(List.of(), new PullRequest(number.intValue(), title, head, base, headSha, status, updated,
                 fingerprint, action, occurredAt, policy.select(title, head, GitReferenceSourcePolicy.Source.TITLE)), null);
     }
 
@@ -199,26 +209,41 @@ final class GitWebhookIngestion {
                     index++;
                 }
             }
+            var nonTransitionPrTasks = new LinkedHashSet<UUID>();
             if (pr != null) {
                 UUID id = previousPr == null ? UUID.randomUUID() : previousPr;
                 var tasks = eligible(pr.references(), resolved);
                 String url = repoBase + "/pull/" + pr.number();
-                jdbc.update("INSERT INTO pull_requests(id,repository_id,pr_number,title,source_branch,target_branch,status,task_id,pr_url,provider_updated_at,source_fingerprint) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(repository_id,pr_number) DO UPDATE SET title=EXCLUDED.title,source_branch=EXCLUDED.source_branch,"
-                        + "target_branch=EXCLUDED.target_branch,status=EXCLUDED.status,task_id=EXCLUDED.task_id,pr_url=EXCLUDED.pr_url,"
+                jdbc.update("INSERT INTO pull_requests(id,repository_id,pr_number,title,source_branch,target_branch,head_sha,status,task_id,pr_url,provider_updated_at,source_fingerprint) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(repository_id,pr_number) DO UPDATE SET title=EXCLUDED.title,source_branch=EXCLUDED.source_branch,"
+                        + "target_branch=EXCLUDED.target_branch,head_sha=COALESCE(EXCLUDED.head_sha,pull_requests.head_sha),status=EXCLUDED.status,task_id=EXCLUDED.task_id,pr_url=EXCLUDED.pr_url,"
                         + "provider_updated_at=EXCLUDED.provider_updated_at,source_fingerprint=EXCLUDED.source_fingerprint,updated_at=CURRENT_TIMESTAMP",
-                        id, repository, pr.number(), pr.title(), pr.head(), pr.base(), pr.status(), mirror(tasks), url,
+                        id, repository, pr.number(), pr.title(), pr.head(), pr.base(), pr.headSha(), pr.status(), mirror(tasks), url,
                         Timestamp.from(pr.updatedAt()), pr.fingerprint());
+                List<UUID> previousTasks = previousPr == null ? List.of() : jdbc.queryForList(
+                        "SELECT task_id FROM git_pull_request_task_links WHERE pull_request_id=?",
+                        UUID.class, id);
                 jdbc.update("DELETE FROM git_pull_request_task_links WHERE pull_request_id=?", id);
                 for (UUID task : tasks) jdbc.update("INSERT INTO git_pull_request_task_links(pull_request_id,task_id,source_kind) VALUES (?,?,?)",
                         id, task, pr.references().source().name());
                 String type = pr.action().equals("opened") && previousPr == null ? EventTypes.GIT_PR_OPENED
                         : pr.action().equals("closed") && pr.status().equals("MERGED") && !"MERGED".equals(previousStatus)
                         ? EventTypes.GIT_PR_MERGED : null;
-                if (type != null) for (UUID task : tasks) pending.add(new GitDomainEventOutbox.Pending(repository, task, type,
-                        Integer.toString(pr.number()), repoName, url, null, pr.occurredAt()));
+                if (type != null) {
+                    for (UUID task : tasks) pending.add(new GitDomainEventOutbox.Pending(repository, task, type,
+                            Integer.toString(pr.number()), repoName, url, null, pr.occurredAt()));
+                    // Notify tasks that were previously linked to this PR but unlinked in this update.
+                    Set<UUID> currentSet = Set.copyOf(tasks);
+                    for (UUID prev : previousTasks) if (!currentSet.contains(prev)) nonTransitionPrTasks.add(prev);
+                } else {
+                    // Non-transition PR updates (edited, closed without merge, reopened, synchronize)
+                    // do not enqueue a git.* transition event, so emit a lightweight UI refresh directly.
+                    nonTransitionPrTasks.addAll(previousTasks);
+                    nonTransitionPrTasks.addAll(tasks);
+                }
             }
             outbox.enqueue(pending);
+            publishActivityAfterCommit(workspace, repository, nonTransitionPrTasks, ActivityKind.PR_UPDATED);
         } finally { metrics.timer("devflow.gitci.persist.duration").record(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS); }
     }
 
@@ -258,6 +283,38 @@ final class GitWebhookIngestion {
     private static String sha(String value) {
         if (!value.matches("(?:[0-9a-f]{40}|[0-9a-f]{64})") || value.matches("0+")) invalid();
         return value;
+    }
+    private static String optionalSha(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (value.isMissingNode() || value.isNull()) return null;
+        if (!value.isTextual()) invalid();
+        return sha(value.textValue());
+    }
+    void publishActivityAfterCommit(UUID workspace, UUID repository, Set<UUID> taskIds, ActivityKind kind) {
+        publishActivityAfterCommit(events, metrics, workspace, repository, taskIds, kind);
+    }
+    static void publishActivityAfterCommit(ApplicationEventPublisher publisher, MeterRegistry metrics,
+                                           UUID workspace, UUID repository, Set<UUID> taskIds, ActivityKind kind) {
+        if (publisher == null || workspace == null || repository == null || taskIds == null || taskIds.isEmpty()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) return;
+        List<UUID> snapshot = List.copyOf(taskIds);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() {
+                Instant occurredAt = Instant.now();
+                for (int from = 0; from < snapshot.size(); from += 100) {
+                    Set<UUID> batch = Set.copyOf(snapshot.subList(from, Math.min(from + 100, snapshot.size())));
+                    try {
+                        publisher.publishEvent(new TaskGitActivityChangedEvent(
+                                UUID.randomUUID(), workspace, repository, batch, kind, occurredAt));
+                        metrics.counter("devflow.gitci.activity.events", "kind", kind.name(), "outcome", "published").increment();
+                    } catch (RuntimeException ex) {
+                        metrics.counter("devflow.gitci.activity.events", "kind", kind.name(), "outcome", "error").increment();
+                        log.warn("Best-effort Git activity notification failed kind={} exceptionType={}",
+                                kind, ex.getClass().getSimpleName());
+                    }
+                }
+            }
+        });
     }
     private static Instant timestamp(String value) {
         try {
