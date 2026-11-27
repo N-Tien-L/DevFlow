@@ -34,3 +34,10 @@ personal/
 .agents/skills/personal-*
 .agents/rules/personal-*
 .agents/rules/*.local.md
+
+# Agent tooling (local state, never shared)
+.claude/settings.local.json
+CLAUDE.local.md
+.playwright-mcp/
+.review-worktrees/
+.claude/skills/personal-*
