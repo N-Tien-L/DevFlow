@@ -2,7 +2,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TaskProposalCard } from './TaskProposalCard';
+import { TaskProposalCard, taskDescription } from './TaskProposalCard';
+import { ApiError } from '../../types/board';
 import type { ColumnResponse } from '../../types/board';
 import type { ProposedTask } from '../../types/chat';
 
@@ -102,5 +103,73 @@ describe('TaskProposalCard', () => {
     const createdBadge = Array.from(updatedButtons).find((b) => b.textContent?.includes('Đã tạo'));
     expect(createdBadge).toBeDefined();
     expect(createdBadge?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('targets the first column once columns load after the proposal rendered', async () => {
+    const mockRequest = vi.fn().mockResolvedValue({ id: 'task-1' });
+    await act(async () => {
+      root.render(<TaskProposalCard proposals={mockProposals} columns={[]} columnsLoading request={mockRequest} />);
+    });
+    const createButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Tạo task'));
+    expect(createButton()?.disabled).toBe(true);
+
+    await act(async () => {
+      root.render(<TaskProposalCard proposals={mockProposals} columns={mockColumns} request={mockRequest} />);
+    });
+    expect(createButton()?.disabled).toBe(false);
+
+    await act(async () => {
+      createButton()?.click();
+    });
+    expect(mockRequest).toHaveBeenCalledWith('/api/v1/columns/col-1/tasks', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('sends the edited title and the checklist as Markdown steps', async () => {
+    const mockRequest = vi.fn().mockResolvedValue({ id: 'task-1' });
+    await act(async () => {
+      root.render(<TaskProposalCard proposals={mockProposals} columns={mockColumns} request={mockRequest} />);
+    });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    await act(async () => {
+      select.value = 'col-2';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(input, '  Endpoint xác thực JWT  ');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const createButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Tạo task'));
+    await act(async () => {
+      createButton?.click();
+    });
+
+    const [path, init] = mockRequest.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/v1/columns/col-2/tasks');
+    expect(JSON.parse(String(init.body))).toEqual({
+      title: 'Endpoint xác thực JWT',
+      description: ['Cấu hình JWT filter và SecurityFilterChain', '', '- [ ] Viết controller', '- [ ] Thêm unit test'].join('\n'),
+      priority: 'MEDIUM',
+    });
+  });
+
+  it('shows the board problem detail when creation fails and allows another try', async () => {
+    const mockRequest = vi.fn().mockRejectedValue(
+      new ApiError('Forbidden', 403, { status: 403, detail: 'Bạn không có quyền tạo task trên board này.' }),
+    );
+    await act(async () => {
+      root.render(<TaskProposalCard proposals={mockProposals} columns={mockColumns} request={mockRequest} />);
+    });
+    const createButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Tạo task'));
+    await act(async () => {
+      createButton?.click();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('không có quyền');
+    expect(createButton?.disabled).toBe(false);
+  });
+
+  it('builds descriptions without empty checklist noise', () => {
+    expect(taskDescription({ title: 't', description: ' Mô tả ', checklist: [] })).toBe('Mô tả');
+    expect(taskDescription({ title: 't', description: '', checklist: ['Bước 1', ' '] })).toBe('- [ ] Bước 1');
   });
 });

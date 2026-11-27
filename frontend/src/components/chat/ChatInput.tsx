@@ -1,93 +1,96 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { forwardRef, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import clsx from 'clsx';
+import { CHAT_MAX_MESSAGE_LENGTH } from '../../types/chat';
+import { SendIcon, XIcon } from '../common/Icons';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   onCancel: () => void;
-  isStreaming: boolean;
-  disabled?: boolean;
+  streaming: boolean;
+  /** Sending is not possible right now (still connecting, no workspace); typing stays possible. */
+  disabled: boolean;
+  disabledReason?: string;
 }
 
-const MAX_CHARS = 2000;
-
-export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInputProps) {
+export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(function ChatInput(
+  { onSend, onCancel, streaming, disabled, disabledReason },
+  ref,
+) {
   const [text, setText] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const localRef = useRef<HTMLTextAreaElement | null>(null);
+  const trimmed = text.trim();
+  const overLimit = text.length > CHAT_MAX_MESSAGE_LENGTH;
+  const canSubmit = Boolean(trimmed) && !overLimit && !streaming && !disabled;
 
-  // Auto-resize textarea height
   useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    const element = localRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 128)}px`;
   }, [text]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const handleSubmit = () => {
-    const trimmed = text.trim();
-    if (!trimmed || isStreaming || disabled || trimmed.length > MAX_CHARS) return;
+  const submit = () => {
+    if (!canSubmit) return;
     onSend(trimmed);
     setText('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      submit();
     }
   };
 
-  const charCount = text.length;
-  const isOverLimit = charCount > MAX_CHARS;
-
   return (
-    <div className="border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-      <div className="relative rounded-xl border border-slate-300 bg-slate-50/50 focus-within:border-indigo-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950/60 dark:focus-within:border-indigo-400 dark:focus-within:bg-slate-900">
+    <div className="border-t border-slate-200/80 bg-white p-3">
+      <label className="sr-only" htmlFor="devflow-chat-input">
+        Nhập câu hỏi cho trợ lý AI
+      </label>
+      <div className="flex items-end gap-2">
         <textarea
-          ref={textareaRef}
+          id="devflow-chat-input"
+          ref={(element) => {
+            localRef.current = element;
+            if (typeof ref === 'function') ref(element);
+            else if (ref) ref.current = element;
+          }}
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled || isStreaming}
           rows={1}
-          placeholder={isStreaming ? 'AI đang trả lời…' : 'Hỏi về dự án hoặc yêu cầu chia task… (Enter gửi)'}
-          className="w-full resize-none bg-transparent px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500 disabled:opacity-60"
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={handleKeyDown}
+          aria-describedby="devflow-chat-input-hint"
+          aria-invalid={overLimit || undefined}
+          placeholder={streaming ? 'Trợ lý đang trả lời…' : 'Hỏi về dự án hoặc nhờ chia task…'}
+          className="min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
         />
-
-        <div className="flex items-center justify-between px-3 pb-2 pt-1 text-2xs text-slate-400 dark:text-slate-500">
-          <span className={isOverLimit ? 'text-red-500 font-semibold' : ''}>
-            {charCount}/{MAX_CHARS}
-          </span>
-
-          <div className="flex items-center gap-2">
-            {isStreaming ? (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100 transition-colors dark:bg-rose-950/50 dark:text-rose-400 dark:hover:bg-rose-900/50"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                <span>Dừng</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!text.trim() || disabled || isOverLimit}
-                className="inline-flex items-center justify-center rounded-lg bg-indigo-600 p-1.5 text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-40 disabled:hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600"
-                aria-label="Gửi tin nhắn"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
+        {streaming ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Dừng câu trả lời"
+            className="grid size-10 shrink-0 place-items-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+          >
+            <XIcon className="size-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            aria-label="Gửi tin nhắn"
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            <SendIcon className="size-4" />
+          </button>
+        )}
       </div>
+      <p id="devflow-chat-input-hint" className="mt-1.5 flex justify-between gap-2 text-[11px] text-slate-500">
+        <span className="truncate">{disabled && disabledReason ? disabledReason : 'Enter để gửi, Shift+Enter xuống dòng'}</span>
+        <span className={clsx('shrink-0 tabular-nums', overLimit && 'font-semibold text-rose-600')}>
+          {text.length}/{CHAT_MAX_MESSAGE_LENGTH}
+        </span>
+      </p>
     </div>
   );
-}
+});

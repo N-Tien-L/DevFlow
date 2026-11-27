@@ -1,15 +1,12 @@
 import { Client, ReconnectionTimeMode } from '@stomp/stompjs';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatConnectionStatus, ChatMessageRequest, ChatMessageResponse, ProposedTask } from '../types/chat';
+import { parseChatFrame } from '../components/chat/chatStream';
+import type { ChatConnectionStatus, ChatFrame, ChatMessageRequest } from '../types/chat';
 
 interface UseChatWebSocketOptions {
   enabled: boolean;
   getValidAccessToken: (options?: { minValidityMs?: number; signal?: AbortSignal }) => Promise<string>;
-  onChunk: (text: string) => void;
-  onProposal: (proposals: ProposedTask[]) => void;
-  onEnd: () => void;
-  onError: (errorMsg: string) => void;
-  onStatusChange?: (status: ChatConnectionStatus) => void;
+  onFrame: (frame: ChatFrame) => void;
 }
 
 function tokenExpiresAt(token: string): number | null {
@@ -24,38 +21,20 @@ function tokenExpiresAt(token: string): number | null {
   }
 }
 
-export function useChatWebSocket({
-  enabled,
-  getValidAccessToken,
-  onChunk,
-  onProposal,
-  onEnd,
-  onError,
-  onStatusChange,
-}: UseChatWebSocketOptions) {
+/**
+ * STOMP transport for the AI chat: subscribes to the caller's own `/user/queue/chat`, publishes to
+ * `/app/chat` and `/app/chat/cancel`, renews the JWT before it expires and reconnects with backoff.
+ */
+export function useChatWebSocket({ enabled, getValidAccessToken, onFrame }: UseChatWebSocketOptions) {
   const [status, setStatus] = useState<ChatConnectionStatus>('idle');
+  const [generation, setGeneration] = useState(0);
   const clientRef = useRef<Client | null>(null);
-
-  const chunkRef = useRef(onChunk);
-  const proposalRef = useRef(onProposal);
-  const endRef = useRef(onEnd);
-  const errorRef = useRef(onError);
-  const statusRef = useRef(onStatusChange);
-
-  chunkRef.current = onChunk;
-  proposalRef.current = onProposal;
-  endRef.current = onEnd;
-  errorRef.current = onError;
-  statusRef.current = onStatusChange;
-
-  const updateStatus = useCallback((next: ChatConnectionStatus) => {
-    setStatus(next);
-    statusRef.current?.(next);
-  }, []);
+  const frameRef = useRef(onFrame);
+  frameRef.current = onFrame;
 
   useEffect(() => {
     if (!enabled) {
-      updateStatus('idle');
+      setStatus('idle');
       return undefined;
     }
 
@@ -65,9 +44,8 @@ export function useChatWebSocket({
     let renewalTimer: number | undefined;
     const abortController = new AbortController();
 
-    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const brokerURL = new URL('/ws', window.location.href);
-    brokerURL.protocol = scheme;
+    brokerURL.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
     const client = new Client({
       brokerURL: brokerURL.toString(),
@@ -78,45 +56,31 @@ export function useChatWebSocket({
       heartbeatIncoming: 10_000,
       heartbeatOutgoing: 10_000,
       discardWebsocketOnCommFailure: true,
+      debug: () => undefined,
       beforeConnect: async () => {
         if (!active || abortController.signal.aborted) return;
-        updateStatus(everConnected ? 'reconnecting' : 'connecting');
+        setStatus(everConnected ? 'reconnecting' : 'connecting');
         try {
           activeToken = await getValidAccessToken({ minValidityMs: 60_000, signal: abortController.signal });
           if (!active || abortController.signal.aborted) return;
           client.connectHeaders = { Authorization: `Bearer ${activeToken}` };
         } catch (reason) {
           if (!active || abortController.signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError')) return;
-          updateStatus('error');
+          setStatus('error');
           void client.deactivate({ force: true });
         }
       },
       onConnect: () => {
         if (!active) return;
         everConnected = true;
-        updateStatus('connected');
+        setStatus('connected');
 
-        // Subscribe to user private chat queue
-        client.subscribe('/user/queue/chat', (frame) => {
+        client.subscribe('/user/queue/chat', (message) => {
           if (!active) return;
-          try {
-            const data: ChatMessageResponse = JSON.parse(frame.body);
-            if (data.type === 'CHUNK') {
-              chunkRef.current(data.content);
-            } else if (data.type === 'TASK_PROPOSAL') {
-              const proposals = (data.metadata?.proposals as ProposedTask[]) ?? [];
-              proposalRef.current(proposals);
-            } else if (data.type === 'END') {
-              endRef.current();
-            } else if (data.type === 'ERROR') {
-              errorRef.current(data.content || 'An error occurred.');
-            }
-          } catch {
-            errorRef.current('Malformed chat message received.');
-          }
+          const frame = parseChatFrame(message.body);
+          if (frame) frameRef.current(frame);
         });
 
-        // Token renewal before expiry
         if (renewalTimer !== undefined) window.clearTimeout(renewalTimer);
         const expiresAt = activeToken ? tokenExpiresAt(activeToken) : null;
         if (expiresAt !== null) {
@@ -131,7 +95,7 @@ export function useChatWebSocket({
               })
               .catch(() => {
                 if (!active) return;
-                updateStatus('error');
+                setStatus('error');
                 void client.deactivate({ force: true });
               });
           }, delay);
@@ -139,20 +103,20 @@ export function useChatWebSocket({
       },
       onStompError: () => {
         if (!active) return;
-        updateStatus('error');
+        setStatus('error');
         void client.deactivate({ force: true });
       },
       onWebSocketClose: () => {
         if (!active) return;
-        updateStatus(navigator.onLine ? 'reconnecting' : 'offline');
+        setStatus(navigator.onLine ? 'reconnecting' : 'offline');
       },
       onWebSocketError: () => {
         if (!active) return;
-        updateStatus(navigator.onLine ? 'reconnecting' : 'offline');
+        setStatus(navigator.onLine ? 'reconnecting' : 'offline');
       },
       onHeartbeatLost: () => {
         if (!active) return;
-        updateStatus(navigator.onLine ? 'reconnecting' : 'offline');
+        setStatus(navigator.onLine ? 'reconnecting' : 'offline');
       },
     });
 
@@ -160,16 +124,14 @@ export function useChatWebSocket({
 
     const handleOnline = () => {
       if (!active) return;
-      updateStatus('reconnecting');
-      if (client.connected) {
-        updateStatus('connected');
-      }
+      setStatus('reconnecting');
+      client.reconnectDelay = 800 + Math.floor(Math.random() * 401);
       client.activate();
     };
 
     const handleOffline = () => {
       if (!active) return;
-      updateStatus('offline');
+      setStatus('offline');
       if (renewalTimer !== undefined) window.clearTimeout(renewalTimer);
       renewalTimer = undefined;
       void client.deactivate({ force: true });
@@ -178,7 +140,7 @@ export function useChatWebSocket({
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    updateStatus('connecting');
+    setStatus('connecting');
     client.activate();
 
     return () => {
@@ -190,32 +152,23 @@ export function useChatWebSocket({
       if (clientRef.current === client) clientRef.current = null;
       void client.deactivate({ force: true });
     };
-  }, [enabled, getValidAccessToken, updateStatus]);
+  }, [enabled, generation, getValidAccessToken]);
 
-  const sendMessage = useCallback((req: ChatMessageRequest) => {
+  const sendMessage = useCallback((request: ChatMessageRequest) => {
     const client = clientRef.current;
-    if (!client || !client.connected) {
-      return false;
-    }
-    client.publish({
-      destination: '/app/chat',
-      body: JSON.stringify(req),
-    });
+    if (!client || !client.connected) return false;
+    client.publish({ destination: '/app/chat', body: JSON.stringify(request) });
     return true;
   }, []);
 
   const cancelStream = useCallback((conversationId: string) => {
     const client = clientRef.current;
     if (!client || !client.connected) return;
-    client.publish({
-      destination: '/app/chat/cancel',
-      body: JSON.stringify({ conversationId }),
-    });
+    client.publish({ destination: '/app/chat/cancel', body: JSON.stringify({ conversationId }) });
   }, []);
 
-  return {
-    status,
-    sendMessage,
-    cancelStream,
-  };
+  /** Drops the current socket and connects again (manual retry after an error). */
+  const reconnect = useCallback(() => setGeneration((value) => value + 1), []);
+
+  return { status, sendMessage, cancelStream, reconnect };
 }
