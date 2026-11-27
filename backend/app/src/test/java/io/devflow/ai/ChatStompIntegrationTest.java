@@ -113,6 +113,24 @@ class ChatStompIntegrationTest {
     }
 
     @Test
+    void userWithSeveralSessionsGetsTheAnswerOnEverySession() throws Exception {
+        // Real users hold several sockets at once (board sync, notifications, chat): the answer must fan out.
+        Inbox chatTab = connectAndSubscribe(aliceId);
+        Inbox otherTab = connectAndSubscribe(aliceId);
+        Inbox notificationsOnly = connect(aliceId);
+        notificationsOnly.session.subscribe("/user/queue/notifications", notificationsOnly);
+        UUID conversation = UUID.randomUUID();
+
+        chatTab.session.send("/app/chat", chat(conversation, QUESTION));
+
+        chatTab.awaitTerminal(conversation);
+        otherTab.awaitTerminal(conversation);
+        assertOrderedAnswer(chatTab.frames);
+        assertOrderedAnswer(otherTab.frames);
+        assertThat(notificationsOnly.frames).isEmpty();
+    }
+
+    @Test
     void nonMemberReceivesOnlyAnAccessDeniedError() throws Exception {
         Inbox outsider = connectAndSubscribe(outsiderId);
         UUID conversation = UUID.randomUUID();
@@ -147,14 +165,16 @@ class ChatStompIntegrationTest {
         assertThat(eavesdropper.frames).isEmpty();
     }
 
+    /** Outbound order is not forced per session, so frames are put back in {@code seq} order like the client does. */
     private void assertOrderedAnswer(List<Map<String, Object>> frames) {
-        Map<String, Object> end = frames.get(frames.size() - 1);
-        assertThat(end.get("type")).isEqualTo("END");
-        List<Map<String, Object>> chunks = frames.subList(0, frames.size() - 1);
-        assertThat(end.get("seq")).isEqualTo(chunks.size());
+        List<Map<String, Object>> ends = frames.stream().filter(frame -> "END".equals(frame.get("type"))).toList();
+        assertThat(ends).hasSize(1);
+        List<Map<String, Object>> chunks = frames.stream().filter(frame -> "CHUNK".equals(frame.get("type")))
+                .sorted(java.util.Comparator.comparingInt(frame -> (Integer) frame.get("seq"))).toList();
+        assertThat(frames).hasSize(chunks.size() + 1);
+        assertThat(ends.get(0).get("seq")).isEqualTo(chunks.size());
         StringBuilder answer = new StringBuilder();
         for (int i = 0; i < chunks.size(); i++) {
-            assertThat(chunks.get(i).get("type")).isEqualTo("CHUNK");
             assertThat(chunks.get(i).get("seq")).isEqualTo(i);
             answer.append(chunks.get(i).get("content"));
         }
@@ -268,10 +288,19 @@ class ChatStompIntegrationTest {
             frames.add((Map<String, Object>) payload);
         }
 
+        /** Waits for ERROR, or for END plus every chunk it announces (END may overtake the last chunks). */
         void awaitTerminal(UUID conversationId) {
-            await(Duration.ofSeconds(5), "END or ERROR for " + conversationId, () -> frames.stream()
-                    .anyMatch(frame -> conversationId.toString().equals(frame.get("conversationId"))
-                            && ("END".equals(frame.get("type")) || "ERROR".equals(frame.get("type")))));
+            await(Duration.ofSeconds(5), "END or ERROR for " + conversationId, () -> {
+                List<Map<String, Object>> own = frames.stream()
+                        .filter(frame -> conversationId.toString().equals(frame.get("conversationId"))).toList();
+                if (own.stream().anyMatch(frame -> "ERROR".equals(frame.get("type")))) {
+                    return true;
+                }
+                return own.stream().filter(frame -> "END".equals(frame.get("type"))).findFirst()
+                        .map(end -> own.stream().filter(frame -> "CHUNK".equals(frame.get("type"))).count()
+                                >= (Integer) end.get("seq"))
+                        .orElse(false);
+            });
         }
     }
 }

@@ -22,8 +22,11 @@ import java.util.List;
  * /user/queue/* for frames meant only for them (notifications, AI chat replies). Only the server publishes to
  * /topic and /queue; each owning module guards its destinations with an inbound interceptor.
  *
- * <p>Frame order is preserved per session in both directions: chat answers stream as ordered chunks, and a
- * cancel sent right after a chat message must not overtake it.
+ * <p>Frame order per session is deliberately NOT forced. With {@code setPreserveReceiveOrder(true)}, Spring 6.2's
+ * UserDestinationMessageHandler fails with "Expected mutable SimpMessageHeaderAccessor" as soon as a user has
+ * several sessions (board sync, notifications and chat each open one), dropping the message for every session
+ * after the first. Chat chunks carry a {@code seq} and the client reassembles them instead;
+ * {@code ChatStompIntegrationTest} covers the multi-session case.
  *
  * <p>Board topic authorization and STOMP JWT authentication are installed by their owning
  * modules through ordered {@link WebSocketMessageBrokerConfigurer} implementations.
@@ -56,7 +59,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws").setAllowedOrigins(allowedOrigins.toArray(String[]::new));
-        registry.setPreserveReceiveOrder(true);
     }
 
     @Override
@@ -65,7 +67,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .setHeartbeatValue(new long[] {10_000, 10_000})
                 .setTaskScheduler(heartbeatScheduler);
         registry.setApplicationDestinationPrefixes("/app");
-        registry.setPreservePublishOrder(true);
     }
 
     @Override
