@@ -127,19 +127,34 @@ export function TaskProposalCard({ proposals, columns, request, boardName, colum
                 created ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-white',
               )}
             >
-              <div className="flex items-start gap-2">
-                <label className="sr-only" htmlFor={`${selectId}-title-${index}`}>
-                  Tiêu đề task {index + 1}
-                </label>
-                <input
-                  id={`${selectId}-title-${index}`}
-                  type="text"
-                  value={item.title}
-                  maxLength={MAX_TITLE_LENGTH}
-                  disabled={created || creating}
-                  onChange={(event) => update(index, { title: event.target.value })}
-                  className="min-h-8 min-w-0 flex-1 rounded-md border border-transparent px-1.5 py-1 text-xs font-semibold text-slate-900 hover:border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none disabled:text-slate-700"
-                />
+              <label className="sr-only" htmlFor={`${selectId}-title-${index}`}>
+                Tiêu đề task {index + 1}
+              </label>
+              <input
+                id={`${selectId}-title-${index}`}
+                type="text"
+                value={item.title}
+                maxLength={MAX_TITLE_LENGTH}
+                disabled={created || creating}
+                onChange={(event) => update(index, { title: event.target.value })}
+                className="min-h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:border-slate-300 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30 disabled:border-transparent disabled:bg-transparent disabled:text-slate-700"
+              />
+
+              <div className="mt-1.5 flex items-center justify-between gap-2 pl-0.5">
+                {hasDetails ? (
+                  <button
+                    type="button"
+                    onClick={() => update(index, { expanded: !item.expanded })}
+                    aria-expanded={item.expanded}
+                    aria-controls={detailsId}
+                    className="inline-flex items-center gap-1 rounded text-[11px] font-medium text-indigo-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  >
+                    <span>{item.expanded ? 'Ẩn chi tiết' : 'Xem chi tiết'}</span>
+                    <ChevronDownIcon className={clsx('size-3 transition-transform', item.expanded && 'rotate-180')} />
+                  </button>
+                ) : (
+                  <span />
+                )}
                 <button
                   type="button"
                   onClick={() => void create(index)}
@@ -170,29 +185,15 @@ export function TaskProposalCard({ proposals, columns, request, boardName, colum
                 </button>
               </div>
 
-              {hasDetails && (
-                <div className="mt-1 px-1.5">
-                  <button
-                    type="button"
-                    onClick={() => update(index, { expanded: !item.expanded })}
-                    aria-expanded={item.expanded}
-                    aria-controls={detailsId}
-                    className="inline-flex items-center gap-1 rounded text-[11px] font-medium text-indigo-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  >
-                    <span>{item.expanded ? 'Ẩn chi tiết' : 'Xem chi tiết'}</span>
-                    <ChevronDownIcon className={clsx('size-3 transition-transform', item.expanded && 'rotate-180')} />
-                  </button>
-                  {item.expanded && (
-                    <div id={detailsId} className="mt-1.5 space-y-1.5 rounded-md bg-slate-50 p-2 text-slate-700">
-                      {proposal.description && <p className="leading-5">{proposal.description}</p>}
-                      {proposal.checklist && proposal.checklist.length > 0 && (
-                        <ul className="list-disc space-y-0.5 pl-4 text-[11px]">
-                          {proposal.checklist.map((step, stepIndex) => (
-                            <li key={stepIndex}>{step}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
+              {hasDetails && item.expanded && (
+                <div id={detailsId} className="mt-1.5 space-y-1.5 rounded-md bg-slate-50 p-2 text-slate-700">
+                  {proposal.description && <p className="leading-5">{proposal.description}</p>}
+                  {proposal.checklist && proposal.checklist.length > 0 && (
+                    <ul className="list-disc space-y-0.5 pl-4 text-[11px]">
+                      {proposal.checklist.map((step, stepIndex) => (
+                        <li key={stepIndex}>{step}</li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               )}
