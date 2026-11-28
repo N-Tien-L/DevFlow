@@ -1,0 +1,24 @@
+% ==============================================================================
+% 07_tich_hop_api.tex — Phần 7. Thiết kế tích hợp và API
+% Phụ trách: Tiến (Dev 1) — phối hợp Xuân phần Git Webhook
+% Ngân sách trang: 5 trang
+% ==============================================================================
+
+\pttkPart{Thiết kế tích hợp và API}
+
+\todosection{Tiến (Dev 1)}{Tham chiếu \texttt{docs/ARCHITECTURE\_VI.md} (Mục 4--5) và các controller thực tế trong \texttt{backend/*-impl}. Ngân sách mục tiêu: 5 trang.}
+
+\subsection{Nguyên tắc thiết kế API}
+% 3 cổng: REST (/api/v1, Stateless JWT, Optimistic Locking version, RFC 7807 ProblemDetail), STOMP WebSocket, MCP Server SSE (/sse).
+
+\subsection{Danh sách Endpoint, Kênh WebSocket và MCP Tool chính}
+% Bảng REST endpoints chính, kênh STOMP (/topic/boards/{id}, /user/queue/chat, /user/queue/notifications), MCP @Tool.
+
+\subsection{Ví dụ yêu cầu và phản hồi}
+% Khối JSON request/response chuẩn 201 Created và lỗi 409/422 theo chuẩn application/problem+json (RFC 7807).
+
+\subsection{Hợp đồng sự kiện miền (Domain Events)}
+% Bảng toàn bộ DevFlowEvent: workspace.membership\_check\_requested, task.created, task.status\_changed, git.*, ci.*, risk.*, user.account\_deleted, workspace.deleted.
+
+\subsection{Tích hợp hệ thống ngoài}
+% Bảng tích hợp: GitHub/GitLab Webhooks (HMAC SHA-256), LLM Provider (Spring AI + Resilience4j), Email SMTP/API, Cloudflare Turnstile, IDE MCP Client.

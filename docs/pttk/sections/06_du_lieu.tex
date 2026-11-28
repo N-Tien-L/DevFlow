@@ -1,0 +1,25 @@
+% ==============================================================================
+% 06_du_lieu.tex — Phần 6. Thiết kế dữ liệu
+% Phụ trách: Xuân (Dev 2)
+% Ngân sách trang: 5 trang
+% ==============================================================================
+
+\pttkPart{Thiết kế dữ liệu}
+
+\todosection{Xuân (Dev 2)}{Tham chiếu \texttt{docs/DATABASE\_DESIGN\_VI.md}, \texttt{docs/diagrams/database-erd.mmd} và migrations V1--V19. Ngân sách mục tiêu: 5 trang.}
+
+\subsection{Sơ đồ thực thể -- liên kết (ERD logic và ranh giới module)}
+\todofig{Hình 8. Sơ đồ ERD mức logic theo 5 module (Hard FK nội bộ vs Soft Reference UUID) — diagrams/out/hinh\_08\_erd.pdf}
+% Giải thích ngắn triết lý Database-per-Module và Hard FK vs Soft Reference UUID.
+
+\subsection{Từ điển dữ liệu}
+% Trích chi tiết 3 bảng đại diện: tasks, workspaces/users, ci\_failures hoặc git\_domain\_event\_outbox.
+
+\subsection{Chỉ mục và hiệu năng}
+% Index cho Kanban (board\_id, column\_id, position), Optimistic Locking (version), webhook receipt idempotency, outbox.
+
+\subsection{Chiến lược lưu trữ}
+% Bảng nguồn dữ liệu: PostgreSQL 17, Caffeine (lộ trình Redis), Flyway migrations.
+
+\subsection{Chuyển đổi dữ liệu, lưu giữ và quyền xóa (GDPR)}
+% Chính sách migration/seed, lưu giữ audit log >= 12 tháng, quy trình xóa tài khoản user.account\_deleted + DeletedUser.ID.

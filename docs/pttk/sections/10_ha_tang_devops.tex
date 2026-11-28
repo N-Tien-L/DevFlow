@@ -1,0 +1,24 @@
+% ==============================================================================
+% 10_ha_tang_devops.tex — Phần 10. Thiết kế hạ tầng và vận hành (DevOps)
+% Phụ trách: Xuân (Dev 2) — phối hợp Tiến phần Cloud/Cloudflare Pages
+% Ngân sách trang: 3 trang
+% ==============================================================================
+
+\pttkPart{Thiết kế hạ tầng và vận hành (DevOps)}
+
+\todosection{Xuân (Dev 2)}{Tham chiếu \texttt{docker-compose.yml}, \texttt{.github/workflows/ci.yml}, \texttt{infra/} và \texttt{docs/xuan/18..19}. Ngân sách mục tiêu: 3 trang.}
+
+\subsection{Sơ đồ triển khai}
+\todofig{Hình 10. Sơ đồ triển khai DevFlow (Local Docker Compose và Production Cloud) — diagrams/out/hinh\_10\_deployment.pdf}
+
+\subsection{Các môi trường vận hành}
+% Bảng môi trường: Local/Dev (Docker Compose), CI/Test (H2/Testcontainers), Production (Cloudflare Pages + PaaS + Managed PostgreSQL).
+
+\subsection{Quy trình CI/CD}
+% Quy trình PR -> ./gradlew :verifyModuleBoundaries -> ./gradlew check -> npm run build/lint -> Docker build -> Deploy Cloud.
+
+\subsection{Giám sát và mục tiêu mức dịch vụ (SLO)}
+% Bảng SLI/SLO (API success >= 99.5\%, p95 < 200ms, AI latency, Webhook delivery) + Actuator/Micrometer -> Prometheus -> Grafana + JSON logs.
+
+\subsection{Sao lưu và khôi phục thảm họa}
+% Bảng chiến lược sao lưu PostgreSQL PITR, RPO <= 15 phút, RTO <= 4 giờ, quản lý schema qua Flyway.

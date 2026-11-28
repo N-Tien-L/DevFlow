@@ -1,0 +1,39 @@
+% ==============================================================================
+% main.tex — Tệp gốc biên dịch Hồ sơ PTTK Hệ thống DevFlow (DF-PTTK-01)
+% Biên dịch: powershell -ExecutionPolicy Bypass -File docs/pttk/build.ps1
+% ==============================================================================
+\documentclass[11pt,a4paper]{article}
+
+\input{preamble.tex}
+
+\begin{document}
+
+% --- Phần Mở đầu: Trang bìa, Thông tin tài liệu, Mục lục ---
+\input{sections/00_mo_dau.tex}
+
+\clearpage
+\tableofcontents
+\clearpage
+\listoffigures
+\vspace{12pt}
+\listoftables
+
+% --- 13 Phần Nội dung Chính ---
+\input{sections/01_tong_quan.tex}
+\input{sections/02_hien_trang.tex}
+\input{sections/03_yeu_cau.tex}
+\input{sections/04_mo_hinh_hoa.tex}
+\input{sections/05_kien_truc.tex}
+\input{sections/06_du_lieu.tex}
+\input{sections/07_tich_hop_api.tex}
+\input{sections/08_ui_ux.tex}
+\input{sections/09_bao_mat.tex}
+\input{sections/10_ha_tang_devops.tex}
+\input{sections/11_thanh_phan_ai.tex}
+\input{sections/12_kiem_thu.tex}
+\input{sections/13_trien_khai.tex}
+
+% --- Phụ lục ---
+\input{sections/14_phu_luc.tex}
+
+\end{document}

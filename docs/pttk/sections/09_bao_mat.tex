@@ -1,0 +1,24 @@
+% ==============================================================================
+% 09_bao_mat.tex — Phần 9. Thiết kế bảo mật và tuân thủ
+% Phụ trách: Tiến (Dev 1)
+% Ngân sách trang: 3.5 trang
+% ==============================================================================
+
+\pttkPart{Thiết kế bảo mật và tuân thủ}
+
+\todosection{Tiến (Dev 1)}{Tham chiếu \texttt{docs/PRODUCT\_SPEC\_VI.md} (Mục 8), \texttt{docs/ARCHITECTURE\_VI.md} (Mục 9.2) và \texttt{auth-impl}. Ngân sách mục tiêu: 3.5 trang.}
+
+\subsection{Mô hình hóa mối đe dọa (STRIDE)}
+% Bảng phân tích 6 nhóm STRIDE cho Auth, Board IDOR, Git Webhook HMAC, AI Prompt Injection, DoS gọi LLM, WebSocket/MCP.
+
+\subsection{Ma trận phân quyền (RBAC và ABAC)}
+% Ma trận quyền Workspace (OWNER, ADMIN, MEMBER) + kiểm tra membership/ownership + phạm vi PAT cho MCP.
+
+\subsection{Bảo vệ dữ liệu và chống lạm dụng}
+% TLS 1.2+, BCrypt, token\_version revocation, Cloudflare Turnstile, lọc disposable email/DNS MX, Bucket4j, secret redaction trước khi gọi LLM.
+
+\subsection{Tuân thủ pháp lý và quyền riêng tư}
+% Bảng đối chiếu Luật Bảo vệ dữ liệu cá nhân 2025 / NĐ 356/2025 và nguyên tắc GDPR (Right to Erasure).
+
+\subsection{Nhật ký kiểm toán (Audit Logging)}
+% Cơ chế @AuditLog, bảng board\_audit\_events / task\_audit\_events, Logback JSON + MDC correlationId (không log PII/secret).

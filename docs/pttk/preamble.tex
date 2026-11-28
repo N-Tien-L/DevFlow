@@ -1,0 +1,217 @@
+% ==============================================================================
+% preamble.tex — Cấu hình định dạng chuẩn cho Hồ sơ PTTK DevFlow (DF-PTTK-01)
+% Biên dịch bằng: XeLaTeX (MiKTeX / TeX Live)
+% CẢNH BÁO: Không tự ý chỉnh sửa tệp này khi chưa thống nhất với Tiến (chủ trì).
+% ==============================================================================
+
+% --- Khổ giấy & Lề A4 ---
+\usepackage[
+  a4paper,
+  top=2.2cm,
+  bottom=2.2cm,
+  left=2.5cm,
+  right=2.0cm,
+  headheight=24pt
+]{geometry}
+
+% --- Font tiếng Việt UTF-8 (XeLaTeX) ---
+\usepackage{fontspec}
+\setmainfont{Segoe UI}[
+  BoldFont={Segoe UI Bold},
+  ItalicFont={Segoe UI Italic},
+  BoldItalicFont={Segoe UI Bold Italic}
+]
+\setsansfont{Segoe UI}
+\setmonofont{Cascadia Mono}[Scale=0.86]
+
+% --- Giãn dòng & Đoạn văn ---
+\usepackage{setspace}
+\setstretch{1.22}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+% --- Tiếng Việt hóa nhãn chuẩn ---
+\renewcommand{\contentsname}{Mục lục}
+\renewcommand{\listfigurename}{Danh mục hình ảnh}
+\renewcommand{\listtablename}{Danh mục bảng biểu}
+\renewcommand{\figurename}{Hình}
+\renewcommand{\tablename}{Bảng}
+
+% --- Bảng màu chuẩn DevFlow PTTK (tối đa 2 màu chủ đạo + trung tính) ---
+\usepackage[table]{xcolor}
+\definecolor{pttkNavy}{HTML}{1F3A5F}
+\definecolor{pttkNavySoft}{HTML}{EBF1F6}
+\definecolor{pttkTeal}{HTML}{0F766E}
+\definecolor{pttkTealSoft}{HTML}{E6F4F1}
+\definecolor{pttkAction}{HTML}{D9731A}
+\definecolor{pttkActionSoft}{HTML}{FEF3E7}
+\definecolor{pttkDanger}{HTML}{B42318}
+\definecolor{pttkSurface}{HTML}{F4F6F8}
+\definecolor{pttkRowAlt}{HTML}{F8FAFC}
+\definecolor{pttkBorder}{HTML}{CBD5E1}
+\definecolor{pttkText}{HTML}{1E293B}
+\definecolor{pttkMuted}{HTML}{64748B}
+
+\color{pttkText}
+
+% --- Đồ họa, Bảng biểu, Danh sách ---
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{enumitem}
+\setlist[itemize]{nosep, topsep=3pt, leftmargin=1.5em}
+\setlist[enumerate]{nosep, topsep=3pt, leftmargin=1.8em}
+
+% --- Định dạng Caption Hình & Bảng ---
+\usepackage{caption}
+\captionsetup{
+  font={small},
+  labelfont={bf, color=pttkNavy},
+  textfont={color=pttkText},
+  skip=6pt
+}
+
+% --- Định dạng Đề mục (3 cấp chuẩn) ---
+\usepackage{titlesec}
+
+\titleformat{\section}
+  {\Large\bfseries\color{pttkNavy}}
+  {Phần \thesection.}
+  {0.5em}
+  {}
+  [\vspace{2pt}{\color{pttkNavy}\titlerule[1.2pt]}]
+\titlespacing*{\section}{0pt}{4pt}{10pt}
+
+\titleformat{\subsection}
+  {\large\bfseries\color{pttkTeal}}
+  {\thesubsection.}
+  {0.5em}
+  {}
+\titlespacing*{\subsection}{0pt}{12pt}{4pt}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{pttkNavy}}
+  {\thesubsubsection.}
+  {0.5em}
+  {}
+\titlespacing*{\subsubsection}{0pt}{8pt}{3pt}
+
+% --- Header & Footer ---
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\color{pttkMuted} DF-PTTK-01 \;\textbar\; Hồ sơ Phân tích Thiết kế Hệ thống DevFlow}
+\fancyhead[R]{\footnotesize\color{pttkMuted} Phiên bản 1.0}
+\fancyfoot[L]{\footnotesize\color{pttkMuted} Tài liệu đồ án môn Phân tích Thiết kế Hệ thống}
+\fancyfoot[R]{\footnotesize\color{pttkNavy}\textbf{Trang \thepage\ / \pageref{LastPage}}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{pttkBorder}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrule}{\hbox to\headwidth{\color{pttkBorder}\leaders\hrule height \footrulewidth\hfill}}
+
+% --- Hộp nội dung & Khối mã nguồn ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize\color{pttkText},
+  backgroundcolor=\color{pttkSurface},
+  frame=single,
+  rulecolor=\color{pttkBorder},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=2,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  aboveskip=6pt,
+  belowskip=6pt,
+  extendedchars=true
+}
+
+\usepackage{mdframed}
+\newenvironment{pttkbox}[1]{%
+  \begin{mdframed}[
+    backgroundcolor=pttkSurface,
+    linecolor=pttkTeal,
+    linewidth=2pt,
+    topline=false,
+    rightline=false,
+    bottomline=false,
+    innertopmargin=7pt,
+    innerbottommargin=7pt,
+    innerleftmargin=10pt,
+    innerrightmargin=10pt,
+    skipabove=6pt,
+    skipbelow=6pt
+  ]
+  \textbf{\color{pttkTeal}#1}\par\vspace{3pt}%
+}{%
+  \end{mdframed}%
+}
+
+% --- Liên kết & PDF Bookmarks ---
+\usepackage[
+  colorlinks=true,
+  linkcolor=pttkNavy,
+  urlcolor=pttkTeal,
+  citecolor=pttkNavy,
+  pdftitle={Hồ sơ Phân tích Thiết kế Hệ thống Thông tin DevFlow},
+  pdfauthor={Nhóm DevFlow}
+]{hyperref}
+
+% --- Macro Tiện ích Dùng chung ---
+
+% Bắt đầu 1 Phần lớn trên trang mới
+\newcommand{\pttkPart}[1]{\clearpage\section{#1}}
+
+% Ô tiêu đề bảng chữ trắng trên nền Navy
+\newcommand{\tablehead}[1]{\textbf{\textcolor{white}{#1}}}
+
+% Cột tabularx căn trái không bị khoảng trắng kéo giãn xấu
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+% Độ cao hàng bảng thoáng mắt
+\renewcommand{\arraystretch}{1.28}
+
+% Chèn hình hoàn chỉnh vừa khít A4
+% Cách dùng: \pttkfigure{diagrams/out/hinh_01.pdf}{Chú thích hình}{fig:id}{0.95}
+\newcommand{\pttkfigure}[4]{%
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=#4\textwidth, height=0.72\textheight, keepaspectratio]{#1}
+    \caption{#2}
+    \label{#3}
+  \end{figure}
+}
+
+% Khung placeholder cho hình chưa vẽ xong (dễ tìm & thay thế trước khi nộp)
+\newcommand{\todofig}[1]{%
+  \begin{mdframed}[
+    backgroundcolor=pttkActionSoft,
+    linecolor=pttkAction,
+    linewidth=1pt,
+    innertopmargin=14pt,
+    innerbottommargin=14pt,
+    innerleftmargin=12pt,
+    innerrightmargin=12pt,
+    skipabove=8pt,
+    skipbelow=8pt
+  ]
+    \centering
+    \textbf{\color{pttkAction}[CHỜ CHÈN SƠ ĐỒ / HÌNH MINH HỌA]}\par\vspace{3pt}
+    \small\color{pttkText}#1
+  \end{mdframed}
+}
+
+% Nhãn trạng thái chưa giao / đang soạn thảo
+\newcommand{\todosection}[2]{%
+  \begin{pttkbox}{Trạng thái soạn thảo — #1}
+    \small #2
+  \end{pttkbox}
+}

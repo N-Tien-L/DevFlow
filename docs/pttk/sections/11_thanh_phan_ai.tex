@@ -1,0 +1,18 @@
+% ==============================================================================
+% 11_thanh_phan_ai.tex — Phần 11. Thành phần trí tuệ nhân tạo (AI)
+% Phụ trách: Tiến (Dev 1)
+% Ngân sách trang: 3 trang
+% ==============================================================================
+
+\pttkPart{Thành phần trí tuệ nhân tạo (AI)}
+
+\todosection{Tiến (Dev 1)}{Tham chiếu \texttt{backend/ai-impl}, \texttt{openspec/changes/t-035-*} và \texttt{t-037-*}. Ngân sách mục tiêu: 3 trang.}
+
+\subsection{Các tình huống sử dụng AI}
+% Bảng 4 năng lực AI dùng chung bộ não ai-impl: Tóm tắt lỗi CI (FR-16), Phân rã Task (FR-17), Hỏi đáp dự án (FR-18), Cảnh báo trễ hạn (FR-19) + MCP (FR-20).
+
+\subsection{Thẻ mô hình (Model Card)}
+% Bảng Model Card: Mục đích, Dữ liệu đầu vào, Dữ liệu không dùng, Đầu ra, Chỉ số đánh giá, Giới hạn & cơ chế DeterministicChatModel dự phòng offline.
+
+\subsection{Cơ chế kiểm soát (Guardrails)}
+% Human-in-the-loop (1-click tạo task), kiểm tra membership, che secret & cắt log CI, chống Prompt Injection, Resilience4j timeout/retry/circuit breaker, max-tokens & AiRateLimiter.

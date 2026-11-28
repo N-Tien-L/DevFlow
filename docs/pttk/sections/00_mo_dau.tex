@@ -1,0 +1,80 @@
+% ==============================================================================
+% 00_mo_dau.tex — Trang bìa, Thông tin tài liệu, Lịch sử phiên bản & Phê duyệt
+% Phụ trách: Thành viên 3 (Tiến duyệt cuối)
+% Ngân sách trang: 2 trang (chưa tính Mục lục tự động)
+% ==============================================================================
+
+\begin{titlepage}
+  \thispagestyle{empty}
+  \vspace*{0.8cm}
+
+  {\small\bfseries\color{pttkTeal} BÁO CÁO ĐỒ ÁN MÔN HỌC \;\textbar\; PHÂN TÍCH THIẾT KẾ HỆ THỐNG THÔNG TIN}
+
+  \vspace{0.6cm}
+  {\color{pttkNavy}\rule{\textwidth}{2.5pt}}
+  \vspace{0.8cm}
+
+  {\Huge\bfseries\color{pttkNavy} HỒ SƠ PHÂN TÍCH THIẾT KẾ}\\[0.35cm]
+  {\Huge\bfseries\color{pttkNavy} HỆ THỐNG THÔNG TIN}\\[0.6cm]
+  {\LARGE\bfseries\color{pttkTeal} DevFlow}\\[0.25cm]
+  {\large\color{pttkText} Nền tảng điều phối công việc kỹ thuật thông minh cho đội ngũ phát triển phần mềm}
+
+  \vspace{0.6cm}
+  {\color{pttkBorder}\rule{\textwidth}{0.8pt}}
+  \vspace{0.5cm}
+
+  {\normalsize\color{pttkMuted}
+  Bộ hồ sơ đầy đủ 13 phần: từ khởi tạo dự án, khảo sát hiện trạng, phân tích yêu cầu đến mô hình hóa, thiết kế kiến trúc Modular Monolith, cơ sở dữ liệu, API/Event/MCP, UI/UX, bảo mật, DevOps, AI, kiểm thử và kế hoạch triển khai.}
+
+  \vspace{1.2cm}
+
+  \begin{tabularx}{\textwidth}{L{4.2cm} Y}
+    \rowcolor{pttkNavy}
+    \tablehead{Thông tin} & \tablehead{Giá trị} \\
+    Mã tài liệu & \texttt{DF-PTTK-01} \\
+    \rowcolor{pttkRowAlt}
+    Phiên bản & 0.1 (Bản khung khởi tạo) \\
+    Ngày lập & 28/11/2026 \\
+    \rowcolor{pttkRowAlt}
+    Trạng thái & Đang soạn thảo \\
+    Nhóm thực hiện & Lâm Vĩnh Tiến, Lê Xuân, Thành viên 3 \emph{(cập nhật họ tên đầy đủ)} \\
+    \rowcolor{pttkRowAlt}
+    Kiến trúc tham chiếu & Modular Monolith (Java 17 / Spring Boot 3.4.5, React 19, PostgreSQL 17) \\
+    \bottomrule
+  \end{tabularx}
+
+  \vfill
+  {\footnotesize\color{pttkMuted}
+  Lưu ý: Các dữ liệu kỹ thuật và thiết kế phản ánh trực tiếp hệ thống DevFlow; một số số liệu khảo sát hiện trạng và ước tính kinh tế phục vụ mục đích học tập.}
+\end{titlepage}
+
+% --- Trang Thông tin tài liệu: Lịch sử phiên bản & Bảng phê duyệt ---
+\clearpage
+\section*{Thông tin tài liệu}
+
+\subsection*{Lịch sử phiên bản}
+\begin{tabularx}{\textwidth}{L{1.8cm} L{2.4cm} L{3.6cm} Y}
+  \rowcolor{pttkNavy}
+  \tablehead{Phiên bản} & \tablehead{Ngày} & \tablehead{Người thực hiện} & \tablehead{Nội dung thay đổi} \\
+  0.1 & 28/11/2026 & Nhóm DevFlow & Khởi tạo khung 13 phần, khóa mã định danh và phân công \\
+  \rowcolor{pttkRowAlt}
+  0.5 & \ldots/\ldots/2026 & Nhóm DevFlow & Hoàn thiện nháp Phần 1--7 và sơ đồ phân tích/kiến trúc \\
+  0.9 & \ldots/\ldots/2026 & Nhóm DevFlow & Bổ sung Phần 8--13, Phụ lục, rà soát chéo RTM \\
+  \rowcolor{pttkRowAlt}
+  1.0 & \ldots/\ldots/2026 & Nhóm DevFlow & Hoàn thiện biên tập, xuất bản PDF nộp bài \\
+  \bottomrule
+\end{tabularx}
+
+\vspace{16pt}
+\subsection*{Phê duyệt và Xác nhận}
+\begin{tabularx}{\textwidth}{L{4.2cm} L{4.2cm} L{3.2cm} Y}
+  \rowcolor{pttkNavy}
+  \tablehead{Vai trò} & \tablehead{Họ tên} & \tablehead{Chữ ký} & \tablehead{Ngày} \\
+  Giảng viên hướng dẫn & & & \\
+  \rowcolor{pttkRowAlt}
+  Trưởng nhóm / Kiến trúc sư & Lâm Vĩnh Tiến & & \\
+  Phụ trách DevOps \& Dữ liệu & Lê Xuân & & \\
+  \rowcolor{pttkRowAlt}
+  Phân tích nghiệp vụ (BA) & \emph{(Điền họ tên)} & & \\
+  \bottomrule
+\end{tabularx}

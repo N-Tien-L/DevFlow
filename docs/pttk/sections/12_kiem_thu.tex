@@ -1,0 +1,21 @@
+% ==============================================================================
+% 12_kiem_thu.tex — Phần 12. Kiểm thử và đảm bảo chất lượng
+% Phụ trách: Xuân (Dev 2) — Tiến bổ sung test case Auth/AI/Security
+% Ngân sách trang: 3.5 trang
+% ==============================================================================
+
+\pttkPart{Kiểm thử và đảm bảo chất lượng}
+
+\todosection{Xuân (Dev 2)}{Tham chiếu \texttt{glossary\_lock.md}, \texttt{docs/xuan/17\_*} và các test suite thực tế. Ngân sách mục tiêu: 3.5 trang.}
+
+\subsection{Chiến lược kiểm thử}
+% Bảng 7 mức kiểm thử: Unit (JUnit/Mockito), Architecture Boundary (:verifyModuleBoundaries), Integration (H2/Testcontainers), Frontend (Vitest), E2E, Performance (k6/JMeter), Security (OWASP).
+
+\subsection{Ví dụ bộ Test Case tiêu biểu}
+% Bảng 6--8 Test Case trọng tâm: Auth/Turnstile, Board Optimistic Lock, Git Webhook HMAC & Auto-move, AI Secret Redaction, Security IDOR 403.
+
+\subsection{Ma trận truy vết yêu cầu (RTM)}
+% Bảng RTM (10--12 dòng tiêu biểu) ánh xạ FR/NFR -> User Story -> Use Case -> Module/API/Bảng -> Test Case -> Trạng thái thực tế.
+
+\subsection{Định nghĩa hoàn thành (Definition of Done)}
+% Bộ tiêu chí DoD của DevFlow (0 lỗi boundary, ./gradlew check, npm run build/lint, Production Quality Checklist, PR review).

@@ -1,0 +1,27 @@
+% ==============================================================================
+% 05_kien_truc.tex — Phần 5. Thiết kế kiến trúc
+% Phụ trách: Tiến (Dev 1)
+% Ngân sách trang: 5 trang
+% ==============================================================================
+
+\pttkPart{Thiết kế kiến trúc}
+
+\todosection{Tiến (Dev 1)}{Tham chiếu \texttt{docs/ARCHITECTURE\_VI.md} và ADR-001..ADR-006 trong \texttt{glossary\_lock.md}. Ngân sách mục tiêu: 5 trang.}
+
+\subsection{Lựa chọn kiểu kiến trúc}
+% Modular Monolith + In-Process Event Bus vs Microservices; lộ trình 4 bước bóc tách AI Service.
+
+\subsection{Mức 1 -- Sơ đồ ngữ cảnh hệ thống (C4 Context)}
+\todofig{Hình 6. Sơ đồ ngữ cảnh hệ thống DevFlow (C4 -- Mức 1) — diagrams/out/hinh\_06\_c4\_context.pdf}
+
+\subsection{Mức 2 -- Sơ đồ Container (C4 Container)}
+\todofig{Hình 7. Sơ đồ Container hệ thống DevFlow (C4 -- Mức 2) — diagrams/out/hinh\_07\_c4\_container.pdf}
+
+\subsection{Công nghệ sử dụng (Tech Stack)}
+% Bảng Tech Stack (Spring Boot 3.4.5, Spring AI, React 19, PostgreSQL 17, Docker Compose, Cloudflare Pages) + công nghệ loại bỏ (K8s, Supabase).
+
+\subsection{Bản ghi quyết định kiến trúc (ADR)}
+% Bảng tổng hợp ADR-001..ADR-006 và viết đầy đủ 1-2 ADR tiêu biểu (ADR-001 hoặc ADR-004).
+
+\subsection{Chiến thuật đáp ứng thuộc tính chất lượng}
+% Hiệu năng (HikariCP, Caffeine->Redis), Sẵn sàng (Resilience4j), Bảo mật (Bucket4j, Turnstile), Bảo trì (:verifyModuleBoundaries).

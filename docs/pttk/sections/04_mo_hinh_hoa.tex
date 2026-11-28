@@ -1,0 +1,25 @@
+% ==============================================================================
+% 04_mo_hinh_hoa.tex — Phần 4. Mô hình hóa phân tích
+% Phụ trách: Xuân (Dev 2)
+% Ngân sách trang: 6 trang
+% ==============================================================================
+
+\pttkPart{Mô hình hóa phân tích}
+
+\todosection{Xuân (Dev 2)}{Tham chiếu \texttt{glossary\_lock.md}, \texttt{docs/ARCHITECTURE\_VI.md} và \texttt{docs/xuan/01..15}. Ngân sách mục tiêu: 6 trang.}
+
+\subsection{Biểu đồ Use Case tổng quát}
+\todofig{Hình 3. Biểu đồ Use Case tổng quát của DevFlow (UC01--UC12) — diagrams/out/hinh\_03\_usecase.pdf}
+
+\subsection{Đặc tả Use Case trọng tâm}
+% Đặc tả đầy đủ 3 UC cốt lõi: UC05 (Kéo thả & đồng bộ Board), UC06 (Git Webhook & Auto-move), UC07/UC08 (AI CI Triage / Task Breakdown).
+
+\subsection{Biểu đồ tuần tự (Sequence Diagram)}
+\todofig{Hình 4. Biểu đồ tuần tự luồng Git Webhook $\rightarrow$ Event Bus $\rightarrow$ Board \& AI — diagrams/out/hinh\_04\_sequence\_git.pdf}
+
+\subsection{Biểu đồ trạng thái của Công việc (Task)}
+\todofig{Hình 5. Máy trạng thái đối tượng Task/Card (Thủ công và Tự động từ Git) — diagrams/out/hinh\_05\_state\_task.pdf}
+% Bảng chuyển trạng thái (Từ, Sự kiện, Đến, Ai/Hệ thống thực hiện, Điều kiện).
+
+\subsection{Mô hình miền và ngữ cảnh giới hạn (DDD)}
+% Bảng 5 Bounded Context của DevFlow: Auth, Board, Git & CI, AI Service, Notification.
