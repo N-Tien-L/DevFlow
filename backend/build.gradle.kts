@@ -66,6 +66,18 @@ val verifyModuleBoundaries by tasks.registering {
                 config.dependencies.withType(org.gradle.api.artifacts.ProjectDependency::class.java)
                     .forEach { dep ->
                         val target = dep.dependencyProject.path
+                        if (module.path == ":common") {
+                            throw IllegalArgumentException(
+                                "Module boundary violation: ':common' must not depend on '$target' " +
+                                    "(ARCHITECTURE.md Section 10)."
+                            )
+                        }
+                        if (module.name.endsWith("-api")) {
+                            require(target == ":common") {
+                                "Module boundary violation: '${module.path}' may only depend on ':common', " +
+                                    "but depends on '$target' (ARCHITECTURE.md Section 10)."
+                            }
+                        }
                         require(target !in implPaths) {
                             "Module boundary violation: '${module.path}' depends on '$target'. " +
                                 "Depend on its -api project instead (ARCHITECTURE.md Section 10)."
